@@ -24,11 +24,34 @@
 - 确认 `.cookie`、`.qq-cookie`、`updates/`、`node_modules/`、旧 `dist/` 没有进入 git。
 - 确认 README/SECURITY/CHANGELOG/Release 正文包含 `v1.0.10` 旧安装包隔离说明。
 - 确认 `docs/VENDOR_MANIFEST.md` 中的 vendor hash 与 `Get-FileHash public\vendor\* -Algorithm SHA256` 一致。
+- 使用干净依赖树：`npm ci`。
+- 运行发布门禁：`npm run verify:release`。
+- 确认生产审计为 clean；当前依赖例外处理为 `NeteaseCloudMusicApi -> music-metadata@11.13.0`。如果 `npm run audit:prod` 不为 clean，必须在 Release 记录 advisory、依赖路径、严重级别、运行时可达性、影响面、临时接受理由、补偿控制、负责人和到期日期。
 - 运行语法检查：`git diff --check`、`node --check server.js`、前端内联脚本解析。
 - 运行 Git 跟踪风险残留检查，确认没有跟踪 `.exe/.dll/.scr/.bat/.cmd/.ps1/.vbs/.jse/.wsf/.hta/.xlsm` 等可执行/脚本残留。
 - 从当前源码执行 `npm run build:win` 生成 Windows 安装包。
 - 对新生成的安装包和当前源码执行安全扫描。
-- 生成并记录新安装包 SHA256。
+- 运行安装包验证：`npm run verify:artifacts`。
+- 生成并记录新安装包 SHA256、Authenticode 签名状态和安装包路径。
+
+## Release Artifact 验证
+
+正式上传前必须对 `dist\Mineradio-*-Setup.exe` 记录签名状态和 SHA256：
+
+```powershell
+Get-AuthenticodeSignature dist\Mineradio-*-Setup.exe
+Get-FileHash dist\Mineradio-*-Setup.exe -Algorithm SHA256
+```
+
+也可以运行：
+
+```powershell
+npm run verify:artifacts
+```
+
+`npm run verify:artifacts` 会查找 `dist\Mineradio-*-Setup.exe`，输出等价的 Authenticode 和 SHA256 信息。未生成安装包时该命令必须失败。
+
+如果官方安装包暂时未签名，Release 正文必须明确写出“未签名”，并把 GitHub Release 来源和 SHA256 作为完整性依据；如果签名失败但未记录接受理由，不得发布。
 
 ## GitHub Release
 
@@ -65,7 +88,7 @@ Mineradio v1.1.0 纯净安装版
 
 应用会请求 GitHub Releases latest。为了避免 `v1.0.10` 旧客户端通过软件内更新直接拉到 `v1.1.0`，本次 GitHub Release 不应设为旧更新通道的 latest。
 
-本地验证更新链路时，可以用临时 manifest：
+本地验证更新链路时，可以用临时 manifest。这个示例仅限本地测试，不可用于生产发布：
 
 ```json
 {
@@ -73,7 +96,11 @@ Mineradio v1.1.0 纯净安装版
   "release": {
     "name": "Mineradio v1.1.0-test",
     "downloadUrl": "http://127.0.0.1:3144/Mineradio-1.1.0-Setup.exe",
+    "sha256": "仅本地测试时填写",
+    "signature": "仅本地测试时填写",
     "notes": ["本地在线更新链路测试"]
   }
 }
 ```
+
+生产 manifest 或快速补丁清单必须包含 signed manifest 校验、每个补丁文件的 SHA256 digest、路径 allowlist 和回滚策略。缺少 digest 或 hash mismatch 时必须拒绝更新。

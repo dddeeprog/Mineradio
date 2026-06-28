@@ -48,3 +48,20 @@ test('vendor manifest records every vendored browser bundle', () => {
   assert.match(manifest, /92BB9A96476F983D212A2BC4F54C889039C1696DD4461D40A736860938570FBB/);
   assert.match(manifest, /9274BBCEC8D96168626C732B5D31C775AA8CFB7EAA0599BEC0C175908A2C1CE2/);
 });
+
+test('release and security docs describe packaging hardening gates', () => {
+  const release = readText('RELEASE.md');
+  const security = readText('SECURITY.md');
+
+  assert.match(release, /npm ci/);
+  assert.match(release, /npm run verify:release/);
+  assert.match(release, /npm run verify:artifacts/);
+  assert.match(release, /Get-AuthenticodeSignature/);
+  assert.match(release, /Get-FileHash/);
+  assert.match(release, /NeteaseCloudMusicApi -> music-metadata@11\.13\.0/);
+
+  assert.match(security, /ASAR/);
+  assert.match(security, /快速补丁/);
+  assert.match(security, /signed manifest/);
+  assert.match(security, /SHA256/);
+});
