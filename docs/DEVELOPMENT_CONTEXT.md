@@ -19,14 +19,15 @@
 
 ## 发布状态
 
-发布仓库尚未在本维护分支中最终确认。当前观察到的状态：
+发布仓库已在本维护分支中统一：
 
 - 本地 remote：`English-worse/Mineradio`
-- 应用内更新配置：`XxHuberrr/Mineradio`
+- 应用内更新配置：`English-worse/Mineradio`
+- electron-builder 发布配置：`English-worse/Mineradio`
 - `package.json` 版本：`1.1.0`
-- 当前 HEAD tag：`v1.2.0`
+- 当前 HEAD tag：无
 
-在执行发布、更新配置、版本号调整或打安装包前，必须先完成发布归属统一。
+正式发布时只在完成验证的发布提交上创建对应版本 tag，例如 `v1.1.0`。普通维护提交没有 tag 时，不视为已经发布。
 
 ## 基线命令
 

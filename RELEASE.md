@@ -1,5 +1,13 @@
 # 发布流程
 
+## 发布归属
+
+- 正式发布仓库：`English-worse/Mineradio`
+- Release 页面：`https://github.com/English-worse/Mineradio/releases`
+- `package.json` 的 `build.publish` 和 `mineradio.update` 必须同时指向该仓库。
+
+作者署名和版权说明继续保留 `XxHuberrr`，但正式安装包和应用内更新检查以 `English-worse/Mineradio` 为准。
+
 ## v1.1.0 发布边界
 
 - `v1.1.0` 是纯净安装发布版，从当前 `resources/app` 可信源码重新构建。
@@ -12,9 +20,10 @@
 ## 发布前检查
 
 - 确认 `package.json` 和 `package-lock.json` 版本号正确。
-- 确认 `mineradio.update.owner/repo` 指向正式仓库。
+- 确认 `build.publish.owner/repo` 和 `mineradio.update.owner/repo` 都指向 `English-worse/Mineradio`。
 - 确认 `.cookie`、`.qq-cookie`、`updates/`、`node_modules/`、旧 `dist/` 没有进入 git。
 - 确认 README/SECURITY/CHANGELOG/Release 正文包含 `v1.0.10` 旧安装包隔离说明。
+- 确认 `docs/VENDOR_MANIFEST.md` 中的 vendor hash 与 `Get-FileHash public\vendor\* -Algorithm SHA256` 一致。
 - 运行语法检查：`git diff --check`、`node --check server.js`、前端内联脚本解析。
 - 运行 Git 跟踪风险残留检查，确认没有跟踪 `.exe/.dll/.scr/.bat/.cmd/.ps1/.vbs/.jse/.wsf/.hta/.xlsm` 等可执行/脚本残留。
 - 从当前源码执行 `npm run build:win` 生成 Windows 安装包。
@@ -22,6 +31,12 @@
 - 生成并记录新安装包 SHA256。
 
 ## GitHub Release
+
+目标仓库：
+
+```text
+English-worse/Mineradio
+```
 
 Release tag：
 
