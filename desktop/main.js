@@ -3,6 +3,12 @@ const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
+const {
+  isAllowedAppUrl,
+  isAllowedLoginUrl,
+  isSafeExternalUrl,
+} = require('./navigation-guard');
+const { assertAllowedIpcSender } = require('./ipc-auth');
 
 let mainWindow = null;
 let localServer = null;
@@ -259,6 +265,30 @@ function getSenderWindow(event) {
   return BrowserWindow.fromWebContents(event.sender);
 }
 
+function openSafeExternal(url) {
+  if (!isSafeExternalUrl(url)) return Promise.resolve(false);
+  return shell.openExternal(url).then(() => true).catch(() => false);
+}
+
+function guardMainNavigation(event, url) {
+  if (isAllowedAppUrl(url, mainServerPort)) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  openSafeExternal(url);
+}
+
+function guardLoginNavigation(provider, event, url) {
+  if (isAllowedLoginUrl(url, provider)) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  openSafeExternal(url);
+}
+
+function handleIpc(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    assertAllowedIpcSender(event, channel, mainServerPort);
+    return handler(event, ...args);
+  });
+}
+
 function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -448,16 +478,21 @@ async function openNeteaseMusicLoginWindow(owner) {
     };
 
     loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\/([^/]+\.)?(163|music\.163|netease)\.com/i.test(url)) {
+      if (isAllowedLoginUrl(url, 'netease')) {
         loginWindow.loadURL(url).catch((e) => console.warn('Netease login popup navigation failed:', e.message));
-      } else if (/^https?:\/\//i.test(url)) {
-        shell.openExternal(url).catch(() => {});
+      } else {
+        openSafeExternal(url);
       }
       return { action: 'deny' };
+    });
+    loginWindow.webContents.on('will-navigate', (event, url) => guardLoginNavigation('netease', event, url));
+    loginWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) guardLoginNavigation('netease', event, url);
     });
 
     loginWindow.webContents.on('did-finish-load', () => {
       checkCookies();
+      if (!isAllowedLoginUrl(loginWindow.webContents.getURL(), 'netease')) return;
       loginWindow.webContents.executeJavaScript(`
         setTimeout(() => {
           const docs = [document];
@@ -557,16 +592,21 @@ async function openQQMusicLoginWindow(owner) {
     };
 
     loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) {
+      if (isAllowedLoginUrl(url, 'qq')) {
         loginWindow.loadURL(url).catch((e) => console.warn('QQ login popup navigation failed:', e.message));
       } else {
-        shell.openExternal(url).catch(() => {});
+        openSafeExternal(url);
       }
       return { action: 'deny' };
+    });
+    loginWindow.webContents.on('will-navigate', (event, url) => guardLoginNavigation('qq', event, url));
+    loginWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) guardLoginNavigation('qq', event, url);
     });
 
     loginWindow.webContents.on('did-finish-load', () => {
       checkCookies();
+      if (!isAllowedLoginUrl(loginWindow.webContents.getURL(), 'qq')) return;
       loginWindow.webContents.executeJavaScript(`
         setTimeout(() => {
           const nodes = Array.from(document.querySelectorAll('a, button, span, div'));
@@ -1097,35 +1137,35 @@ function closeOverlayWindows() {
   closeWallpaperWindow();
 }
 
-ipcMain.handle('desktop-window-minimize', (event) => {
+handleIpc('desktop-window-minimize', (event) => {
   getSenderWindow(event)?.minimize();
 });
 
-ipcMain.handle('desktop-window-toggle-maximize', (event) => {
+handleIpc('desktop-window-toggle-maximize', (event) => {
   toggleFullscreen(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-toggle-fullscreen', (event) => {
+handleIpc('desktop-window-toggle-fullscreen', (event) => {
   toggleFullscreen(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-exit-fullscreen-windowed', (event) => {
+handleIpc('desktop-window-exit-fullscreen-windowed', (event) => {
   exitFullscreenToWindow(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-get-state', (event) => {
+handleIpc('desktop-window-get-state', (event) => {
   return getWindowState(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-close', (event) => {
+handleIpc('desktop-window-close', (event) => {
   getSenderWindow(event)?.close();
 });
 
-ipcMain.handle('mineradio-hotkeys-configure-global', (_event, bindings) => {
+handleIpc('mineradio-hotkeys-configure-global', (_event, bindings) => {
   return configureMineradioGlobalHotkeys(bindings);
 });
 
-ipcMain.handle('mineradio-export-json-file', async (event, payload = {}) => {
+handleIpc('mineradio-export-json-file', async (event, payload = {}) => {
   try {
     const owner = getSenderWindow(event);
     const defaultName = String(payload.defaultName || 'mineradio-export.json').replace(/[\\/:*?"<>|]+/g, '-');
@@ -1143,7 +1183,7 @@ ipcMain.handle('mineradio-export-json-file', async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle('mineradio-import-json-file', async (event) => {
+handleIpc('mineradio-import-json-file', async (event) => {
   try {
     const owner = getSenderWindow(event);
     const result = await dialog.showOpenDialog(owner, {
@@ -1160,23 +1200,23 @@ ipcMain.handle('mineradio-import-json-file', async (event) => {
   }
 });
 
-ipcMain.handle('netease-music-open-login', async (event) => {
+handleIpc('netease-music-open-login', async (event) => {
   return openNeteaseMusicLoginWindow(getSenderWindow(event));
 });
 
-ipcMain.handle('netease-music-clear-login', async () => {
+handleIpc('netease-music-clear-login', async () => {
   return clearNeteaseMusicLoginSession();
 });
 
-ipcMain.handle('qq-music-open-login', async (event) => {
+handleIpc('qq-music-open-login', async (event) => {
   return openQQMusicLoginWindow(getSenderWindow(event));
 });
 
-ipcMain.handle('qq-music-clear-login', async () => {
+handleIpc('qq-music-clear-login', async () => {
   return clearQQMusicLoginSession();
 });
 
-ipcMain.handle('mineradio-open-update-installer', async (_event, filePath) => {
+handleIpc('mineradio-open-update-installer', async (_event, filePath) => {
   try {
     const target = path.resolve(String(filePath || ''));
     const updateDir = path.resolve(getUpdateDownloadDir());
@@ -1191,7 +1231,7 @@ ipcMain.handle('mineradio-open-update-installer', async (_event, filePath) => {
   }
 });
 
-ipcMain.handle('mineradio-restart-app', async () => {
+handleIpc('mineradio-restart-app', async () => {
   try {
     app.relaunch();
     app.exit(0);
@@ -1201,7 +1241,7 @@ ipcMain.handle('mineradio-restart-app', async () => {
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, payload) => {
+handleIpc('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, payload) => {
   try {
     if (enabled) {
       createDesktopLyricsWindow(payload || {});
@@ -1215,7 +1255,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, p
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-update', async (_event, payload) => {
+handleIpc('mineradio-desktop-lyrics-update', async (_event, payload) => {
   try {
     const nextState = { ...desktopLyricsState, ...(payload || {}) };
     if (nextState.enabled) {
@@ -1232,11 +1272,11 @@ ipcMain.handle('mineradio-desktop-lyrics-update', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-dragging', async () => {
+handleIpc('mineradio-desktop-lyrics-set-dragging', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-pointer-capture', async (_event, active) => {
+handleIpc('mineradio-desktop-lyrics-set-pointer-capture', async (_event, active) => {
   try {
     desktopLyricsPointerCapture = !!active;
     applyDesktopLyricsMouseBehavior();
@@ -1246,7 +1286,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-pointer-capture', async (_event, ac
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds) => {
+handleIpc('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds) => {
   try {
     const left = clampNumber(bounds && bounds.left, -2000, 4000, 0);
     const top = clampNumber(bounds && bounds.top, -2000, 4000, 0);
@@ -1259,7 +1299,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds)
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-lock-state', async (_event, locked) => {
+handleIpc('mineradio-desktop-lyrics-set-lock-state', async (_event, locked) => {
   try {
     desktopLyricsState = { ...desktopLyricsState, clickThrough: !!locked };
     if (desktopLyricsState.clickThrough !== false) desktopLyricsPointerCapture = false;
@@ -1271,7 +1311,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-lock-state', async (_event, locked)
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
+handleIpc('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
   try {
     if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return { ok: false, error: 'NO_DESKTOP_LYRICS_WINDOW' };
     if (desktopLyricsState.clickThrough !== false) return { ok: false, error: 'DESKTOP_LYRICS_LOCKED' };
@@ -1289,7 +1329,7 @@ ipcMain.handle('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
   }
 });
 
-ipcMain.handle('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) => {
+handleIpc('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) => {
   try {
     if (enabled) createWallpaperWindow(payload || {});
     else closeWallpaperWindow();
@@ -1299,7 +1339,7 @@ ipcMain.handle('mineradio-wallpaper-set-enabled', async (_event, enabled, payloa
   }
 });
 
-ipcMain.handle('mineradio-wallpaper-update', async (_event, payload) => {
+handleIpc('mineradio-wallpaper-update', async (_event, payload) => {
   try {
     wallpaperState = { ...wallpaperState, ...(payload || {}) };
     if (wallpaperState.enabled) {
@@ -1368,8 +1408,13 @@ async function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openSafeExternal(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', guardMainNavigation);
+  mainWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) guardMainNavigation(event, url);
   });
 
   mainWindow.webContents.once('did-finish-load', () => {
