@@ -53,9 +53,16 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const {
+  assertAllowedRemoteMediaUrl,
+  corsHeadersForOrigin,
+  isAllowedCorsOrigin,
+  isMethodAllowedForRoute,
+  resolveBindHost,
+} = require('./server/security');
 
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = resolveBindHost(process.env);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const COOKIE_FILE = process.env.COOKIE_FILE || path.join(__dirname, '.cookie');
 const QQ_COOKIE_FILE = process.env.QQ_COOKIE_FILE || path.join(__dirname, '.qq-cookie');
@@ -196,9 +203,10 @@ function serveStatic(res, filePath) {
   });
 }
 function sendJSON(res, data, status) {
+  const req = res.mineradioRequest || null;
   res.writeHead(status || 200, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
+    ...corsHeadersForOrigin(req && req.headers && req.headers.origin, PORT),
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
@@ -3243,6 +3251,33 @@ async function getLoginInfo() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost:' + PORT);
   const pn = url.pathname;
+  res.mineradioRequest = req;
+
+  if (pn.startsWith('/api/') && req.method === 'OPTIONS') {
+    const origin = req.headers.origin || '';
+    if (!isAllowedCorsOrigin(origin, PORT)) {
+      sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
+      return;
+    }
+    res.writeHead(204, {
+      ...corsHeadersForOrigin(origin, PORT),
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '600',
+    });
+    res.end();
+    return;
+  }
+
+  if (pn.startsWith('/api/') && !isAllowedCorsOrigin(req.headers.origin || '', PORT)) {
+    sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
+    return;
+  }
+
+  if (!isMethodAllowedForRoute(pn, req.method)) {
+    sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+    return;
+  }
 
   if (pn === '/api/app/version') {
     sendJSON(res, {
@@ -3726,7 +3761,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const audioUrl = url.searchParams.get('url');
       const durationSec = Math.max(0, Number(url.searchParams.get('duration') || 0) || 0);
-      if (!audioUrl || !/^https?:\/\//i.test(audioUrl)) {
+      try {
+        assertAllowedRemoteMediaUrl(audioUrl);
+      } catch (e) {
         sendJSON(res, { error: 'Invalid audio url' }, 400);
         return;
       }
@@ -4135,9 +4172,10 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/cover') {
     try {
       const coverUrl = url.searchParams.get('url');
-      // URL 校验: 必须是 http(s) 开头, 否则直接 404 (不要让 fetch 抛错)
-      if (!coverUrl || !/^https?:\/\//i.test(coverUrl)) {
-        res.writeHead(400, { 'Access-Control-Allow-Origin': '*' });
+      try {
+        assertAllowedRemoteMediaUrl(coverUrl);
+      } catch (e) {
+        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, PORT));
         res.end('Invalid cover url');
         return;
       }
@@ -4146,7 +4184,7 @@ const server = http.createServer(async (req, res) => {
       const cl  = resp.headers.get('content-length');
       const hdr = {
         'Content-Type': ct,
-        'Access-Control-Allow-Origin': '*',
+        ...corsHeadersForOrigin(req.headers.origin, PORT),
         'Cross-Origin-Resource-Policy': 'cross-origin',
         'Cache-Control': 'public, max-age=86400',
       };
@@ -4164,12 +4202,19 @@ const server = http.createServer(async (req, res) => {
     try {
       const audioUrl = url.searchParams.get('url');
       if (!audioUrl) { res.writeHead(400); res.end('Missing url'); return; }
+      try {
+        assertAllowedRemoteMediaUrl(audioUrl);
+      } catch (e) {
+        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, PORT));
+        res.end('Invalid audio url');
+        return;
+      }
       const range = req.headers.range || '';
       const hdr = audioProxyHeadersFor(audioUrl, range);
       const up = await fetch(audioUrl, { headers: hdr });
       const out = {
         'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
-        'Access-Control-Allow-Origin': '*',
+        ...corsHeadersForOrigin(req.headers.origin, PORT),
         'Accept-Ranges': 'bytes',
       };
       const cl = up.headers.get('content-length'); if (cl) out['Content-Length'] = cl;
