@@ -12,6 +12,7 @@
 <script src="api-client.js"></script>
 <script src="storage.js"></script>
 <script src="actions.js"></script>
+<script src="performance.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -2856,6 +2857,41 @@ var updatePreviewState = {
     '单实例与快捷方式修复'
   ]
 };
+var rendererPerformanceTools = window.MineradioPerformance || {};
+var lyricLineFinder = rendererPerformanceTools.createLyricLineFinder
+  ? rendererPerformanceTools.createLyricLineFinder()
+  : {
+      find: function(lines, time, offset) {
+        lines = Array.isArray(lines) ? lines : [];
+        var t = Number(time) + (Number(offset) || 0);
+        var idx = -1;
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i].t <= t) idx = i;
+          else break;
+        }
+        return idx;
+      },
+      reset: function() {}
+    };
+var pointerRectCache = rendererPerformanceTools.createMeasuredRectCache
+  ? rendererPerformanceTools.createMeasuredRectCache()
+  : {
+      get: function(_key, measure) { return typeof measure === 'function' ? measure() : null; },
+      invalidate: function() {}
+    };
+function invalidatePointerRectCache() {
+  if (pointerRectCache && pointerRectCache.invalidate) pointerRectCache.invalidate();
+}
+function cachedElementRect(key, el) {
+  if (!el || !el.getBoundingClientRect) return null;
+  return pointerRectCache.get(key, function(){ return el.getBoundingClientRect(); });
+}
+function pointInRectWithPadding(x, y, rect, padX, padY) {
+  if (!rect) return false;
+  padX = Number(padX) || 0;
+  padY = Number(padY) || padX;
+  return x >= rect.left - padX && x <= rect.right + padX && y >= rect.top - padY && y <= rect.bottom + padY;
+}
 function readSavedVolume() {
   try {
     var v = parseFloat(localStorage.getItem('apex-player-volume'));
@@ -5369,23 +5405,23 @@ function updateControlsAutoHideFromPointer(x, y) {
   if (diyPlayerMode) {
     var fxPanel = document.getElementById('fx-panel');
     var fxFab = document.getElementById('fx-fab');
-    var fr = fxPanel ? fxPanel.getBoundingClientRect() : null;
-    var br = fxFab ? fxFab.getBoundingClientRect() : null;
-    var overFxPanel = fxPanel && (fxPanel.classList.contains('peek') || fxPanel.classList.contains('show')) && fr && x >= fr.left - 18 && x <= fr.right + 18 && y >= fr.top - 18 && y <= fr.bottom + 18;
-    var overFxFab = br && x >= br.left - 18 && x <= br.right + 18 && y >= br.top - 18 && y <= br.bottom + 18;
+    var fr = cachedElementRect('fx-panel', fxPanel);
+    var br = cachedElementRect('fx-fab', fxFab);
+    var overFxPanel = fxPanel && (fxPanel.classList.contains('peek') || fxPanel.classList.contains('show')) && pointInRectWithPadding(x, y, fr, 18);
+    var overFxFab = pointInRectWithPadding(x, y, br, 18);
     if (overFxPanel || overFxFab) {
       scheduleControlsHide(80);
       return;
     }
   }
   controlsLastMoveAt = performance.now();
-  var rect = bar.getBoundingClientRect();
+  var rect = cachedElementRect('bottom-bar', bar);
   var handle = document.getElementById('bottom-handle');
-  var hr = handle ? handle.getBoundingClientRect() : null;
+  var hr = cachedElementRect('bottom-handle', handle);
   var overHandle = hr && x >= hr.left - 18 && x <= hr.right + 18 && y >= hr.top - 12 && y <= hr.bottom + 14;
-  var overBar = x >= rect.left - 18 && x <= rect.right + 18 && y >= rect.top - 18 && y <= rect.bottom + 14;
+  var overBar = rect && x >= rect.left - 18 && x <= rect.right + 18 && y >= rect.top - 18 && y <= rect.bottom + 14;
   var mini = document.getElementById('mini-queue-popover');
-  var miniRect = mini ? mini.getBoundingClientRect() : null;
+  var miniRect = cachedElementRect('mini-queue-popover', mini);
   var overMini = miniQueueOpen && miniRect && x >= miniRect.left - 16 && x <= miniRect.right + 16 && y >= miniRect.top - 16 && y <= miniRect.bottom + 16;
   if (overHandle) wakeBottomHandle();
   if (overBar || overMini || overHandle) revealBottomControls(overHandle ? 900 : 520);
@@ -5590,7 +5626,43 @@ window.addEventListener('mousedown', function(e){
   if (orbit.rotating || e.target === renderer.domElement) return;
   beginParticlePointerDrag(e);
 }, true);
-window.addEventListener('mousemove', function(e){
+function pointerMoveSnapshot(e, accumulated) {
+  return {
+    clientX: e.clientX,
+    clientY: e.clientY,
+    movementX: accumulated ? (Number(accumulated.movementX) || 0) : (Number(e.movementX) || 0),
+    movementY: accumulated ? (Number(accumulated.movementY) || 0) : (Number(e.movementY) || 0),
+    target: e.target || null,
+    pointerType: e.pointerType || 'mouse',
+  };
+}
+var canvasPointerMovePending = null;
+var canvasPointerMoveCoalescer = rendererPerformanceTools.createFrameCoalescer
+  ? rendererPerformanceTools.createFrameCoalescer({ requestAnimationFrame: requestAnimationFrame }, function(snapshot) {
+      var e = snapshot;
+      canvasPointerMovePending = null;
+      handleCanvasPointerMove(e);
+    })
+  : null;
+function recordCanvasPointerMove(e) {
+  if (canvasPointerMovePending) {
+    canvasPointerMovePending.clientX = e.clientX;
+    canvasPointerMovePending.clientY = e.clientY;
+    canvasPointerMovePending.target = e.target || null;
+    canvasPointerMovePending.pointerType = e.pointerType || 'mouse';
+    canvasPointerMovePending.movementX += Number(e.movementX) || 0;
+    canvasPointerMovePending.movementY += Number(e.movementY) || 0;
+  } else {
+    canvasPointerMovePending = pointerMoveSnapshot(e);
+  }
+  if (canvasPointerMoveCoalescer) canvasPointerMoveCoalescer.push(canvasPointerMovePending);
+  else {
+    var snapshot = canvasPointerMovePending;
+    canvasPointerMovePending = null;
+    handleCanvasPointerMove(snapshot);
+  }
+}
+function handleCanvasPointerMove(e) {
   updateControlsAutoHideFromPointer(e.clientX, e.clientY);
   idleGuidePointerMove(e);
   if (freeCamera && freeCamera.active) {
@@ -5628,6 +5700,9 @@ window.addEventListener('mousemove', function(e){
     if (orbit.recentering) orbit.recentering = false;
   }
   queueParticlePointerFrame(e.clientX, e.clientY);
+}
+window.addEventListener('mousemove', function(e){
+  recordCanvasPointerMove(e);
 });
 window.addEventListener('mouseup', function(){
   orbit.rotating = false;
@@ -5692,6 +5767,8 @@ function makeDotTexture() {
   ctx.fillRect(0, 0, 64, 64);
   var tex = new THREE.CanvasTexture(cv);
   tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.userData = tex.userData || {};
+  tex.userData.mineradioSharedTexture = true;
   return tex;
 }
 var dotTexture = makeDotTexture();
@@ -7451,10 +7528,10 @@ function disposeLyricMesh(mesh) {
   mesh.traverse(function(obj){
     if (obj.material) {
       if (Array.isArray(obj.material)) {
-        obj.material.forEach(function(m){ if (m.map) m.map.dispose(); m.dispose(); });
+        obj.material.forEach(function(m){ if (m.map) disposeLyricTexture(m.map); m.dispose(); });
       } else {
-        if (obj.material.map) obj.material.map.dispose();
-        if (obj.material.uniforms && obj.material.uniforms.uMap && obj.material.uniforms.uMap.value) obj.material.uniforms.uMap.value.dispose();
+        if (obj.material.map) disposeLyricTexture(obj.material.map);
+        if (obj.material.uniforms && obj.material.uniforms.uMap && obj.material.uniforms.uMap.value) disposeLyricTexture(obj.material.uniforms.uMap.value);
         obj.material.dispose();
       }
     }
@@ -8468,8 +8545,48 @@ function lyricThreeColor(css, fallback, minLum) {
 }
 
 var STAGE_LYRIC_MAX_LINES = 1;
+var lyricTextureCache = new Map();
+function lyricTextureStyleKey() {
+  return [
+    normalizeLyricFontKey(fx && fx.lyricFont),
+    lyricFontWeightValue(),
+    clampRange(Number(fx && fx.lyricLetterSpacing) || 0, -0.04, 0.18).toFixed(3),
+    lyricLineHeightFactor().toFixed(3),
+    STAGE_LYRIC_MAX_LINES
+  ].join('|');
+}
+function markCachedLyricTexture(texture) {
+  if (texture) {
+    texture.userData = texture.userData || {};
+    texture.userData.mineradioCachedLyricTexture = true;
+  }
+  return texture;
+}
+function cachedLyricTextureValue(key, factory) {
+  if (lyricTextureCache.has(key)) return lyricTextureCache.get(key);
+  var value = factory();
+  lyricTextureCache.set(key, value);
+  return value;
+}
+function disposeLyricTexture(texture) {
+  if (!texture || typeof texture.dispose !== 'function') return;
+  if (texture.userData && (texture.userData.mineradioCachedLyricTexture || texture.userData.mineradioSharedTexture)) return;
+  texture.dispose();
+}
+function disposeCachedLyricTextureValue(value) {
+  if (!value) return;
+  if (value.texture && typeof value.texture.dispose === 'function') value.texture.dispose();
+  else if (typeof value.dispose === 'function') value.dispose();
+}
+function clearLyricTextureCache() {
+  lyricTextureCache.forEach(disposeCachedLyricTextureValue);
+  lyricTextureCache.clear();
+}
 
 function makeLyricMask(text) {
+  var cacheText = String(text || '').replace(/\s+/g, ' ').trim();
+  var cacheKey = 'mask|' + lyricTextureStyleKey() + '|' + cacheText;
+  return cachedLyricTextureValue(cacheKey, function(){
   var canvas = document.createElement('canvas');
   var W = 2048, H = 384;
   canvas.width = W; canvas.height = H;
@@ -8518,10 +8635,14 @@ function makeLyricMask(text) {
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1);
-  return { texture:tex, width:W, height:H, textWidth:width, textHeight:blockH, fontSize:fontSize, lineHeight:lineHeight, lineCount:lines.length, lines:lines, fitScaleX:fitScaleX, textMin:(W / 2 - width / 2) / W, textMax:(W / 2 + width / 2) / W };
+  markCachedLyricTexture(tex);
+  return { cacheKey:cacheKey, texture:tex, width:W, height:H, textWidth:width, textHeight:blockH, fontSize:fontSize, lineHeight:lineHeight, lineCount:lines.length, lines:lines, fitScaleX:fitScaleX, textMin:(W / 2 - width / 2) / W, textMax:(W / 2 + width / 2) / W };
+  });
 }
 
 function makeLyricReadabilityTexture(mask) {
+  var cacheKey = 'readability|' + ((mask && mask.cacheKey) || lyricTextureStyleKey());
+  return cachedLyricTextureValue(cacheKey, function(){
   var canvas = document.createElement('canvas');
   var W = mask && mask.width || 2048;
   var H = mask && mask.height || 384;
@@ -8593,11 +8714,14 @@ function makeLyricReadabilityTexture(mask) {
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1);
-  return tex;
+  return markCachedLyricTexture(tex);
+  });
 }
 
 function makeLyricGlowTexture(text, fontSize, textWidth, lines, lineHeight, fitScaleX) {
   text = String(text || '').replace(/\s+/g, ' ').trim();
+  var cacheKey = 'glow|' + lyricTextureStyleKey() + '|' + text + '|' + Math.round(fontSize || 0) + '|' + Math.round(textWidth || 0) + '|' + Math.round((lineHeight || 0) * 100) + '|' + Math.round((fitScaleX || 1) * 1000);
+  return cachedLyricTextureValue(cacheKey, function(){
   var drawLines = Array.isArray(lines) && lines.length ? lines : [text];
   var canvas = document.createElement('canvas');
   var measureCanvas = document.createElement('canvas');
@@ -8699,7 +8823,9 @@ function makeLyricGlowTexture(text, fontSize, textWidth, lines, lineHeight, fitS
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
   tex.userData = { width:W, height:H, textWidth:measuredWidth };
+  markCachedLyricTexture(tex);
   return tex;
+  });
 }
 
 var lyricSunBloomTexture = null;
@@ -8762,6 +8888,8 @@ function getLyricSunBloomTexture() {
   lyricSunBloomTexture.minFilter = THREE.LinearFilter;
   lyricSunBloomTexture.magFilter = THREE.LinearFilter;
   lyricSunBloomTexture.generateMipmaps = false;
+  lyricSunBloomTexture.userData = lyricSunBloomTexture.userData || {};
+  lyricSunBloomTexture.userData.mineradioSharedTexture = true;
   return lyricSunBloomTexture;
 }
 
@@ -9312,10 +9440,7 @@ function tickLyricsParticles() {
     return;
   }
   var t = audio.currentTime;
-  var newIdx = -1;
-  for (var i = 0; i < lyricsLines.length; i++) {
-    if (lyricsLines[i].t <= t + 0.05) newIdx = i; else break;
-  }
+  var newIdx = lyricLineFinder.find(lyricsLines, t, 0.05);
   if (newIdx < 0) {
     var introText = currentLyricFallbackText();
     if (!introText) {
@@ -16766,7 +16891,9 @@ function applyLyricsState(lines, hasNativeKaraoke, timingSource) {
   lyricsLines = cloneLyricLines(lines || []);
   if (!lyricsLines.length) lyricsLines = withLyricFallback([]);
   if (lyricsLines.length && lyricsLines[0].fallback) lyricsTimingSource = 'fallback';
+  lyricLineFinder.reset();
   renderLyrics();
+  clearLyricTextureCache();
   updateCustomLyricControls();
 }
 function applyOriginalLyricsState() {
@@ -16811,7 +16938,9 @@ function applyCustomLyricState(song, silent) {
   lyricsTimingSource = lines[0] && lines[0].source === 'custom-lrc' ? 'custom-lrc' : 'custom-text';
   lyricsLines = withLyricFallback(lines);
   if (lyricsLines.length && lyricsLines[0].fallback) lyricsTimingSource = 'fallback';
+  lyricLineFinder.reset();
   renderLyrics();
+  clearLyricTextureCache();
   updateCustomLyricControls();
   return true;
 }
@@ -25201,6 +25330,7 @@ function scheduleMainRendererViewportRefresh(reason) {
   });
 }
 window.addEventListener('resize', function(){
+  invalidatePointerRectCache();
   scheduleMainRendererViewportRefresh('resize');
   if (desktopRuntimeState.fullscreen || desktopFullscreenActive || document.fullscreenElement || document.body.classList.contains('desktop-fullscreen')) layoutFullscreenDiyZone();
 });
@@ -25276,6 +25406,7 @@ var PEEK_HIDE_DELAY = 170;
 var peekTimers = { search:null, fx:null, pl:null };
 function setPeek(el, on, key) {
   if (!el) return;
+  invalidatePointerRectCache();
   if (immersiveMode && on && (key === 'search' || key === 'fx')) return;
   if (on && !diyPlayerMode && key === 'fx') return;
   if (!on && key === 'search' && emptyHomeActive && !immersiveMode) return;
@@ -25294,6 +25425,7 @@ function setPeek(el, on, key) {
       delete el.dataset.preserveTabOnOpen;
     }
     el.classList.add('peek');
+    requestAnimationFrame(invalidatePointerRectCache);
     if (key === 'pl' && !wasPeek) {
       scheduleUiWarmTask(function(){
         flushDeferredQueuePanel('playlist-panel-peek');
@@ -25308,6 +25440,7 @@ function setPeek(el, on, key) {
     if (peekTimers[key]) clearTimeout(peekTimers[key]);
     peekTimers[key] = setTimeout(function(){
       el.classList.remove('peek');
+      invalidatePointerRectCache();
       if (key === 'fx') {
         var fabOff = document.getElementById('fx-fab');
         if (fabOff && !el.classList.contains('show')) fabOff.classList.remove('active');
@@ -25459,7 +25592,23 @@ function isPlaylistPanelFocusActive(inTrigger, inPanel, pp, ex, ppRect) {
   if (isSecondaryLeftDisplaySeamGuardActive() && ex < SECONDARY_PLAYLIST_SEAM_CLOSE_X) return false;
   return inTrigger || inPanel || (pp && pp.classList.contains('peek') && ex < ppRect.right + playlistPanelFocusPadding());
 }
-window.addEventListener('mousemove', function(e){
+var globalPointerMovePending = null;
+var globalPointerMoveCoalescer = rendererPerformanceTools.createFrameCoalescer
+  ? rendererPerformanceTools.createFrameCoalescer({ requestAnimationFrame: requestAnimationFrame }, function(snapshot) {
+      globalPointerMovePending = null;
+      handleGlobalPointerMove(snapshot);
+    })
+  : null;
+function recordGlobalPointerMove(e) {
+  globalPointerMovePending = pointerMoveSnapshot(e);
+  if (globalPointerMoveCoalescer) globalPointerMoveCoalescer.push(globalPointerMovePending);
+  else {
+    var snapshot = globalPointerMovePending;
+    globalPointerMovePending = null;
+    handleGlobalPointerMove(snapshot);
+  }
+}
+function handleGlobalPointerMove(e) {
   var sa = document.getElementById('search-area');
   var fp = document.getElementById('fx-panel');
   var pp = document.getElementById('playlist-panel');
@@ -25478,7 +25627,7 @@ window.addEventListener('mousemove', function(e){
     updateShelfCardHoverSelection(e);
     updateControlsAutoHideFromPointer(ex, ey);
     var ppOnImm = pp.classList.contains('peek');
-    var ppRectImm = pp.getBoundingClientRect();
+    var ppRectImm = cachedElementRect('playlist-panel', pp);
     var inQueueTriggerImm = isPlaylistEdgeTrigger(ex, ey, H);
     var inQueuePanelImm = ppOnImm && ex >= ppRectImm.left - 18 && ex <= ppRectImm.right + 24 && ey >= ppRectImm.top - 22 && ey <= ppRectImm.bottom + 22;
     if (inQueueTriggerImm || inQueuePanelImm) setPeek(pp, true, 'pl');
@@ -25498,7 +25647,7 @@ window.addEventListener('mousemove', function(e){
   updateShelfCardHoverSelection(e);
   // 搜索 (上): 顶部 48px 内进入; 已显示时鼠标在 280px 内保留
   var saOn = sa.classList.contains('peek');
-  var saRect = sa.getBoundingClientRect();
+  var saRect = cachedElementRect('search-area', sa);
   var searchFocused = document.activeElement === $input;
   var uploadTip = document.getElementById('upload-tip');
   var uploadTipOpen = !!(uploadTip && uploadTip.classList.contains('show'));
@@ -25507,9 +25656,9 @@ window.addEventListener('mousemove', function(e){
   else if (saOn && !emptyHomeActive) setPeek(sa, false, 'search');
   // 控制台: 右下角触发；一旦面板出现，就按真实面板矩形保留显示
   var fpOn = fp.classList.contains('peek') || fp.classList.contains('show');
-  var fpRect = fp.getBoundingClientRect();
+  var fpRect = cachedElementRect('fx-panel', fp);
   var fab = document.getElementById('fx-fab');
-  var fabRect = fab ? fab.getBoundingClientRect() : { left:W, right:W, top:H, bottom:H };
+  var fabRect = cachedElementRect('fx-fab', fab) || { left:W, right:W, top:H, bottom:H };
   var inFxPanel = fpOn && ex >= fpRect.left - 24 && ex <= fpRect.right + 24 && ey >= fpRect.top - 24 && ey <= fpRect.bottom + 24;
   var inFxFab = ex >= fabRect.left - 18 && ex <= fabRect.right + 18 && ey >= fabRect.top - 18 && ey <= fabRect.bottom + 18;
   var inFxBridge = fpOn && ex >= Math.min(fpRect.left, fabRect.left) - 18 && ex <= W && ey >= fpRect.bottom - 10 && ey <= fabRect.bottom + 18;
@@ -25518,7 +25667,7 @@ window.addEventListener('mousemove', function(e){
   else if (fpOn) setPeek(fp, false, 'fx');
   // 歌单/队列 DOM 面板只在左侧明确停留时出现，避免和右侧 3D 架抢焦点
   var ppOn = pp.classList.contains('peek');
-  var ppRect = pp.getBoundingClientRect();
+  var ppRect = cachedElementRect('playlist-panel', pp);
   var inQueueTrigger = isPlaylistEdgeTrigger(ex, ey, H);
   var inQueuePanel = ppOn && ex >= ppRect.left - 18 && ex <= ppRect.right + 24 && ey >= ppRect.top - 22 && ey <= ppRect.bottom + 22;
   if (inQueueTrigger || inQueuePanel) setPeek(pp, true, 'pl');
@@ -25546,6 +25695,9 @@ window.addEventListener('mousemove', function(e){
     newFocus = 'shelf-stage';
   }
   setFocusZone(newFocus, newFocus === 'queue');
+}
+window.addEventListener('mousemove', function(e){
+  recordGlobalPointerMove(e);
 });
 
 // ============================================================
@@ -26198,11 +26350,7 @@ function currentDesktopLyricSnapshot() {
   var t = audio && isFinite(audio.currentTime) ? Number(audio.currentTime) : 0;
   var lines = Array.isArray(lyricsLines) ? lyricsLines : [];
   if (playing && audio && lines.length) {
-    var idx = -1;
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].t <= t + 0.05) idx = i;
-      else break;
-    }
+    var idx = lyricLineFinder.find(lines, t, 0.05);
     if (idx >= 0) {
       var curLine = lines[idx] || { t:t, text:'' };
       var nextLine = lines[idx + 1];
@@ -26518,6 +26666,7 @@ function toggleFullscreen() {
     applyState({});
   }
   document.addEventListener('fullscreenchange', function(){
+    invalidatePointerRectCache();
     var wasDocumentFullscreen = documentFullscreenActive;
     documentFullscreenActive = !!document.fullscreenElement;
     desktopWindowState.isHtmlFullScreen = documentFullscreenActive;
