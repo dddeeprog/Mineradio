@@ -9,6 +9,9 @@
 <script src="vendor/three.r128.min.js"></script>
 <script src="vendor/music-tempo.min.js"></script>
 <script src="vendor/gsap.min.js"></script>
+<script src="api-client.js"></script>
+<script src="storage.js"></script>
+<script src="actions.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -7636,7 +7639,7 @@ function saveLyricLayout() {
     var presetForSave = startupVisualPreviewActive && !playing && currentIdx < 0
       ? playbackVisualPreset
       : clampRange(Number(fx.preset) || 0, 0, presetMeta.length - 1);
-    localStorage.setItem(LYRIC_LAYOUT_STORE_KEY, JSON.stringify({
+    setLocalStorageJson(LYRIC_LAYOUT_STORE_KEY, {
       visualPresetSchema: VISUAL_PRESET_SCHEMA,
       desktopLyricsSchema: 'desktop-lyrics-v3',
       preset: presetForSave,
@@ -7716,7 +7719,7 @@ function saveLyricLayout() {
       shelfBgOpacity: clampRange(fx.shelfBgOpacity == null ? fxDefaults.shelfBgOpacity : Number(fx.shelfBgOpacity), 0.25, 0.98),
       shelfAccentColor: normalizeHexColor(fx.shelfAccentColor || fxDefaults.shelfAccentColor, fxDefaults.shelfAccentColor),
       cam: /^(off|gesture)$/.test(String(fx.cam || '')) ? fx.cam : fxDefaults.cam
-    }));
+    }, { debounceMs: 360 });
   } catch (e) {}
 }
 function normalizeHexColor(value, fallback) {
@@ -15079,7 +15082,31 @@ window.addEventListener('blur', function(){
 // ============================================================
 //  API 助手
 // ============================================================
+function mineradioStorageApi() {
+  return window.MineradioStorage || null;
+}
+function setLocalStorageItem(key, value, options) {
+  options = options || {};
+  var store = mineradioStorageApi();
+  if (store) {
+    if (options.debounceMs && typeof store.setItemDebounced === 'function') return store.setItemDebounced(key, value, options.debounceMs);
+    if (typeof store.setItem === 'function') return store.setItem(key, value);
+  }
+  try { localStorage.setItem(key, String(value)); return true; } catch (e) { return false; }
+}
+function setLocalStorageJson(key, value, options) {
+  options = options || {};
+  var store = mineradioStorageApi();
+  if (store) {
+    if (options.debounceMs && typeof store.setJsonDebounced === 'function') return store.setJsonDebounced(key, value, options.debounceMs);
+    if (typeof store.setJson === 'function') return store.setJson(key, value);
+  }
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
+}
 async function apiJson(url, opts) {
+  if (window.MineradioApi && typeof window.MineradioApi.request === 'function') {
+    return window.MineradioApi.request(url, opts || {});
+  }
   opts = opts || {};
   var timeoutMs = Number(opts.timeoutMs) || 0;
   var fetchOpts = Object.assign({}, opts);
@@ -17986,7 +18013,7 @@ function setVolume(value, silent) {
   var next = Math.max(0, Math.min(1, Number(value) || 0));
   targetVolume = next;
   if (next > 0.01) lastNonZeroVolume = next;
-  try { localStorage.setItem('apex-player-volume', String(next)); } catch (e) {}
+  setLocalStorageItem('apex-player-volume', String(next), silent ? { debounceMs: 240 } : null);
   applyVolumeToAudio();
   updateVolumeUi();
   if (!silent) showToast('音量 ' + Math.round(next * 100) + '%');

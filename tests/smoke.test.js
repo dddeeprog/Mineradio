@@ -11,7 +11,7 @@ test('maintenance baseline scripts are wired', () => {
 
   assert.equal(
     scripts.check,
-    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js'
+    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js'
   );
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
