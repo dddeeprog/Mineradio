@@ -60,6 +60,7 @@ const {
   isMethodAllowedForRoute,
   resolveBindHost,
 } = require('./server/security');
+const updateTools = require('./server/update');
 
 const PORT = process.env.PORT || 3000;
 const HOST = resolveBindHost(process.env);
@@ -277,17 +278,10 @@ function readUpdateMirrors(local) {
   return mirrors.slice(0, 6);
 }
 function normalizeDigest(value, algorithm) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const prefix = new RegExp('^' + algorithm + ':', 'i');
-  return raw.replace(prefix, '').trim().replace(/^['"]|['"]$/g, '');
+  return updateTools.normalizeDigest(value, algorithm);
 }
 function assetDigestInfo(asset) {
-  const digest = String(asset && asset.digest || '').trim();
-  return {
-    sha256: normalizeDigest((asset && asset.sha256) || (/^sha256:/i.test(digest) ? digest : ''), 'sha256').toLowerCase(),
-    sha512: normalizeDigest((asset && asset.sha512) || (/^sha512:/i.test(digest) ? digest : ''), 'sha512'),
-  };
+  return updateTools.assetDigestInfo(asset);
 }
 function buildMirrorUrl(originalUrl, mirror) {
   const source = String(originalUrl || '').trim();
@@ -335,19 +329,10 @@ function publicDownloadUrls(candidates) {
     .filter(Boolean);
 }
 function normalizeVersion(value) {
-  return String(value || '').trim().replace(/^v/i, '').replace(/[+].*$/, '').replace(/-.+$/, '');
+  return updateTools.normalizeVersion(value);
 }
 function compareVersions(a, b) {
-  const aa = normalizeVersion(a).split('.').map(n => parseInt(n, 10) || 0);
-  const bb = normalizeVersion(b).split('.').map(n => parseInt(n, 10) || 0);
-  const len = Math.max(aa.length, bb.length, 3);
-  for (let i = 0; i < len; i++) {
-    const left = aa[i] || 0;
-    const right = bb[i] || 0;
-    if (left > right) return 1;
-    if (left < right) return -1;
-  }
-  return 0;
+  return updateTools.compareVersions(a, b);
 }
 function cleanReleaseLine(line) {
   return String(line || '')
@@ -371,55 +356,17 @@ function extractReleaseNotes(body) {
   return notes.slice(0, 4);
 }
 function pickReleaseAsset(assets) {
-  const list = Array.isArray(assets) ? assets : [];
-  const preferred = list.find(a => /\.(exe|msi)$/i.test(a && a.name || ''))
-    || list.find(a => /\.(zip|7z)$/i.test(a && a.name || ''))
-    || list[0];
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
+  return updateTools.pickReleaseAsset(assets, {
+    downloadUrlsFor: url => publicDownloadUrls(uniqueDownloadCandidates(url)),
+  });
 }
 function patchAssetVersions(name) {
-  const matches = String(name || '').match(/\d+(?:[._-]\d+){1,3}/g) || [];
-  return matches.map(item => normalizeVersion(item.replace(/[._-]/g, '.'))).filter(Boolean);
+  return updateTools.patchAssetVersions(name);
 }
 function pickPatchAsset(assets, currentVersion, latestVersion) {
-  const list = Array.isArray(assets) ? assets : [];
-  const current = normalizeVersion(currentVersion || APP_VERSION);
-  const latest = normalizeVersion(latestVersion || '');
-  const preferred = list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    if (latest) return versions[0] === current && versions[versions.length - 1] === latest;
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => /\.(patch\.json|patch)$/i.test(a && a.name || ''));
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
+  return updateTools.pickPatchAsset(assets, currentVersion || APP_VERSION, latestVersion, {
+    downloadUrlsFor: url => publicDownloadUrls(uniqueDownloadCandidates(url)),
+  });
 }
 function updateAssetNameFromUrl(value) {
   try {
@@ -772,13 +719,7 @@ async function fetchLatestUpdateInfo() {
   }
 }
 function safeUpdateFileName(name, version) {
-  const raw = String(name || '').trim() || `Mineradio-${version || APP_VERSION}.exe`;
-  const cleaned = raw
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160);
-  return cleaned || `Mineradio-${version || APP_VERSION}.exe`;
+  return updateTools.safeUpdateFileName(name, version || APP_VERSION);
 }
 function publicUpdateJob(job) {
   if (!job) return { ok: false, error: 'UPDATE_JOB_NOT_FOUND' };
@@ -1138,68 +1079,25 @@ function startUpdateDownloadJob(info) {
   return publicUpdateJob(job);
 }
 function sha256Hex(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
+  return updateTools.sha256Hex(buffer);
 }
 function safePatchRelativePath(value) {
-  const rel = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
-  if (!rel || rel.includes('\0')) return '';
-  const parts = rel.split('/').filter(Boolean);
-  if (!parts.length || parts.some(part => part === '..' || part === '.')) return '';
-  const root = parts[0];
-  if (PATCH_ALLOWED_FILES.has(rel)) return rel;
-  if (!PATCH_ALLOWED_ROOTS.has(root)) return '';
-  if (/\.(exe|dll|node|msi|bat|cmd|ps1|pfx|pem|key)$/i.test(rel)) return '';
-  return parts.join('/');
-}
-function patchTargetPath(rel) {
-  const safeRel = safePatchRelativePath(rel);
-  if (!safeRel) return null;
-  const target = path.resolve(__dirname, safeRel);
-  const root = path.resolve(__dirname);
-  if (target !== root && !target.startsWith(root + path.sep)) return null;
-  return target;
-}
-function decodePatchFile(file) {
-  if (!file || typeof file !== 'object') return null;
-  if (typeof file.contentBase64 === 'string') return Buffer.from(file.contentBase64, 'base64');
-  if (typeof file.content === 'string') return Buffer.from(file.content, file.encoding === 'base64' ? 'base64' : 'utf8');
-  return null;
-}
-function backupPatchTarget(job, rel, target) {
-  if (!fs.existsSync(target)) return;
-  const backup = path.join(UPDATE_PATCH_BACKUP_DIR, job.id, rel);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  fs.copyFileSync(target, backup);
-}
-function writePatchFile(job, file) {
-  const rel = safePatchRelativePath(file.path || file.name);
-  const target = rel ? patchTargetPath(rel) : null;
-  const content = decodePatchFile(file);
-  if (!rel || !target || !content) throw new Error('INVALID_PATCH_FILE');
-  if (content.length > PATCH_MAX_BYTES) throw new Error('PATCH_FILE_TOO_LARGE');
-  const expected = String(file.sha256 || '').trim().toLowerCase();
-  const actual = sha256Hex(content);
-  if (expected && expected !== actual) throw new Error('PATCH_HASH_MISMATCH:' + rel);
-  backupPatchTarget(job, rel, target);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = target + '.mineradio-patch';
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, target);
-  if (expected && sha256Hex(fs.readFileSync(target)) !== expected) throw new Error('PATCH_WRITE_VERIFY_FAILED:' + rel);
-  return rel;
+  return updateTools.safePatchRelativePath(value, {
+    allowedRoots: PATCH_ALLOWED_ROOTS,
+    allowedFiles: PATCH_ALLOWED_FILES,
+  });
 }
 function normalizePatchPayload(payload) {
-  if (!payload || typeof payload !== 'object') throw new Error('INVALID_PATCH_PAYLOAD');
-  const type = String(payload.type || payload.kind || '');
-  if (type && type !== 'mineradio-resource-patch') throw new Error('UNSUPPORTED_PATCH_TYPE');
-  const from = normalizeVersion(payload.from || payload.baseVersion || '');
-  const to = normalizeVersion(payload.to || payload.version || payload.targetVersion || '');
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  if (!from || compareVersions(from, APP_VERSION) !== 0) throw new Error('PATCH_VERSION_MISMATCH');
-  if (!to || compareVersions(to, APP_VERSION) <= 0) throw new Error('PATCH_TARGET_VERSION_INVALID');
-  if (!files.length) throw new Error('PATCH_EMPTY');
-  if (files.length > 40) throw new Error('PATCH_TOO_MANY_FILES');
-  return { from, to, files, restartRequired: payload.restartRequired !== false };
+  return updateTools.normalizePatchPayload(payload, { currentVersion: APP_VERSION });
+}
+function applyPatchToJob(job, files) {
+  return updateTools.applyPatchFiles(files, {
+    rootDir: __dirname,
+    backupDir: path.join(UPDATE_PATCH_BACKUP_DIR, job.id),
+    allowedRoots: PATCH_ALLOWED_ROOTS,
+    allowedFiles: PATCH_ALLOWED_FILES,
+    maxBytes: PATCH_MAX_BYTES,
+  });
 }
 async function downloadAndApplyPatch(job) {
   const chunks = [];
@@ -1232,16 +1130,13 @@ async function downloadAndApplyPatch(job) {
     }
 
     const raw = Buffer.concat(chunks);
-    const expectedPatchHash = String(job.sha256 || '').trim().toLowerCase();
-    if (expectedPatchHash && sha256Hex(raw) !== expectedPatchHash) throw new Error('PATCH_PACKAGE_HASH_MISMATCH');
+    verifyUpdateBuffer(raw, job);
     const patch = normalizePatchPayload(JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')));
     job.version = patch.to;
     job.message = '正在应用快速补丁';
     job.progress = 88;
     job.updatedAt = Date.now();
-    const changed = [];
-    patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-    job.changedFiles = changed;
+    job.changedFiles = applyPatchToJob(job, patch.files);
     job.status = 'ready';
     job.progress = 100;
     job.restartRequired = patch.restartRequired;
@@ -1313,9 +1208,7 @@ async function downloadAndApplyPatchWithMirrors(job) {
       job.progress = 88;
       job.etaSeconds = 0;
       job.updatedAt = Date.now();
-      const changed = [];
-      patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-      job.changedFiles = changed;
+      job.changedFiles = applyPatchToJob(job, patch.files);
       job.status = 'ready';
       job.progress = 100;
       job.restartRequired = patch.restartRequired;
@@ -1339,6 +1232,12 @@ function startUpdatePatchJob(info) {
   if (!info || !info.configured) return { ok: false, error: 'UPDATE_REPOSITORY_NOT_CONFIGURED' };
   if (!info.updateAvailable) return { ok: false, error: 'NO_UPDATE_AVAILABLE' };
   if (!release.patchAvailable || !/^https?:\/\//i.test(downloadUrl)) return { ok: false, error: 'PATCH_ASSET_MISSING' };
+  let patchDigest;
+  try {
+    patchDigest = updateTools.assertPatchPackageDigest(patch);
+  } catch (err) {
+    return { ok: false, error: err.code || 'PATCH_DIGEST_MISSING' };
+  }
 
   const version = info.latestVersion || release.version || patch.to || '';
   const existing = Array.from(updateDownloadJobs.values())
@@ -1362,8 +1261,8 @@ function startUpdatePatchJob(info) {
     downloadCandidates,
     releaseUrl: release.htmlUrl || '',
     expectedSize: patch.size || 0,
-    sha256: normalizeDigest(patch.sha256 || '', 'sha256').toLowerCase(),
-    sha512: normalizeDigest(patch.sha512 || '', 'sha512'),
+    sha256: patchDigest.sha256,
+    sha512: patchDigest.sha512,
     restartRequired: true,
     sourceLabel: '',
     attempt: 0,
