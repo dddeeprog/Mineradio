@@ -13,6 +13,7 @@
 <script src="storage.js"></script>
 <script src="actions.js"></script>
 <script src="performance.js"></script>
+<script src="playlist-state.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -2815,6 +2816,7 @@ var smoothWheelScrollBound = false;
 var coverProcessToken = 0, aiDepthPipeline = null, aiDepthReady = false, aiDepthBusy = false, aiDepthFailUntil = 0;
 var coverDepthCache = Object.create(null), coverDepthCacheKeys = [];
 var aiDepthLastRunAt = 0, aiDepthMinGapMs = 18000;
+var UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE = true;
 var updatePreviewState = {
   visible: false,
   open: false,
@@ -13144,6 +13146,42 @@ function makeShelfManager() {
     return source;
   }
 
+  function findPlaylistShelfFocus(playlistId) {
+    var helper = window.MineradioPlaylistState;
+    if (!helper || typeof helper.findPlaylistShelfFocus !== 'function') return null;
+    return helper.findPlaylistShelfFocus(userPlaylists, playlistId, {
+      currentPane: shelfPane,
+      mergeCollections: shelfMergesCollections()
+    });
+  }
+
+  function focusPlaylistById(playlistId, opts) {
+    opts = opts || {};
+    var focus = findPlaylistShelfFocus(playlistId);
+    if (!focus) return false;
+    if (!shelfMergesCollections() && focus.pane && focus.pane !== shelfPane) {
+      paneMemory[shelfPane] = Math.max(0, Math.round(centerTarget));
+      shelfPane = focus.pane;
+      collectionReveal = 0;
+      paneSwitchAt = uniforms.uTime.value;
+      paneSwitchDir = shelfPane === 'fav' ? 1 : -1;
+      shelfOpenAnimAt = uniforms.uTime.value;
+    }
+    allItems = currentItems();
+    lastSig = sig(allItems);
+    var maxIndex = Math.max(0, allItems.length - 1);
+    var nextIndex = Math.max(0, Math.min(maxIndex, Math.round(focus.index)));
+    centerTarget = nextIndex;
+    centerSmooth = nextIndex;
+    centerIdx = nextIndex;
+    selectedIdx = nextIndex;
+    paneMemory[shelfPane] = nextIndex;
+    syncRenderedWindow(true, !!opts.asyncCards);
+    applySelectedIndex(nextIndex);
+    if (opts.pulse !== false) pulseCard(cards.find(function(c){ return c.index === nextIndex; }), 0.55);
+    return true;
+  }
+
   function currentItems() {
     if (hasAnyPlatformLogin() && (userPlaylists.length || myPodcastCollections.length)) {
       var source = activePlaylists();
@@ -13597,7 +13635,10 @@ function makeShelfManager() {
     openCardIdx = -1;
     setShelfPinnedOpen(false, true);
     if (typeof setFocusZone === 'function') setFocusZone(null, true);
-    loadPlaylistIntoQueueById(action.playlistId, true, action.title || (card.item && card.item.title) || '');
+    loadPlaylistIntoQueueById(action.playlistId, true, action.title || (card.item && card.item.title) || '', {
+      switchPanelToQueue: false,
+      focusShelfPlaylistId: action.playlistId
+    });
     return true;
   }
 
@@ -13968,6 +14009,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     hasOpenContent: function() { return contentList && contentList.isOpen(); },
     getContentList: function() { return contentList; },
     getOpenContentIndex: function() { return openCardIdx; },
+    focusPlaylistById: focusPlaylistById,
     canInteract: function() { return mode !== 'off' && allItems.length > 0; }
   };
 }
@@ -13981,6 +14023,20 @@ function safeShelfRebuild(reason, asyncCards) {
     console.warn('[ShelfRebuild]', reason || 'unknown', e);
     return false;
   }
+}
+function safeShelfFocusPlaylist(reason, playlistId, opts) {
+  if (!playlistId || !shelfManager || typeof shelfManager.focusPlaylistById !== 'function') return false;
+  try {
+    return !!shelfManager.focusPlaylistById(playlistId, opts || {});
+  } catch (e) {
+    console.warn('[ShelfFocusPlaylist]', reason || 'unknown', e);
+    return false;
+  }
+}
+function safeShelfRebuildForPlaylist(reason, playlistId, asyncCards) {
+  var rebuilt = safeShelfRebuild(reason, asyncCards);
+  safeShelfFocusPlaylist(reason, playlistId, { asyncCards: !!asyncCards });
+  return rebuilt;
 }
 var deferredShelfRebuild = { raf: 0, reason: '', asyncCards: true, token: 0 };
 function scheduleShelfRebuild(reason, asyncCards) {
@@ -14060,6 +14116,7 @@ function makeContentListManager() {
   var open = false;
   var centerTarget = 0, centerSmooth = 0;
   var playlistTitle = '';
+  var currentPlaylistId = '';
   var contentKind = 'playlist';
   var sourceCard = null;
   var requestToken = 0;
@@ -14486,6 +14543,7 @@ function makeContentListManager() {
     open: async function(playlistId, title, fromCard) {
       open = true;
       playlistTitle = title;
+      currentPlaylistId = playlistId || '';
       sourceCard = fromCard;
       var token = ++requestToken;
       openAnimAt = uniforms.uTime.value;
@@ -14597,6 +14655,7 @@ function makeContentListManager() {
       panel = null;
       renderedStart = -1;
       allTracks = [];
+      currentPlaylistId = '';
       contentKind = 'playlist';
       sourceCard = null;
       panelDirty = true;
@@ -14839,8 +14898,10 @@ function makeContentListManager() {
       if (!allSongs.length || playIndex < 0) return;
       playQueue = allSongs;
       currentIdx = playIndex;
+      var sourcePlaylistId = contentKind === 'playlist' ? currentPlaylistId : '';
       safeRenderQueuePanel('content-play-row');
-      safeShelfRebuild('content-play-row');
+      if (sourcePlaylistId) safeShelfRebuildForPlaylist('content-play-row', sourcePlaylistId);
+      else safeShelfRebuild('content-play-row');
       forcePlaybackControlsInteractive();
       playQueueAt(playIndex, { preserveHomeState: true }).catch(function(e){
         console.warn('[ContentPlayRow]', e);
@@ -14848,6 +14909,7 @@ function makeContentListManager() {
       // 关闭内容框
       var sm = shelfManager;
       if (sm) safeShelfCloseContent('content-play-row');
+      if (sourcePlaylistId) safeShelfFocusPlaylist('content-play-row-close', sourcePlaylistId, { pulse: false });
     }
   };
 
@@ -19734,16 +19796,25 @@ function playPlaylistPanelDetail() {
   var parts = st.key.split(':');
   var provider = parts[0] === 'qq' ? 'qq' : 'netease';
   var pid = parts.slice(1).join(':');
-  loadPlaylistIntoQueueById(playlistPanelProviderId(provider, pid), true, st.playlist && st.playlist.name || '');
+  var playlistId = playlistPanelProviderId(provider, pid);
+  loadPlaylistIntoQueueById(playlistId, true, st.playlist && st.playlist.name || '', {
+    switchPanelToQueue: false,
+    focusShelfPlaylistId: playlistId
+  });
 }
 function playPlaylistPanelDetailTrack(index) {
   var tracks = playlistPanelDetailState.tracks || [];
   if (!tracks[index]) return;
   playQueue = tracks.map(cloneSong);
   currentIdx = index;
+  var st = playlistPanelDetailState;
+  var parts = st && st.key ? st.key.split(':') : [];
+  var provider = parts[0] === 'qq' ? 'qq' : 'netease';
+  var pid = parts.length ? parts.slice(1).join(':') : '';
+  var playlistId = pid ? playlistPanelProviderId(provider, pid) : '';
   safeRenderQueuePanel('playlist-panel-detail');
-  safeSwitchPlaylistTab('queue', 'playlist-panel-detail');
-  safeShelfRebuild('playlist-panel-detail', true);
+  if (playlistId) safeShelfRebuildForPlaylist('playlist-panel-detail', playlistId, true);
+  else safeShelfRebuild('playlist-panel-detail', true);
   forcePlaybackControlsInteractive();
   playQueueAt(index).catch(function(e){ console.warn('[PlaylistPanelDetailPlay]', e); });
 }
@@ -19999,13 +20070,15 @@ async function loadPodcastRadioIntoQueue(id, autoplay, title) {
     hideLoading();
   }
 }
-async function loadPlaylistIntoQueueById(id, autoplay, title) {
+async function loadPlaylistIntoQueueById(id, autoplay, title, opts) {
   if (!id) return;
+  opts = opts || {};
   homeForcedOpen = false;
   homeSuppressed = false;
   updateEmptyHomeVisibility();
   showLoading();
   var qqPlaylistId = String(id || '').indexOf('qq:') === 0 ? String(id).slice(3) : '';
+  var focusShelfPlaylistId = opts.focusShelfPlaylistId || '';
   var r = null;
   try {
     r = qqPlaylistId
@@ -20025,8 +20098,9 @@ async function loadPlaylistIntoQueueById(id, autoplay, title) {
     if (!qqPlaylistId) syncLikeStatusForSongs(playQueue);
     currentIdx = 0;
     safeRenderQueuePanel('playlist-load');
-    safeSwitchPlaylistTab('queue', 'playlist-load');
-    safeShelfRebuild('playlist-load', true);
+    if (opts.switchPanelToQueue !== false) safeSwitchPlaylistTab('queue', 'playlist-load');
+    if (focusShelfPlaylistId) safeShelfRebuildForPlaylist('playlist-load', focusShelfPlaylistId, true);
+    else safeShelfRebuild('playlist-load', true);
     forcePlaybackControlsInteractive();
     if (autoplay) {
       try {
@@ -22829,7 +22903,23 @@ function updateProgressDetailText() {
   if (updatePreviewState.etaSeconds > 0 && updatePreviewState.etaSeconds < 3600) parts.push('约 ' + updatePreviewState.etaSeconds + ' 秒');
   return parts.join(' · ');
 }
+function suppressUpdatePreviewForMaintenance() {
+  updatePreviewState.preview = false;
+  updatePreviewState.updateAvailable = false;
+  updatePreviewState.visible = false;
+  var entry = document.getElementById('update-entry');
+  if (!entry) return;
+  entry.classList.remove('available', 'downloading', 'ready');
+  if (window.gsap) {
+    window.gsap.killTweensOf(entry);
+    window.gsap.set(entry, { autoAlpha: 0, y: 0, clearProps: 'boxShadow,filter,scale' });
+  }
+}
 function initUpdatePreview() {
+  if (UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE) {
+    suppressUpdatePreviewForMaintenance();
+    return;
+  }
   renderUpdatePreviewPanel();
   setUpdatePreviewVisible(true);
   checkLatestUpdate();
@@ -22855,6 +22945,10 @@ function setUpdatePreviewVisible(visible) {
 }
 
 async function checkLatestUpdate() {
+  if (UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE) {
+    suppressUpdatePreviewForMaintenance();
+    return;
+  }
   try {
     var data = await apiJson('/api/update/latest?t=' + Date.now());
     applyLatestUpdateInfo(data);
@@ -22868,6 +22962,10 @@ async function checkLatestUpdate() {
 }
 
 function applyLatestUpdateInfo(data) {
+  if (UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE) {
+    suppressUpdatePreviewForMaintenance();
+    return;
+  }
   data = data || {};
   var release = data.release || {};
   updatePreviewState.currentVersion = data.currentVersion || updatePreviewState.currentVersion;
@@ -22988,6 +23086,10 @@ function updateUpdatePreviewProgress(progress) {
 }
 
 function openUpdatePanel() {
+  if (UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE) {
+    suppressUpdatePreviewForMaintenance();
+    return;
+  }
   var mask = document.getElementById('update-modal');
   var entry = document.getElementById('update-entry');
   if (!mask) return;
