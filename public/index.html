@@ -2204,6 +2204,9 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <button data-shelf-presence="auto" class="active">自动隐藏</button>
         <button data-shelf-presence="always">常驻</button>
       </div>
+      <div class="fx-toggle-grid">
+        <div class="fx-toggle" id="t-shelfViewportLock" onclick="toggleFx('shelfViewportLock')" title="开启后粒子/歌词缩放和 3D 视角移动不会带动歌单架与唱片架"><span>歌单架独立视图</span><span class="dot"></span></div>
+      </div>
       <div class="fx-section-label">歌单架内容</div>
       <div class="fx-toggle-grid">
         <div class="fx-toggle" id="t-shelfShowPodcasts" onclick="toggleFx('shelfShowPodcasts')" title="关闭后 3D 歌单架不显示播客收藏"><span>显示播客歌单</span><span class="dot"></span></div>
@@ -2220,11 +2223,11 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <div class="fx-color-row-label">歌单架颜色<small id="shelf-accent-value">#F4D28A</small></div>
         <button class="fx-mini-btn ghost" type="button" onclick="resetShelfAccentColor()">默认</button>
       </div>
-      <div class="fx-slider"><label>歌单架大小</label><input id="fx-shelfsize" type="range" min="0.65" max="1.45" step="0.01"><output></output></div>
-      <div class="fx-slider"><label>左右位置</label><input id="fx-shelfx" type="range" min="-1.2" max="1.2" step="0.01"><output></output></div>
-      <div class="fx-slider"><label>上下位置</label><input id="fx-shelfy" type="range" min="-0.9" max="0.9" step="0.01"><output></output></div>
-      <div class="fx-slider"><label>前后景深</label><input id="fx-shelfz" type="range" min="-0.9" max="0.9" step="0.01"><output></output></div>
-      <div class="fx-slider"><label>侧向角度</label><input id="fx-shelfangle" type="range" min="-30" max="30" step="1"><output></output></div>
+      <div class="fx-slider"><label>歌单架大小</label><input id="fx-shelfsize" type="range" min="0.45" max="1.9" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>左右位置</label><input id="fx-shelfx" type="range" min="-2.4" max="2.4" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>上下位置</label><input id="fx-shelfy" type="range" min="-1.8" max="1.8" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>前后景深</label><input id="fx-shelfz" type="range" min="-1.8" max="1.8" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>侧向角度</label><input id="fx-shelfangle" type="range" min="-50" max="50" step="1"><output></output></div>
       <div class="fx-slider"><label>整体透明度</label><input id="fx-shelfopacity" type="range" min="0.25" max="1" step="0.01"><output></output></div>
       <div class="fx-slider"><label>背景透明度</label><input id="fx-shelfbgalpha" type="range" min="0.25" max="0.98" step="0.01"><output></output></div>
 
@@ -3300,6 +3303,7 @@ var fxDefaults = {
   shelfShowPodcasts: false,
   shelfMergeCollections: false,
   shelfDetailView: 'list',
+  shelfViewportLock: true,
   shelfSize: 1,
   shelfOffsetX: 0,
   shelfOffsetY: 0,
@@ -3387,6 +3391,7 @@ var PACKAGED_DEFAULT_FX_SNAPSHOT = Object.freeze({
   shelfShowPodcasts: false,
   shelfMergeCollections: false,
   shelfDetailView: 'list',
+  shelfViewportLock: true,
   shelfSize: 1,
   shelfOffsetX: 0,
   shelfOffsetY: 0,
@@ -5313,12 +5318,21 @@ function setControlsHidden(hidden) {
   updateControlsChromeState();
 }
 
-function isBottomControlsSuppressedForShelf() {
+function bottomControlsShelfState() {
   var shelfContentOpen = false;
   try {
     shelfContentOpen = !!(typeof shelfManager !== 'undefined' && shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent());
   } catch (e) {}
-  return !!(shelfPinnedOpen || shelfContentOpen || (controlsShelfSuppressUntil && performance.now() < controlsShelfSuppressUntil));
+  return {
+    homeControlsLocked: document.body.classList.contains('home-controls-locked'),
+    shelfPinnedOpen: !!shelfPinnedOpen,
+    shelfContentOpen: !!shelfContentOpen,
+    suppressActive: !!(controlsShelfSuppressUntil && performance.now() < controlsShelfSuppressUntil)
+  };
+}
+
+function isBottomControlsSuppressedForShelf(source) {
+  return !canRevealBottomControlsForShelf(source || 'auto', bottomControlsShelfState());
 }
 
 function suppressBottomControlsForShelf(duration) {
@@ -5347,10 +5361,12 @@ function scheduleControlsHide(delay) {
   }, delay == null ? 480 : delay);
 }
 
-function revealBottomControls(delay) {
+function revealBottomControls(delay, source) {
   if (document.body.classList.contains('home-controls-locked')) return;
   var bar = document.getElementById('bottom-bar');
-  if (isBottomControlsSuppressedForShelf()) return;
+  source = source || 'auto';
+  if (isBottomControlsSuppressedForShelf(source)) return;
+  if (source === 'handle' || source === 'force') controlsShelfSuppressUntil = 0;
   if (bar) bar.classList.add('visible');
   wakeBottomHandle();
   setControlsHidden(false);
@@ -5402,8 +5418,7 @@ function forcePlaybackControlsInteractive() {
 function toggleBottomControlsFromHandle() {
   var bar = document.getElementById('bottom-bar');
   if (!bar || document.body.classList.contains('home-controls-locked')) return;
-  if (isBottomControlsSuppressedForShelf()) return;
-  revealBottomControls(900);
+  revealBottomControls(900, 'handle');
 }
 
 function updateControlsAutoHideFromPointer(x, y) {
@@ -5483,7 +5498,7 @@ function applyControlsAutoHidePreference() {
   if (handle) {
     handle.addEventListener('mouseenter', function(){
       controlsHovering = true;
-      revealBottomControls(900);
+      revealBottomControls(900, 'handle');
     });
     handle.addEventListener('mouseleave', leaveControls);
     handle.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); toggleBottomControlsFromHandle(); });
@@ -5559,7 +5574,7 @@ var particlePointerLocalHit = new THREE.Vector3();
 var particlePointerQuat = new THREE.Quaternion();
 var particlePointerFrame = { dirty:false, ndcX:0, ndcY:0 };
 var CLICK_THRESHOLD = 6;  // 像素, 拖动 > 6px 视为 drag
-var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
+var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
 
 function isPointerOverUi(e) {
   if (!e) return false;
@@ -5617,6 +5632,7 @@ function updateParticlePointerFrame() {
 function beginParticlePointerDrag(e) {
   if (e.button === 2) return;
   if (isPointerOverUi(e)) return;
+  if (isPointerOverRecordShelfContent(e)) return;
   markRenderInteraction('canvas-drag', 1200);
   idleGuidePointerDown(e);
   orbit.rotating = true; orbit.last.x = e.clientX; orbit.last.y = e.clientY;
@@ -5675,6 +5691,12 @@ function recordCanvasPointerMove(e) {
 function handleCanvasPointerMove(e) {
   updateControlsAutoHideFromPointer(e.clientX, e.clientY);
   idleGuidePointerMove(e);
+  if (!orbit.rotating && isPointerOverRecordShelfContent(e)) {
+    particlePointerFrame.dirty = false;
+    mouseWorld.set(-999, -999, 0);
+    mouseActive = false;
+    return;
+  }
   if (freeCamera && freeCamera.active) {
     markRenderInteraction('free-camera', 900);
     var mdx = e.movementX || 0;
@@ -7636,7 +7658,7 @@ function readSavedLyricLayout() {
     var savedShelfCameraMode = normalizeShelfCameraMode(raw.shelfCameraMode || fxDefaults.shelfCameraMode);
     var savedShelfAngleManual = raw.shelfAngleYManual === true;
     var savedShelfAngle = savedShelfAngleManual
-      ? clampRange(raw.shelfAngleY == null ? shelfDefaultAngleForCameraMode(savedShelfCameraMode) : Number(raw.shelfAngleY), -30, 30)
+      ? shelfControlValue('shelfAngleY', raw.shelfAngleY, shelfDefaultAngleForCameraMode(savedShelfCameraMode))
       : shelfDefaultAngleForCameraMode(savedShelfCameraMode);
     return {
       preset: savedPreset,
@@ -7707,10 +7729,11 @@ function readSavedLyricLayout() {
       shelfShowPodcasts: raw.shelfShowPodcasts !== false,
       shelfMergeCollections: raw.shelfMergeCollections === true,
       shelfDetailView: normalizeShelfDetailView(raw.shelfDetailView || fxDefaults.shelfDetailView),
-      shelfSize: clampRange(raw.shelfSize == null ? fxDefaults.shelfSize : Number(raw.shelfSize), 0.65, 1.45),
-      shelfOffsetX: clampRange(raw.shelfOffsetX == null ? fxDefaults.shelfOffsetX : Number(raw.shelfOffsetX), -1.2, 1.2),
-      shelfOffsetY: clampRange(raw.shelfOffsetY == null ? fxDefaults.shelfOffsetY : Number(raw.shelfOffsetY), -0.9, 0.9),
-      shelfOffsetZ: clampRange(raw.shelfOffsetZ == null ? fxDefaults.shelfOffsetZ : Number(raw.shelfOffsetZ), -0.9, 0.9),
+      shelfViewportLock: normalizeShelfViewportLock(raw.shelfViewportLock),
+      shelfSize: shelfControlValue('shelfSize', raw.shelfSize, fxDefaults.shelfSize),
+      shelfOffsetX: shelfControlValue('shelfOffsetX', raw.shelfOffsetX, fxDefaults.shelfOffsetX),
+      shelfOffsetY: shelfControlValue('shelfOffsetY', raw.shelfOffsetY, fxDefaults.shelfOffsetY),
+      shelfOffsetZ: shelfControlValue('shelfOffsetZ', raw.shelfOffsetZ, fxDefaults.shelfOffsetZ),
       shelfAngleY: savedShelfAngle,
       shelfAngleYManual: savedShelfAngleManual,
       shelfOpacity: clampRange(raw.shelfOpacity == null ? fxDefaults.shelfOpacity : Number(raw.shelfOpacity), 0.25, 1),
@@ -7798,11 +7821,12 @@ function saveLyricLayout() {
       shelfShowPodcasts: fx.shelfShowPodcasts !== false,
       shelfMergeCollections: fx.shelfMergeCollections === true,
       shelfDetailView: normalizeShelfDetailView(fx.shelfDetailView || fxDefaults.shelfDetailView),
-      shelfSize: clampRange(fx.shelfSize == null ? fxDefaults.shelfSize : Number(fx.shelfSize), 0.65, 1.45),
-      shelfOffsetX: clampRange(fx.shelfOffsetX == null ? fxDefaults.shelfOffsetX : Number(fx.shelfOffsetX), -1.2, 1.2),
-      shelfOffsetY: clampRange(fx.shelfOffsetY == null ? fxDefaults.shelfOffsetY : Number(fx.shelfOffsetY), -0.9, 0.9),
-      shelfOffsetZ: clampRange(fx.shelfOffsetZ == null ? fxDefaults.shelfOffsetZ : Number(fx.shelfOffsetZ), -0.9, 0.9),
-      shelfAngleY: clampRange(fx.shelfAngleY == null ? fxDefaults.shelfAngleY : Number(fx.shelfAngleY), -30, 30),
+      shelfViewportLock: normalizeShelfViewportLock(fx.shelfViewportLock),
+      shelfSize: shelfControlValue('shelfSize', fx.shelfSize, fxDefaults.shelfSize),
+      shelfOffsetX: shelfControlValue('shelfOffsetX', fx.shelfOffsetX, fxDefaults.shelfOffsetX),
+      shelfOffsetY: shelfControlValue('shelfOffsetY', fx.shelfOffsetY, fxDefaults.shelfOffsetY),
+      shelfOffsetZ: shelfControlValue('shelfOffsetZ', fx.shelfOffsetZ, fxDefaults.shelfOffsetZ),
+      shelfAngleY: shelfControlValue('shelfAngleY', fx.shelfAngleY, fxDefaults.shelfAngleY),
       shelfAngleYManual: fx.shelfAngleYManual === true,
       shelfOpacity: clampRange(fx.shelfOpacity == null ? fxDefaults.shelfOpacity : Number(fx.shelfOpacity), 0.25, 1),
       shelfBgOpacity: clampRange(fx.shelfBgOpacity == null ? fxDefaults.shelfBgOpacity : Number(fx.shelfBgOpacity), 0.25, 0.98),
@@ -7858,6 +7882,171 @@ function recordToolbarLayout(orientation) {
   if (helper && typeof helper.recordToolbarLayout === 'function') return helper.recordToolbarLayout(orientation);
   return orientation === 'stage' ? 'horizontal' : 'vertical';
 }
+function recordCardLayout() {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.recordCardLayout === 'function') return helper.recordCardLayout();
+  return {
+    canvasW: 620,
+    canvasH: 760,
+    worldW: 0.98,
+    worldH: 1.2,
+    coverX: 0,
+    coverY: 0,
+    coverSize: 620,
+    textX: 34,
+    titleY: 676,
+    artistY: 718,
+  };
+}
+function normalizeShelfViewportLock(value) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.normalizeShelfViewportLock === 'function') return helper.normalizeShelfViewportLock(value);
+  return !(value === false || value === 0 || value === '0' || value === 'false' || value === 'off');
+}
+function shelfMotionBinding(viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfMotionBinding === 'function') return helper.shelfMotionBinding(viewportLockEnabled);
+  return normalizeShelfViewportLock(viewportLockEnabled) ? 'locked' : 'dynamic';
+}
+function shelfMotionLocked() {
+  return shelfMotionBinding(fx && fx.shelfViewportLock) === 'locked';
+}
+function playlistShelfCardAction(itemType, isCenter) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.playlistShelfCardAction === 'function') return helper.playlistShelfCardAction(itemType, isCenter);
+  if (!isCenter) return 'scroll';
+  if (itemType === 'playlist' || itemType === 'podcastCollection') return 'openContent';
+  if (itemType === 'queue') return 'playQueue';
+  return 'none';
+}
+function recordShelfCardAction(isCenter, playable) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.recordShelfCardAction === 'function') return helper.recordShelfCardAction(isCenter, playable);
+  if (!isCenter) return 'scroll';
+  return playable ? 'play' : 'none';
+}
+function stageShelfControlsLift(controlsVisible, viewportHeight, viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.stageShelfControlsLift === 'function') return helper.stageShelfControlsLift(controlsVisible, viewportHeight, viewportLockEnabled);
+  if (!controlsVisible && viewportLockEnabled !== true) return 0;
+  var h = Number(viewportHeight);
+  if (!isFinite(h)) h = 1080;
+  if (h <= 700) return 0.34;
+  if (h <= 860) return 0.42;
+  return 0.5;
+}
+function isShelfViewportProjectionSafe(x, y, z) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.isShelfViewportProjectionSafe === 'function') return helper.isShelfViewportProjectionSafe(x, y, z);
+  var nx = Number(x);
+  var ny = Number(y);
+  var nz = Number(z);
+  if (!isFinite(nx) || !isFinite(ny) || !isFinite(nz)) return false;
+  return Math.abs(nx) <= 1.75 && Math.abs(ny) <= 1.75 && nz >= -1.2 && nz <= 1.2;
+}
+function shelfControlBounds(key) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfControlBounds === 'function') return helper.shelfControlBounds(key);
+  switch (key) {
+    case 'shelfSize': return { min: 0.45, max: 1.9 };
+    case 'shelfOffsetX': return { min: -2.4, max: 2.4 };
+    case 'shelfOffsetY': return { min: -1.8, max: 1.8 };
+    case 'shelfOffsetZ': return { min: -1.8, max: 1.8 };
+    case 'shelfAngleY': return { min: -50, max: 50 };
+    default: return { min: 0, max: 1 };
+  }
+}
+function shelfControlValue(key, value, fallback) {
+  var bounds = shelfControlBounds(key);
+  var n = value == null ? fallback : Number(value);
+  if (!isFinite(n)) n = fallback;
+  return clampRange(n, bounds.min, bounds.max);
+}
+function shelfControlNumber(key, fallback) {
+  return shelfControlValue(key, fx && fx[key], fallback);
+}
+function shelfViewportScaleFactor(currentDistance, currentFov, anchorDistance, anchorFov) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfViewportScaleFactor === 'function') return helper.shelfViewportScaleFactor(currentDistance, currentFov, anchorDistance, anchorFov);
+  var cd = Math.abs(Number(currentDistance));
+  var ad = Math.abs(Number(anchorDistance));
+  var cf = Number(currentFov);
+  var af = Number(anchorFov);
+  if (!isFinite(cd) || !isFinite(ad) || !isFinite(cf) || !isFinite(af) || cd <= 0 || ad <= 0) return 1;
+  var currentSpan = cd * Math.tan(cf * Math.PI / 360);
+  var anchorSpan = ad * Math.tan(af * Math.PI / 360);
+  if (!isFinite(currentSpan) || !isFinite(anchorSpan) || anchorSpan <= 0) return 1;
+  return currentSpan / anchorSpan;
+}
+function shelfParallaxValue(value, viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfParallaxValue === 'function') return helper.shelfParallaxValue(value, viewportLockEnabled);
+  if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
+  var n = Number(value);
+  return isFinite(n) ? n : 0;
+}
+function shouldContentShelfHandleWheel(hitState) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldContentShelfHandleWheel === 'function') return helper.shouldContentShelfHandleWheel(hitState);
+  hitState = hitState || {};
+  return !!(hitState.rowHit || hitState.rowScreenHit || hitState.chromeHit || hitState.chromeScreenHit);
+}
+function shouldCaptureShelfViewportAnchor(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldCaptureShelfViewportAnchor === 'function') return helper.shouldCaptureShelfViewportAnchor(state);
+  state = state || {};
+  if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
+  if (state.splashActive || state.splashRevealing || state.warmupActive) return false;
+  if (state.cameraReady === false) return false;
+  var now = Number(state.now);
+  var warmupUntil = Number(state.warmupUntil);
+  if (isFinite(now) && isFinite(warmupUntil) && now < warmupUntil) return false;
+  return true;
+}
+function shouldSnapShelfControlsLift(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldSnapShelfControlsLift === 'function') return helper.shouldSnapShelfControlsLift(state);
+  state = state || {};
+  return normalizeShelfViewportLock(state.viewportLockEnabled) && state.snapPending === true;
+}
+function canRevealBottomControlsForShelf(source, state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.canRevealBottomControlsForShelf === 'function') return helper.canRevealBottomControlsForShelf(source, state);
+  state = state || {};
+  if (state.homeControlsLocked) return false;
+  if (source === 'handle' || source === 'force') return true;
+  return !(state.shelfPinnedOpen || state.shelfContentOpen || state.suppressActive);
+}
+function shouldApplyStartupStarfieldPreview(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldApplyStartupStarfieldPreview === 'function') return helper.shouldApplyStartupStarfieldPreview(state);
+  state = state || {};
+  if (state.splashActive && state.ignoreSplash !== true) return false;
+  if (state.immersiveMode || state.playing || state.audioActive) return false;
+  if (state.shelfPinnedOpen || state.shelfContentOpen) return false;
+  if (Number(state.currentIdx) >= 0) return false;
+  if (Number(state.playQueueLength) > 0) return false;
+  var shelfMode = String(state.shelfMode || 'off');
+  if (shelfMode === 'stage') return false;
+  if (shelfMode === 'side' && state.shelfAlwaysVisible !== false) return false;
+  return true;
+}
+function shouldResetShelfAnchorForPlaybackVisual(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldResetShelfAnchorForPlaybackVisual === 'function') return helper.shouldResetShelfAnchorForPlaybackVisual(state);
+  state = state || {};
+  if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+  if (state.presetChanged === true) return true;
+  return !!(state.startupPreviewActive || state.homeWallpaperPreviewActive || state.homeVisualPresetActive);
+}
+function shouldResetShelfAnchorForContentClose(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldResetShelfAnchorForContentClose === 'function') return helper.shouldResetShelfAnchorForContentClose(state);
+  state = state || {};
+  if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+  if (state.reason === 'shelf-mode-reset') return true;
+  return state.hasReusableAnchor !== true;
+}
 function normalizeShelfCameraMode(value) {
   return String(value || '') === 'static' ? 'static' : 'dynamic';
 }
@@ -7871,7 +8060,7 @@ function applyShelfCameraDefaultAngle(force) {
     fx.shelfAngleYManual = false;
     fx.shelfAngleY = shelfDefaultAngleForCameraMode(fx.shelfCameraMode);
   } else {
-    fx.shelfAngleY = Math.round(clampRange(Number(fx.shelfAngleY) || 0, -30, 30));
+    fx.shelfAngleY = Math.round(shelfControlNumber('shelfAngleY', 0));
   }
 }
 function normalizeShelfPresence(value) {
@@ -7884,13 +8073,13 @@ function normalizedShelfNumber(key, fallback, min, max) {
 }
 function shelfSettings() {
   var angleDeg = fx && fx.shelfAngleYManual === true
-    ? normalizedShelfNumber('shelfAngleY', shelfDefaultAngleForCameraMode(fx.shelfCameraMode), -30, 30)
+    ? shelfControlNumber('shelfAngleY', shelfDefaultAngleForCameraMode(fx.shelfCameraMode))
     : shelfDefaultAngleForCameraMode(fx && fx.shelfCameraMode);
   return {
-    size: normalizedShelfNumber('shelfSize', fxDefaults.shelfSize, 0.65, 1.45),
-    x: normalizedShelfNumber('shelfOffsetX', fxDefaults.shelfOffsetX, -1.2, 1.2),
-    y: normalizedShelfNumber('shelfOffsetY', fxDefaults.shelfOffsetY, -0.9, 0.9),
-    z: normalizedShelfNumber('shelfOffsetZ', fxDefaults.shelfOffsetZ, -0.9, 0.9),
+    size: shelfControlNumber('shelfSize', fxDefaults.shelfSize),
+    x: shelfControlNumber('shelfOffsetX', fxDefaults.shelfOffsetX),
+    y: shelfControlNumber('shelfOffsetY', fxDefaults.shelfOffsetY),
+    z: shelfControlNumber('shelfOffsetZ', fxDefaults.shelfOffsetZ),
     angle: angleDeg * Math.PI / 180,
     opacity: normalizedShelfNumber('shelfOpacity', fxDefaults.shelfOpacity, 0.25, 1),
     bgOpacity: normalizedShelfNumber('shelfBgOpacity', fxDefaults.shelfBgOpacity, 0.25, 0.98),
@@ -12934,8 +13123,116 @@ var shelfManager = null;
 var shelfOpenAnimAt = -10;
 var shelfHoverCue = { target: 0, value: 0, x: 0, y: 0, lastAt: 0, enteredAt: 0, zoneActive: false, guide: false };
 var shelfVisibility = 0;  // 0..1, 侧栏自动隐藏的整体透明度系数
+var shelfStageControlsLiftValue = 0;
+var shelfViewportAnchor = null;
+var shelfViewportAnchorKey = '';
+var shelfViewportNdc = new THREE.Vector3();
+var shelfViewportTarget = new THREE.Vector3();
+var shelfViewportAnchorView = new THREE.Vector3();
+var shelfViewportCurrentView = new THREE.Vector3();
+var shelfViewportScaleVec = new THREE.Vector3();
+var shelfViewportWarmupUntil = 0;
+var shelfStageControlsLiftSnapPending = true;
 function isPortraitShelfViewport() {
   return innerHeight > innerWidth * 1.08;
+}
+function shelfViewportLockActive() {
+  return normalizeShelfViewportLock(fx && fx.shelfViewportLock);
+}
+function resetShelfViewportAnchor(reason, warmupMs) {
+  shelfViewportAnchor = null;
+  shelfViewportAnchorKey = '';
+  var duration = warmupMs == null ? 260 : Number(warmupMs);
+  if (isFinite(duration) && duration > 0 && typeof performance !== 'undefined') {
+    shelfViewportWarmupUntil = Math.max(shelfViewportWarmupUntil || 0, performance.now() + duration);
+  }
+  shelfStageControlsLiftSnapPending = true;
+}
+function shelfViewportAnchorSignature(kind) {
+  var mode = shelfManager && shelfManager.getMode ? shelfManager.getMode() : ((fx && fx.shelf) || fxDefaults.shelf);
+  return [
+    'shelf',
+    mode,
+    innerWidth + 'x' + innerHeight,
+    (fx && fx.shelfCameraMode) || fxDefaults.shelfCameraMode,
+    (fx && fx.preset) || 0
+  ].join(':');
+}
+function captureShelfViewportAnchor(key) {
+  if (!camera) return null;
+  camera.updateMatrixWorld(true);
+  camera.updateProjectionMatrix();
+  shelfViewportAnchor = {
+    key: key,
+    fov: camera.fov || BASE_FOV,
+    matrixWorldInverse: camera.matrixWorldInverse.clone(),
+    projectionViewMatrix: new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  };
+  shelfViewportAnchorKey = key;
+  return shelfViewportAnchor;
+}
+function shelfViewportCaptureState() {
+  var now = typeof performance !== 'undefined' && performance.now ? performance.now() : 0;
+  var body = document.body && document.body.classList;
+  var cameraReady = !!(camera && camera.position && camera.projectionMatrix && camera.matrixWorldInverse
+    && isFinite(camera.position.x) && isFinite(camera.position.y) && isFinite(camera.position.z)
+    && isFinite(camera.fov || BASE_FOV));
+  return {
+    viewportLockEnabled: shelfViewportLockActive(),
+    splashActive: !!(body && body.contains('splash-active')),
+    splashRevealing: !!(body && body.contains('splash-revealing')),
+    warmupActive: !!(shelfViewportWarmupUntil && now < shelfViewportWarmupUntil),
+    warmupUntil: shelfViewportWarmupUntil || 0,
+    cameraReady: cameraReady,
+    now: now
+  };
+}
+function ensureShelfViewportAnchor(kind) {
+  if (!shelfViewportLockActive()) {
+    resetShelfViewportAnchor('disabled', 0);
+    return null;
+  }
+  if (!shouldCaptureShelfViewportAnchor(shelfViewportCaptureState())) return null;
+  var key = shelfViewportAnchorSignature(kind);
+  if (!shelfViewportAnchor || shelfViewportAnchorKey !== key) return captureShelfViewportAnchor(key);
+  return shelfViewportAnchor;
+}
+function applyShelfViewportLockToMesh(mesh, kind) {
+  if (!mesh || !camera || !shelfViewportLockActive()) return;
+  var anchor = ensureShelfViewportAnchor(kind);
+  if (!anchor) return;
+  camera.updateMatrixWorld(true);
+  var baseScale = shelfViewportScaleVec.copy(mesh.scale);
+  shelfViewportNdc.copy(mesh.position).applyMatrix4(anchor.projectionViewMatrix);
+  if (!isShelfViewportProjectionSafe(shelfViewportNdc.x, shelfViewportNdc.y, shelfViewportNdc.z)) {
+    resetShelfViewportAnchor('unsafe-projection', 0);
+    return;
+  }
+  shelfViewportTarget.set(shelfViewportNdc.x, shelfViewportNdc.y, shelfViewportNdc.z).unproject(camera);
+  shelfViewportAnchorView.copy(mesh.position).applyMatrix4(anchor.matrixWorldInverse);
+  shelfViewportCurrentView.copy(shelfViewportTarget).applyMatrix4(camera.matrixWorldInverse);
+  var scaleFix = shelfViewportScaleFactor(
+    Math.abs(shelfViewportCurrentView.z),
+    camera.fov || BASE_FOV,
+    Math.abs(shelfViewportAnchorView.z),
+    anchor.fov || BASE_FOV
+  );
+  scaleFix = clampRange(scaleFix, 0.42, 2.80);
+  mesh.position.copy(shelfViewportTarget);
+  mesh.scale.copy(baseScale).multiplyScalar(scaleFix);
+}
+function updateShelfStageControlsLift(dt) {
+  var controlsVisible = document.body.classList.contains('controls-visible');
+  var target = stageShelfControlsLift(controlsVisible, innerHeight, shelfViewportLockActive());
+  if (shouldSnapShelfControlsLift({ viewportLockEnabled: shelfViewportLockActive(), snapPending: shelfStageControlsLiftSnapPending })) {
+    shelfStageControlsLiftValue = target;
+    shelfStageControlsLiftSnapPending = false;
+    return;
+  }
+  shelfStageControlsLiftSnapPending = false;
+  var ease = target > shelfStageControlsLiftValue ? 0.18 : 0.14;
+  shelfStageControlsLiftValue += (target - shelfStageControlsLiftValue) * Math.min(1, ease * Math.max(1, dt * 60));
+  if (Math.abs(shelfStageControlsLiftValue - target) < 0.002) shelfStageControlsLiftValue = target;
 }
 function shelfLayoutProfile() {
   var portrait = isPortraitShelfViewport();
@@ -12959,7 +13256,7 @@ function shelfLayoutProfile() {
     sideRotX: skullShelf ? (portrait ? 0.018 : 0.030) : (portrait ? 0.022 : 0.042),
     stageX: shelfCtl.x,
     stageXStep: portrait ? 0.92 : (narrow ? 1.22 : 1.55),
-    stageY: (portrait ? -2.46 : -2.20) + shelfCtl.y,
+    stageY: (portrait ? -2.46 : -2.20) + shelfCtl.y + shelfStageControlsLiftValue,
     stageZ: (portrait ? 0.84 : 1.0) + shelfCtl.z,
     stageScale: (portrait ? 0.72 : (narrow ? 0.86 : 1)) * shelfCtl.size,
     detail: {
@@ -13358,27 +13655,7 @@ function makeShelfManager() {
 
     if (card.isCenter) {
       var actionY = H - pad - 78;
-      if (item.type === 'playlist') {
-        makeRoundRect(ctx, tx, actionY, 138, 38, 18);
-        var playGrad = ctx.createLinearGradient(tx, actionY, tx + 138, actionY + 38);
-        playGrad.addColorStop(0, 'rgba(255,255,255,0.88)');
-        playGrad.addColorStop(0.55, shelfAccentRgba(0.94));
-        playGrad.addColorStop(1, shelfAccentRgba(0.58));
-        ctx.fillStyle = playGrad; ctx.fill();
-        ctx.strokeStyle = shelfAccentRgba(0.44);
-        ctx.lineWidth = 1.1; ctx.stroke();
-        ctx.font = '800 14px Inter, "Microsoft YaHei", Arial';
-        ctx.fillStyle = readableInkForHex(shelfAccentHex());
-        ctx.fillText('▶ 播放歌单', tx + 25, actionY + 24);
-
-        makeRoundRect(ctx, tx + 150, actionY, 104, 38, 18);
-        ctx.fillStyle = 'rgba(255,255,255,0.055)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-        ctx.lineWidth = 1.1; ctx.stroke();
-        ctx.font = '700 14px Inter, "Microsoft YaHei", Arial';
-        ctx.fillStyle = 'rgba(255,255,255,0.78)';
-        ctx.fillText('详情', tx + 184, actionY + 24);
-      } else if (item.type === 'queue') {
+      if (item.type === 'queue') {
         ctx.font = '600 14px Inter, "Microsoft YaHei", Arial';
         ctx.fillStyle = shelfAccentRgba(0.84);
         ctx.fillText('点击播放', tx, actionY + 25);
@@ -13545,8 +13822,9 @@ function makeShelfManager() {
     if (absD > SHELF_VISIBLE_RADIUS + 0.5) { card.mesh.visible = false; return; }
     card.mesh.visible = true;
     card.mesh.renderOrder = 60 + Math.round((SHELF_VISIBLE_RADIUS + 1 - Math.min(absD, SHELF_VISIBLE_RADIUS + 1)) * 10);
-    var parX = pointerParallax.x || 0;
-    var parY = pointerParallax.y || 0;
+    var motionLocked = shelfMotionLocked();
+    var parX = shelfParallaxValue(pointerParallax.x, motionLocked);
+    var parY = shelfParallaxValue(pointerParallax.y, motionLocked);
     var parWeight = Math.max(0, 1 - absD * 0.16);
     var pulse = card.fxPulse || 0;
     var layout = shelfLayoutProfile();
@@ -13583,7 +13861,7 @@ function makeShelfManager() {
       var paneEase = 1 - paneRaw * paneRaw * (3 - 2 * paneRaw);
       var wallpaperShelfPose = shouldUseWallpaperSafeShelfCamera();
       var skullShelfPose = shouldUseSkullSafeShelfCamera();
-      var safeShelfPose = wallpaperShelfPose || skullShelfPose;
+      var safeShelfPose = !motionLocked && (wallpaperShelfPose || skullShelfPose);
       var px = layout.sideX + absD * layout.sideXStep - (detailOpenSide ? layout.sideDetailShift : 0) + entry * layout.sideEntryX;
       var py = (layout.sideY || 0) - delta * layout.sideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18);
       var pz = layout.sideZ - absD * layout.sideZStep - (1 - reveal) * 0.20;
@@ -13601,18 +13879,18 @@ function makeShelfManager() {
         pz += lift * (skullShelfPose ? 0.080 : 0.220);
       }
       var scale = (absD < 0.5 ? 1.12 : Math.max(0.55, 1.04 - absD * 0.14)) * (0.88 + reveal * 0.12) * (1 + pulse * 0.056 + breathPulse * 0.026 + lift * (skullShelfPose ? 0.045 : 0.075)) * layout.sideScale;
-      if (wallpaperShelfPose) scale *= 1.22;
-      else if (skullShelfPose) scale *= 1.04;
+      if (!motionLocked && wallpaperShelfPose) scale *= 1.22;
+      else if (!motionLocked && skullShelfPose) scale *= 1.04;
       card.mesh.position.set(px, py, pz);
-      if (skullShelfPose && camera) {
+      if (!motionLocked && skullShelfPose && camera && !shelfViewportLockActive()) {
         card.mesh.quaternion.copy(camera.quaternion);
         card.mesh.rotateX(layout.sideRotX - delta * 0.008 - parY * 0.004 * parWeight);
         card.mesh.rotateY(layout.sideRotY + (1 - reveal) * 0.012 + parX * 0.006 * parWeight);
       } else {
-        var safeRotY = wallpaperShelfPose ? 0.12 : layout.sideRotY;
-        var safeEntryRotY = wallpaperShelfPose ? 0.05 : 0.16;
+        var safeRotY = (!motionLocked && wallpaperShelfPose) ? 0.12 : layout.sideRotY;
+        var safeEntryRotY = (!motionLocked && wallpaperShelfPose) ? 0.05 : 0.16;
         card.mesh.rotation.y = (safeShelfPose ? safeRotY : layout.sideRotY) + (1 - reveal) * safeEntryRotY + parX * (safeShelfPose ? 0.014 : 0.038) * parWeight;
-        var safeRotX = wallpaperShelfPose ? 0.020 : layout.sideRotX;
+        var safeRotX = (!motionLocked && wallpaperShelfPose) ? 0.020 : layout.sideRotX;
         card.mesh.rotation.x = -delta * (safeShelfPose ? safeRotX : layout.sideRotX) - parY * (safeShelfPose ? 0.010 : 0.024) * parWeight;
       }
       card.mesh.scale.setScalar(scale);
@@ -13667,6 +13945,7 @@ function makeShelfManager() {
       card.mesh.material.opacity = Math.min(1, opS * (shelfVisibility != null ? shelfVisibility : 1) * (1 - paneEaseS * 0.24) + pulse * 0.10) * shelfLook.opacity;
       setCardCenter(card, absD < 0.5);
     }
+    applyShelfViewportLockToMesh(card.mesh, 'shelf-card');
   }
 
   function setCardCenter(card, isCenter) {
@@ -13676,23 +13955,6 @@ function makeShelfManager() {
     } else {
       card.isCenter = isCenter;
     }
-  }
-
-  function playPlaylistCard(card) {
-    if (!card || !card.mesh || !card.mesh.userData) return false;
-    var action = card.mesh.userData.action;
-    if (!action || action.kind !== 'loadPlaylist' || !action.playlistId) return false;
-    if (String(action.playlistId).indexOf('podcast:') === 0) return false;
-    pulseCard(card, 1.05);
-    if (contentList && contentList.isOpen && contentList.isOpen()) contentList.close();
-    openCardIdx = -1;
-    setShelfPinnedOpen(false, true);
-    if (typeof setFocusZone === 'function') setFocusZone(null, true);
-    loadPlaylistIntoQueueById(action.playlistId, true, action.title || (card.item && card.item.title) || '', {
-      switchPanelToQueue: false,
-      focusShelfPlaylistId: action.playlistId
-    });
-    return true;
   }
 
   function pulseCard(card, amount) {
@@ -13884,6 +14146,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     setMode: function(m) {
       if (m === mode && group) return;
       mode = m;
+      resetShelfViewportAnchor();
       if (m === 'off') {
         if (group) { scene.remove(group); cards.forEach(function(c){ c.texture.dispose(); c.mesh.material.dispose(); c.mesh.geometry.dispose(); }); }
         if (connectorParticles) { scene.remove(connectorParticles); connectorParticles.geometry.dispose(); connectorParticles.material.dispose(); connectorParticles = null; }
@@ -13903,6 +14166,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     getMode: function(){ return mode; },
     update: function(dt) {
       if (!group) return;
+      updateShelfStageControlsLift(dt);
       // PSP 滚动平滑
       centerSmooth += (centerTarget - centerSmooth) * 0.16;
       if (Math.abs(centerSmooth - centerTarget) < 0.001) centerSmooth = centerTarget;
@@ -13925,13 +14189,32 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       group.visible = appRevealed && (mode !== 'side' || shelfVisibility > 0) && (allItems.length > 0 || (contentList && contentList.isOpen()));
       if (connectorParticles) connectorParticles.visible = group.visible && mode === 'stage';
       if (floorMirror) floorMirror.visible = group.visible && mode === 'stage';
+      if (connectorParticles || floorMirror) {
+        var extraLayout = shelfLayoutProfile();
+        if (connectorParticles) {
+          connectorParticles.position.set(extraLayout.stageX || 0, extraLayout.stageY, extraLayout.stageZ - 1.0);
+          connectorParticles.rotation.set(0, 0, 0);
+          connectorParticles.scale.setScalar(1);
+        }
+        if (floorMirror) {
+          floorMirror.position.set(extraLayout.stageX || 0, extraLayout.stageY - 0.65, extraLayout.stageZ - 0.60);
+          floorMirror.rotation.set(-Math.PI / 2, 0, 0);
+          floorMirror.scale.setScalar(1);
+        }
+        if (connectorParticles) applyShelfViewportLockToMesh(connectorParticles, 'shelf-extra');
+        if (floorMirror) applyShelfViewportLockToMesh(floorMirror, 'shelf-extra');
+      }
       if (mode === 'side') {
+        var motionLockedSide = shelfMotionLocked();
         var passiveAlwaysGroup = shelfAlwaysVisible() && !shelfPinnedOpen && !(contentList && contentList.isOpen());
         var liftedCardActive = passiveAlwaysGroup && cards.some(function(c){ return c.selected || (c.floatMix || 0) > 0.025; });
         group.renderOrder = passiveAlwaysGroup && !liftedCardActive ? 30 : 50;
         group.position.set(0, 0, 0);
-        var bindToCover = shelfAlwaysVisible() && particles && particles.rotation && !(contentList && contentList.isOpen());
-        if (bindToCover) {
+        group.scale.setScalar(1);
+        var bindToCover = !motionLockedSide && shelfAlwaysVisible() && particles && particles.rotation && !(contentList && contentList.isOpen());
+        if (motionLockedSide) {
+          group.rotation.set(0, 0, 0);
+        } else if (bindToCover) {
           group.rotation.x += ((particles.rotation.x - py * 0.010) - group.rotation.x) * 0.075;
           group.rotation.y += ((particles.rotation.y + px * 0.018) - group.rotation.y) * 0.075;
           group.rotation.z += (particles.rotation.z - group.rotation.z) * 0.075;
@@ -13941,12 +14224,25 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
           group.rotation.z += (0 - group.rotation.z) * 0.045;
         }
       } else {
+        var motionLockedStage = shelfMotionLocked();
         group.renderOrder = 50;
-        var t = uniforms.uTime.value;
-        group.position.y = Math.sin(t * 0.3) * 0.04;
-        group.position.x = px * 0.10;
-        group.rotation.y = px * 0.025;
-        group.rotation.x = -py * 0.012;
+        if (motionLockedStage) {
+          group.position.set(0, 0, 0);
+          group.rotation.set(0, 0, 0);
+          group.scale.setScalar(1);
+        } else {
+          var t = uniforms.uTime.value;
+          var coverRxStage = particles && particles.rotation ? particles.rotation.x : 0;
+          var coverRyStage = particles && particles.rotation ? particles.rotation.y : 0;
+          var coverRzStage = particles && particles.rotation ? particles.rotation.z : 0;
+          group.position.y = Math.sin(t * 0.3) * 0.04 + coverRxStage * 0.020;
+          group.position.x = px * 0.10 + coverRyStage * 0.030;
+          group.position.z = coverRzStage * 0.030;
+          group.rotation.y = px * 0.025 + coverRyStage * 0.12;
+          group.rotation.x = -py * 0.012 + coverRxStage * 0.10;
+          group.rotation.z = coverRzStage * 0.10;
+          group.scale.setScalar(1);
+        }
       }
       for (var i = 0; i < cards.length; i++) {
         placeCard(cards[i], i, cards.length, mode);
@@ -14003,9 +14299,6 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     getCenterIdx: function() { return Math.round(centerSmooth); },
     getCardAt: function(idx) { return cards.find(function(c){ return c.index === idx; }); },
     getCards: function() { return cards; },
-    playPlaylistAt: function(idx) {
-      return playPlaylistCard(cards.find(function(c){ return c.index === idx; }));
-    },
     clearSelected: function() {
       applySelectedIndex(-1);
     },
@@ -14051,9 +14344,9 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       }
       if (action.kind === 'empty') togglePlaylistPanel(true);
     },
-    closeContent: function() {
+    closeContent: function(reason) {
       openCardIdx = -1;
-      if (contentList) contentList.close();
+      if (contentList) contentList.close(reason);
       var hint = document.getElementById('hint');
       if (hint) hint.classList.toggle('shelf-hidden', shelfPinnedOpen);
       if (typeof setFocusZone === 'function') setFocusZone(shelfPinnedOpen ? 'shelf-side' : null, true);
@@ -14109,7 +14402,7 @@ function scheduleShelfRebuild(reason, asyncCards) {
 function safeShelfCloseContent(reason) {
   if (!shelfManager || typeof shelfManager.closeContent !== 'function') return false;
   try {
-    shelfManager.closeContent();
+    shelfManager.closeContent(reason);
     return true;
   } catch (e) {
     console.warn('[ShelfCloseContent]', reason || 'unknown', e);
@@ -14539,19 +14832,29 @@ function makeContentListManager() {
   function applyRecordShelfGroupPose() {
     if (!group) return;
     var mode = shelfManager && shelfManager.getMode ? shelfManager.getMode() : ((fx && fx.shelf) || fxDefaults.shelf);
-    var parX = pointerParallax.x || 0;
-    var parY = pointerParallax.y || 0;
+    var locked = shelfMotionLocked();
+    var parX = shelfParallaxValue(pointerParallax.x, locked);
+    var parY = shelfParallaxValue(pointerParallax.y, locked);
+    if (locked) {
+      group.position.set(0, 0, 0);
+      group.rotation.set(0, 0, 0);
+      group.scale.setScalar(1);
+      return;
+    }
+    var coverRx = particles && particles.rotation ? particles.rotation.x : 0;
+    var coverRy = particles && particles.rotation ? particles.rotation.y : 0;
+    var coverRz = particles && particles.rotation ? particles.rotation.z : 0;
     if (mode === 'stage') {
       var t = uniforms.uTime.value || 0;
-      group.position.set(parX * 0.10, Math.sin(t * 0.3) * 0.04, 0);
-      group.rotation.y = parX * 0.025;
-      group.rotation.x = -parY * 0.012;
-      group.rotation.z = 0;
+      group.position.set(parX * 0.10 + coverRy * 0.030, Math.sin(t * 0.3) * 0.04 + coverRx * 0.020, coverRz * 0.030);
+      group.rotation.y = parX * 0.025 + coverRy * 0.12;
+      group.rotation.x = -parY * 0.012 + coverRx * 0.10;
+      group.rotation.z = coverRz * 0.10;
     } else {
-      group.position.set(0, 0, 0);
-      group.rotation.y = parX * 0.018;
-      group.rotation.x = -parY * 0.010;
-      group.rotation.z = 0;
+      group.position.set(0, coverRx * 0.018, coverRz * 0.020);
+      group.rotation.y = coverRy * 0.20 + parX * 0.018;
+      group.rotation.x = coverRx * 0.16 - parY * 0.010;
+      group.rotation.z = coverRz * 0.14;
     }
     group.scale.setScalar(1);
   }
@@ -14577,16 +14880,18 @@ function makeContentListManager() {
       recordToolbar.mesh.scale.setScalar((layout.sideScale || 1) * 0.96);
     }
     recordToolbar.mesh.material.opacity = Math.min(0.94, pr * shelfLook.opacity);
+    applyShelfViewportLockToMesh(recordToolbar.mesh, 'record-toolbar');
   }
 
   function drawRecordRow(row, song, isCenter) {
     var cv = row.canvas, ctx = cv.getContext('2d');
     var W = cv.width, H = cv.height;
+    var layout = recordCardLayout();
     var playable = isPlayableDetailSong(song, row.index);
     var loadingRow = !playable && isLoadingLabel(song && song.name);
     var nowPlaying = currentQueueContentIndex() === row.index;
     ctx.clearRect(0, 0, W, H);
-    makeRoundRect(ctx, 24, 24, W - 48, H - 48, 34);
+    makeRoundRect(ctx, 0, 0, W, H, 34);
     var cardGrad = ctx.createLinearGradient(0, 0, W, H);
     var cardAlpha = shelfSettings().bgOpacity;
     cardGrad.addColorStop(0, 'rgba(12,16,23,' + Math.min(0.98, cardAlpha + (isCenter ? 0.04 : 0.00)).toFixed(3) + ')');
@@ -14603,32 +14908,21 @@ function makeContentListManager() {
     ctx.lineWidth = nowPlaying ? 2.4 : (isCenter ? 1.6 : 1);
     ctx.stroke();
 
-    ctx.font = '900 28px Inter, Arial';
-    ctx.fillStyle = isCenter ? canvasAccent(0.95) : 'rgba(255,255,255,0.36)';
-    var order = String(row.index + 1);
-    if (order.length < 2) order = '0' + order;
-    ctx.fillText(order, 54, 70);
-    if (nowPlaying) {
-      ctx.font = '800 16px Inter, "Microsoft YaHei", Arial';
-      ctx.fillStyle = canvasAccent(0.92);
-      ctx.fillText('正在播放', W - 154, 68);
-    }
-
-    var coverSize = 360;
-    var coverX = (W - coverSize) / 2;
-    var coverY = 102;
-    makeRoundRect(ctx, coverX, coverY, coverSize, coverSize, 28);
+    var coverSize = layout.coverSize;
+    var coverX = layout.coverX;
+    var coverY = layout.coverY;
+    makeRoundRect(ctx, coverX, coverY, coverSize, coverSize, 34);
     var coverBg = ctx.createLinearGradient(coverX, coverY, coverX + coverSize, coverY + coverSize);
     coverBg.addColorStop(0, canvasAccent(0.16));
     coverBg.addColorStop(1, 'rgba(255,255,255,0.045)');
     ctx.fillStyle = coverBg;
     ctx.fill();
-    var songCover = songCoverSrc(song, 360);
+    var songCover = songCoverSrc(song, coverSize);
     if (songCover) {
       var rec = playlistCoverCache[songCover];
       if (rec && rec.loaded && rec.img) {
         ctx.save();
-        makeRoundRect(ctx, coverX, coverY, coverSize, coverSize, 28);
+        makeRoundRect(ctx, 0, 0, W, H, 34);
         ctx.clip();
         ctx.drawImage(rec.img, coverX, coverY, coverSize, coverSize);
         ctx.restore();
@@ -14656,79 +14950,39 @@ function makeContentListManager() {
       ctx.restore();
     }
 
+    if (nowPlaying) {
+      ctx.font = '800 16px Inter, "Microsoft YaHei", Arial';
+      makeRoundRect(ctx, W - 142, 18, 114, 34, 17);
+      ctx.fillStyle = 'rgba(0,0,0,0.48)';
+      ctx.fill();
+      ctx.strokeStyle = canvasAccent(0.38);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = canvasAccent(0.92);
+      ctx.fillText('正在播放', W - 124, 41);
+    }
+
     if (loadingRow) {
       ctx.font = '800 26px Inter, "Microsoft YaHei", Arial';
       ctx.fillStyle = 'rgba(255,247,224,0.90)';
-      ctx.fillText('正在载入歌单', 88, 516);
+      ctx.fillText('正在载入歌单', layout.textX, layout.titleY);
+      makeRoundRect(ctx, 0, 0, W, H, 34);
+      ctx.strokeStyle = nowPlaying ? canvasAccent(0.68) : (isCenter ? canvasAccent(0.46) : 'rgba(255,255,255,0.12)');
+      ctx.lineWidth = nowPlaying ? 2.4 : (isCenter ? 1.6 : 1);
+      ctx.stroke();
       row.texture.needsUpdate = true;
       return;
     }
     ctx.font = isCenter ? '900 27px Inter, "Microsoft YaHei", Arial' : '800 24px Inter, "Microsoft YaHei", Arial';
     ctx.fillStyle = isCenter ? 'rgba(255,247,224,0.96)' : 'rgba(255,255,255,0.80)';
-    ctx.fillText(ellipsize(ctx, song && song.name || '', W - 112), 56, 508);
+    ctx.fillText(ellipsize(ctx, song && song.name || '', W - layout.textX * 2), layout.textX, layout.titleY);
     ctx.font = '600 17px Inter, "Microsoft YaHei", Arial';
     ctx.fillStyle = isCenter ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.54)';
-    ctx.fillText(ellipsize(ctx, song && song.artist || '', W - 112), 56, 536);
-
-    if (isCenter && playable) {
-      var btnY = 560;
-      var mini = 42;
-      var likeX = 162;
-      var collectX = 214;
-      var nextX = 266;
-      var playX = 336;
-      var playW = 136;
-      var liked = isSongLiked(song);
-      [
-        { x: likeX, kind: 'like' },
-        { x: collectX, kind: 'collect' },
-        { x: nextX, kind: 'next' },
-      ].forEach(function(btn) {
-        makeRoundRect(ctx, btn.x, btnY, mini, mini, 15);
-        ctx.fillStyle = btn.kind === 'like' && liked ? 'rgba(255,122,144,0.18)' : 'rgba(255,255,255,0.080)';
-        ctx.fill();
-        ctx.strokeStyle = btn.kind === 'like' && liked ? 'rgba(255,122,144,0.52)' : canvasAccent(0.24);
-        ctx.lineWidth = 1.1;
-        ctx.stroke();
-      });
-      drawCanvasHeart(ctx, likeX + mini / 2, btnY + mini / 2 + 1, 19, liked ? '#ff7a90' : 'rgba(255,255,255,0.78)');
-      ctx.strokeStyle = canvasAccent(0.78);
-      ctx.lineWidth = 2.25;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(collectX + 12, btnY + 20);
-      ctx.lineTo(collectX + 12, btnY + 31);
-      ctx.lineTo(collectX + 30, btnY + 31);
-      ctx.lineTo(collectX + 30, btnY + 20);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(collectX + 21, btnY + 12);
-      ctx.lineTo(collectX + 21, btnY + 25);
-      ctx.moveTo(collectX + 15, btnY + 18);
-      ctx.lineTo(collectX + 27, btnY + 18);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(nextX + 21, btnY + 13);
-      ctx.lineTo(nextX + 21, btnY + 29);
-      ctx.moveTo(nextX + 13, btnY + 21);
-      ctx.lineTo(nextX + 29, btnY + 21);
-      ctx.stroke();
-
-      makeRoundRect(ctx, playX, btnY, playW, mini, 16);
-      var playGrad = ctx.createLinearGradient(playX, btnY, playX + playW, btnY + mini);
-      playGrad.addColorStop(0, 'rgba(255,255,255,0.92)');
-      playGrad.addColorStop(0.58, canvasAccent(0.95));
-      playGrad.addColorStop(1, canvasAccent(0.58));
-      ctx.fillStyle = playGrad;
-      ctx.fill();
-      ctx.strokeStyle = canvasAccent(0.40);
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-      ctx.font = '800 16px Inter, "Microsoft YaHei", Arial';
-      ctx.fillStyle = readableInkForHex(shelfAccentHex());
-      ctx.fillText('播放', playX + 50, btnY + 27);
-    }
+    ctx.fillText(ellipsize(ctx, song && song.artist || '', W - layout.textX * 2), layout.textX, layout.artistY);
+    makeRoundRect(ctx, 0, 0, W, H, 34);
+    ctx.strokeStyle = nowPlaying ? canvasAccent(0.68) : (isCenter ? canvasAccent(0.46) : 'rgba(255,255,255,0.12)');
+    ctx.lineWidth = nowPlaying ? 2.4 : (isCenter ? 1.6 : 1);
+    ctx.stroke();
     row.texture.needsUpdate = true;
   }
 
@@ -14914,8 +15168,9 @@ function makeContentListManager() {
     var nowT = uniforms.uTime.value;
     var revealRaw = Math.max(0, Math.min(1, (nowT - rowAnimAt - absD * 0.044) / 0.72));
     var reveal = revealRaw * revealRaw * (3 - 2 * revealRaw);
-    var parX = pointerParallax.x || 0;
-    var parY = pointerParallax.y || 0;
+    var motionLocked = shelfMotionLocked();
+    var parX = shelfParallaxValue(pointerParallax.x, motionLocked);
+    var parY = shelfParallaxValue(pointerParallax.y, motionLocked);
     var parWeight = Math.max(0, 1 - absD * 0.16);
     var pulse = row.fxPulse || 0;
     var settle = group && group.userData ? (group.userData.rowSettle || 0) : 0;
@@ -14923,7 +15178,7 @@ function makeContentListManager() {
     var shelfLayout = shelfLayoutProfile();
     var wallpaperShelfPose = shouldUseWallpaperSafeShelfCamera();
     var skullShelfPose = shouldUseSkullSafeShelfCamera();
-    var safeShelfPose = wallpaperShelfPose || skullShelfPose;
+    var safeShelfPose = !motionLocked && (wallpaperShelfPose || skullShelfPose);
     var orientation = currentDetailOrientation();
     var isStageRecord = orientation === 'stage';
     var px;
@@ -14944,9 +15199,10 @@ function makeContentListManager() {
       row.mesh.rotation.x = 0.10 - absD * 0.04 - parY * 0.028 * parWeight;
       row.mesh.scale.setScalar(scaleS);
     } else {
+      var recordSideYStep = shelfLayout.sideYStep * (recordCardLayout().worldH / recordCardLayout().worldW);
       var entry = (1 - reveal) * (0.82 + absD * 0.075);
       px = shelfLayout.sideX + absD * shelfLayout.sideXStep + entry * shelfLayout.sideEntryX;
-      py = (shelfLayout.sideY || 0) - delta * shelfLayout.sideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18);
+      py = (shelfLayout.sideY || 0) - delta * recordSideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18);
       pz = shelfLayout.sideZ - absD * shelfLayout.sideZStep - (1 - reveal) * 0.20;
       px += parX * 0.060 * parWeight;
       py += parY * 0.046 * parWeight;
@@ -14954,25 +15210,26 @@ function makeContentListManager() {
       px += settle * (0.12 + absD * 0.010);
       py += settle * (delta < 0 ? -0.08 : 0.08);
       var scaleSide = (absD < 0.5 ? 1.12 : Math.max(0.55, 1.04 - absD * 0.14)) * (0.88 + reveal * 0.12) * (1 + pulse * 0.056) * shelfLayout.sideScale;
-      if (wallpaperShelfPose) scaleSide *= 1.22;
-      else if (skullShelfPose) scaleSide *= 1.04;
+      if (!motionLocked && wallpaperShelfPose) scaleSide *= 1.22;
+      else if (!motionLocked && skullShelfPose) scaleSide *= 1.04;
       row.mesh.position.set(px, py, pz);
       row.mesh.scale.setScalar(scaleSide);
-      if (skullShelfPose && camera) {
+      if (!motionLocked && skullShelfPose && camera && !shelfViewportLockActive()) {
         row.mesh.quaternion.copy(camera.quaternion);
         row.mesh.rotateX(shelfLayout.sideRotX - delta * 0.008 - parY * 0.004 * parWeight);
         row.mesh.rotateY(shelfLayout.sideRotY + (1 - reveal) * 0.012 + parX * 0.006 * parWeight);
       } else {
-        var safeRotY = wallpaperShelfPose ? 0.12 : shelfLayout.sideRotY;
-        var safeEntryRotY = wallpaperShelfPose ? 0.05 : 0.16;
+        var safeRotY = (!motionLocked && wallpaperShelfPose) ? 0.12 : shelfLayout.sideRotY;
+        var safeEntryRotY = (!motionLocked && wallpaperShelfPose) ? 0.05 : 0.16;
         row.mesh.rotation.y = (safeShelfPose ? safeRotY : shelfLayout.sideRotY) + (1 - reveal) * safeEntryRotY + parX * (safeShelfPose ? 0.014 : 0.038) * parWeight;
-        var safeRotX = wallpaperShelfPose ? 0.020 : shelfLayout.sideRotX;
+        var safeRotX = (!motionLocked && wallpaperShelfPose) ? 0.020 : shelfLayout.sideRotX;
         row.mesh.rotation.x = -delta * (safeShelfPose ? safeRotX : shelfLayout.sideRotX) - parY * (safeShelfPose ? 0.010 : 0.024) * parWeight;
       }
     }
     var rowOpacityBase = Math.min(1, (absD < 0.5 ? 1.0 : Math.max(0.30, 1.0 - absD * 0.13)) * reveal + pulse * 0.16);
     var rowOpacityScale = absD < 0.5 ? Math.max(0.94, shelfLook.opacity) : shelfLook.opacity;
     row.mesh.material.opacity = Math.min(1, rowOpacityBase * rowOpacityScale);
+    applyShelfViewportLockToMesh(row.mesh, 'record-row');
   }
 
   function place(row, i) {
@@ -15160,6 +15417,7 @@ function makeContentListManager() {
       playlistTitle = title;
       currentPlaylistId = playlistId || '';
       sourceCard = fromCard;
+      resetShelfViewportAnchor('content-open', 520);
       var podcastCollectionKey = String(playlistId || '').indexOf('podcast:') === 0 ? String(playlistId).slice(8) : '';
       var qqPlaylistId = String(playlistId || '').indexOf('qq:') === 0 ? String(playlistId).slice(3) : '';
       contentKind = podcastCollectionKey ? 'podcast' : 'playlist';
@@ -15259,13 +15517,19 @@ function makeContentListManager() {
         rowsDirty = true;
         startRowsLoadedIntro();
         syncRenderedRows(true);
+        resetShelfViewportAnchor('content-ready', 220);
       } catch (renderReadyErr) {
         console.warn('[ShelfContentReadyRender]', playlistId, renderReadyErr);
         showToast('歌单已载入，3D列表刷新失败');
       }
     },
-    close: function() {
+    close: function(reason) {
       open = false;
+      if (shouldResetShelfAnchorForContentClose({
+        viewportLockEnabled: shelfViewportLockActive(),
+        hasReusableAnchor: !!shelfViewportAnchor,
+        reason: reason || 'content-close'
+      })) resetShelfViewportAnchor('content-close', 320);
       requestToken++;
       var targetGroup = group;
       var targetRows = rows.slice();
@@ -15570,38 +15834,7 @@ function makeContentListManager() {
       var isCenter = Math.abs(row.index - Math.round(centerSmooth)) < 0.5;
       if (!isCenter || !((song && song.id) || song.type === 'podcast-radio')) return null;
       if (isRecordDetailView()) {
-        var recordUv = uv;
-        if (!recordUv) {
-          var recordParams = row.mesh.geometry && row.mesh.geometry.parameters || {};
-          var recordHw = (recordParams.width || 0.98) / 2;
-          var recordHh = (recordParams.height || 0.98) / 2;
-          var recordCorners = [
-            new THREE.Vector3(-recordHw, -recordHh, 0),
-            new THREE.Vector3( recordHw, -recordHh, 0),
-            new THREE.Vector3( recordHw,  recordHh, 0),
-            new THREE.Vector3(-recordHw,  recordHh, 0),
-          ];
-          var recordMinX = Infinity, recordMinY = Infinity, recordMaxX = -Infinity, recordMaxY = -Infinity;
-          row.mesh.updateMatrixWorld(true);
-          for (var ri = 0; ri < recordCorners.length; ri++) {
-            recordCorners[ri].applyMatrix4(row.mesh.matrixWorld).project(camera);
-            var rx = (recordCorners[ri].x + 1) * innerWidth / 2;
-            var ry = (1 - recordCorners[ri].y) * innerHeight / 2;
-            recordMinX = Math.min(recordMinX, rx); recordMaxX = Math.max(recordMaxX, rx);
-            recordMinY = Math.min(recordMinY, ry); recordMaxY = Math.max(recordMaxY, ry);
-          }
-          recordUv = {
-            x: clampRange((sx - recordMinX) / Math.max(1, recordMaxX - recordMinX), 0, 1),
-            y: 1 - clampRange((sy - recordMinY) / Math.max(1, recordMaxY - recordMinY), 0, 1)
-          };
-        }
-        var px = recordUv.x * 620;
-        var py = (1 - recordUv.y) * 620;
-        if (px >= 162 && px <= 204 && py >= 560 && py <= 602) return 'like';
-        if (px >= 214 && px <= 256 && py >= 560 && py <= 602) return 'collect';
-        if (px >= 266 && px <= 308 && py >= 560 && py <= 602) return 'next';
-        if (px >= 336 && px <= 472 && py >= 560 && py <= 602) return 'play';
-        return null;
+        return recordShelfCardAction(isCenter, isPlayableDetailSong(song, row.index)) === 'play' ? 'play' : null;
       }
       var params = row.mesh.geometry && row.mesh.geometry.parameters || {};
       var hw = (params.width || 2.50) / 2;
@@ -15673,15 +15906,16 @@ function makeContentListManager() {
 
   function makeRow(song, i) {
     var recordView = isRecordDetailView();
+    var recordLayout = recordCardLayout();
     var cv = document.createElement('canvas');
-    cv.width = recordView ? 620 : 800;
-    cv.height = recordView ? 620 : 104;
+    cv.width = recordView ? recordLayout.canvasW : 800;
+    cv.height = recordView ? recordLayout.canvasH : 104;
     var ctx = cv.getContext('2d');
     var tx = new THREE.CanvasTexture(cv);
     tx.minFilter = THREE.LinearFilter; tx.magFilter = THREE.LinearFilter;
     tx.generateMipmaps = false;
     var mat = new THREE.MeshBasicMaterial({ map: tx, transparent: true, opacity: 0.96, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
-    var geo = recordView ? new THREE.PlaneGeometry(0.98, 0.98, 1, 1) : new THREE.PlaneGeometry(2.50, 0.36, 1, 1);
+    var geo = recordView ? new THREE.PlaneGeometry(recordLayout.worldW, recordLayout.worldH, 1, 1) : new THREE.PlaneGeometry(2.50, 0.36, 1, 1);
       var mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 240 + i;
       group.add(mesh);
@@ -15756,6 +15990,33 @@ function pointerCardHit(rc, e, screenPad) {
   if (!shelfManager) return null;
   return shelfManager.raycastCards(rc) || (shelfManager.pickCardAtScreen && shelfManager.pickCardAtScreen(e.clientX, e.clientY, screenPad));
 }
+function recordShelfContentHitState(e, rc) {
+  if (!e || !shelfManager || !shelfManager.hasOpenContent || !shelfManager.hasOpenContent()) return null;
+  var cl = shelfManager.getContentList && shelfManager.getContentList();
+  if (!cl || !cl.isRecordView || !cl.isRecordView()) return null;
+  rc = rc || raycasterFromPointerEvent(e);
+  var rowHit = cl.raycastRows ? cl.raycastRows(rc) : null;
+  var rowScreenHit = !rowHit && cl.pickRowAtScreen ? cl.pickRowAtScreen(e.clientX, e.clientY) : null;
+  var chromeHit = !rowHit && !rowScreenHit && cl.raycastChrome ? cl.raycastChrome(rc) : null;
+  var chromeScreenHit = !rowHit && !rowScreenHit && !chromeHit && cl.screenContainsChrome ? cl.screenContainsChrome(e.clientX, e.clientY) : false;
+  return {
+    cl: cl,
+    rowHit: rowHit,
+    rowScreenHit: rowScreenHit,
+    chromeHit: chromeHit,
+    chromeScreenHit: chromeScreenHit,
+    handled: shouldContentShelfHandleWheel({
+      rowHit: !!rowHit,
+      rowScreenHit: !!rowScreenHit,
+      chromeHit: !!chromeHit,
+      chromeScreenHit: !!chromeScreenHit
+    })
+  };
+}
+function isPointerOverRecordShelfContent(e) {
+  var hitState = recordShelfContentHitState(e);
+  return !!(hitState && hitState.handled);
+}
 function isSideShelfFocusHit(e) {
   if (!e || !shelfManager || !shelfManager.getMode || shelfManager.getMode() !== 'side') return false;
   if (shelfPinnedOpen) return true;
@@ -15804,10 +16065,6 @@ function updateShelfCardHoverSelection(e) {
   if (hit && hit.card) shelfManager.setSelected(hit.card.index);
   else shelfManager.clearSelected();
 }
-function isShelfPlaylistPlayHit(hit) {
-  if (!hit || !hit.card || !hit.uv || !hit.card.item || hit.card.item.type !== 'playlist') return false;
-  return hit.uv.x >= 0.49 && hit.uv.x <= 0.72 && hit.uv.y >= 0.13 && hit.uv.y <= 0.42;
-}
 renderer.domElement.addEventListener('click', function(e){
   if (!shelfManager || shelfManager.getMode() === 'off') return;
   if (document.body.classList.contains('splash-active')) return;
@@ -15834,14 +16091,17 @@ renderer.domElement.addEventListener('click', function(e){
         var hitCollectButton = rowAction === 'collect' || (!recordDetailView && rowHit.uv && rowHit.uv.x >= 0.68 && rowHit.uv.x < 0.75 && rowHit.uv.y > 0.20 && rowHit.uv.y < 0.82);
         var hitNextButton = rowAction === 'next' || (!recordDetailView && rowHit.uv && rowHit.uv.x >= 0.75 && rowHit.uv.x < 0.82 && rowHit.uv.y > 0.20 && rowHit.uv.y < 0.82);
         var hitPlayButton = rowAction === 'play' || (!recordDetailView && rowHit.uv && rowHit.uv.x >= 0.82 && rowHit.uv.y > 0.20 && rowHit.uv.y < 0.82);
-        // 详情页支持直接点歌曲播放；红心/收藏按钮仍然保留原动作。
+        var shouldPlayRow = recordDetailView
+          ? (selectedRow && hitPlayButton)
+          : ((rowHit.row.song && rowHit.row.song.id) || rowIsPodcastRadio || (selectedRow && hitPlayButton));
+        // 列表详情保留行内按钮；唱片详情使用中心整卡播放。
         if (selectedRow && !rowIsPodcastRadio && hitLikeButton) {
           toggleLikeDetailSong(rowHit.row.song);
         } else if (selectedRow && !rowIsPodcastRadio && hitCollectButton) {
           collectDetailSong(rowHit.row.song);
         } else if (selectedRow && !rowIsPodcastRadio && hitNextButton) {
           queueDetailSongNext(rowHit.row.song);
-        } else if ((rowHit.row.song && rowHit.row.song.id) || rowIsPodcastRadio || (selectedRow && hitPlayButton)) {
+        } else if (shouldPlayRow) {
           cl.playRow(rowHit.row);
         } else {
           // 滚到这行
@@ -15871,8 +16131,9 @@ renderer.domElement.addEventListener('click', function(e){
     if (mode === 'side') setShelfPinnedOpen(true, true);
     var idx = hit.card.index;
     if (Math.abs(idx - shelfManager.getCenterIdx()) < 0.5) {
-      if (isShelfPlaylistPlayHit(hit) && shelfManager.playPlaylistAt && shelfManager.playPlaylistAt(idx)) return;
-      shelfManager.openContent(idx);
+      var cardAction = playlistShelfCardAction(hit.card.item && hit.card.item.type, true);
+      if (cardAction === 'openContent' || cardAction === 'playQueue') shelfManager.openContent(idx);
+      else if (cardAction === 'none' && hit.card.item && hit.card.item.type === 'empty') shelfManager.openContent(idx);
     } else {
       shelfManager.scrollBy(idx - shelfManager.getCenterIdx());
     }
@@ -15926,9 +16187,15 @@ renderer.domElement.addEventListener('wheel', function(e){
     var cl = shelfManager.getContentList();
     if (cl) {
       var rowHit = cl.raycastRows(rc);
-      var chromeHit = !rowHit && cl.raycastChrome ? cl.raycastChrome(rc) : null;
-      var chromeScreenHit = !rowHit && !chromeHit && cl.screenContainsChrome ? cl.screenContainsChrome(e.clientX, e.clientY) : false;
-      if (!rowHit && !chromeHit && !chromeScreenHit) return;
+      var rowScreenHit = !rowHit && cl.pickRowAtScreen ? cl.pickRowAtScreen(e.clientX, e.clientY) : null;
+      var chromeHit = !rowHit && !rowScreenHit && cl.raycastChrome ? cl.raycastChrome(rc) : null;
+      var chromeScreenHit = !rowHit && !rowScreenHit && !chromeHit && cl.screenContainsChrome ? cl.screenContainsChrome(e.clientX, e.clientY) : false;
+      if (!shouldContentShelfHandleWheel({
+        rowHit: !!rowHit,
+        rowScreenHit: !!rowScreenHit,
+        chromeHit: !!chromeHit,
+        chromeScreenHit: !!chromeScreenHit
+      })) return;
       e.preventDefault(); e.stopImmediatePropagation();
       cl.scrollBy(e.deltaY > 0 ? 1 : -1);
       return;
@@ -16848,12 +17115,24 @@ function shouldForceEmptyHomeAfterSplash() {
   if (playing) return false;
   return true;
 }
+function startupVisualPreviewState(ignoreSplash) {
+  var body = document.body && document.body.classList;
+  return {
+    ignoreSplash: !!ignoreSplash,
+    splashActive: !!(body && body.contains('splash-active')),
+    immersiveMode: !!immersiveMode,
+    playing: !!playing,
+    audioActive: !!(audio && !audio.paused),
+    shelfPinnedOpen: !!shelfPinnedOpen,
+    shelfContentOpen: !!(shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent()),
+    shelfMode: (shelfManager && shelfManager.getMode ? shelfManager.getMode() : (fx && fx.shelf)) || 'off',
+    shelfAlwaysVisible: typeof shelfAlwaysVisible === 'function' ? shelfAlwaysVisible() : true,
+    playQueueLength: playQueue && playQueue.length || 0,
+    currentIdx: currentIdx
+  };
+}
 function shouldUseIdleWallpaperPreview(ignoreSplash) {
-  if (!ignoreSplash && document.body.classList.contains('splash-active')) return false;
-  if (immersiveMode || playing || (audio && !audio.paused)) return false;
-  if (shelfPinnedOpen) return false;
-  if (shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent()) return false;
-  return true;
+  return shouldApplyStartupStarfieldPreview(startupVisualPreviewState(ignoreSplash));
 }
 function setHomeControlsLocked(locked) {
   document.body.classList.toggle('home-controls-locked', !!locked);
@@ -16889,6 +17168,10 @@ function ensureHomeWallpaperParticles(opts) {
 }
 function activateHomeWallpaperPreview(opts) {
   opts = opts || {};
+  if (!shouldUseIdleWallpaperPreview(!!opts.ignoreSplash)) {
+    document.body.classList.remove('home-wallpaper-preview');
+    return;
+  }
   document.body.classList.add('home-wallpaper-preview');
   ensureHomeWallpaperParticles(opts);
 }
@@ -16899,11 +17182,12 @@ function prewarmHomeWallpaperPreview() {
   if (!shouldUseIdleWallpaperPreview(true)) return;
   scheduleVisualApply(function(){
     if (!shouldUseIdleWallpaperPreview(true)) return;
-    activateHomeWallpaperPreview({ skipTransition: true, instant: true });
+    activateHomeWallpaperPreview({ skipTransition: true, instant: true, ignoreSplash: true });
   }, 900, 2600);
 }
 function deactivateHomeWallpaperPreview(playback) {
   document.body.classList.remove('home-wallpaper-preview');
+  if (typeof resetShelfViewportAnchor === 'function') resetShelfViewportAnchor(playback ? 'wallpaper-preview-playback' : 'wallpaper-preview-close', playback ? 360 : 220);
   if (!homeVisualPresetActive) return;
   homeVisualPresetActive = false;
   var nextPreset = typeof homeVisualPrevPreset === 'number' ? homeVisualPrevPreset : (fx && typeof fx.preset === 'number' ? fx.preset : 0);
@@ -16916,17 +17200,32 @@ function switchPlaybackVisualToEmily() {
     deactivateHomeWallpaperPreview(true);
     return;
   }
-  document.body.classList.remove('home-wallpaper-preview');
   var targetPreset = typeof playbackVisualPreset === 'number' ? playbackVisualPreset : fxDefaults.preset;
+  var presetChanged = !!(typeof setPreset === 'function' && fx.preset !== targetPreset);
+  var startupPreviewWasActive = !!startupVisualPreviewActive;
+  var wallpaperPreviewWasActive = !!(document.body && document.body.classList && document.body.classList.contains('home-wallpaper-preview'));
+  document.body.classList.remove('home-wallpaper-preview');
   startupVisualPreviewActive = false;
-  if (typeof setPreset === 'function' && fx.preset !== targetPreset) {
+  if (typeof resetShelfViewportAnchor === 'function' && shouldResetShelfAnchorForPlaybackVisual({
+    viewportLockEnabled: shelfViewportLockActive(),
+    presetChanged: presetChanged,
+    startupPreviewActive: startupPreviewWasActive,
+    homeWallpaperPreviewActive: wallpaperPreviewWasActive,
+    homeVisualPresetActive: false
+  })) resetShelfViewportAnchor('playback-visual', 360);
+  if (presetChanged) {
     setPreset(targetPreset, { silent: true, preserveCamera: false, noSave: true });
   } else if (typeof syncFxUniforms === 'function') {
     syncFxUniforms();
   }
 }
 function applyStartupStarfieldPreset() {
-  if (playing || currentIdx >= 0) return;
+  if (!shouldApplyStartupStarfieldPreview(startupVisualPreviewState(false))) {
+    startupVisualPreviewActive = false;
+    if (typeof resetShelfViewportAnchor === 'function') resetShelfViewportAnchor('startup-starfield-skip', 420);
+    if (typeof syncFxUniforms === 'function') syncFxUniforms();
+    return;
+  }
   startupVisualPreviewActive = true;
   if (typeof setPreset === 'function' && fx.preset !== 5) {
     setPreset(5, { silent: true, preserveCamera: false, skipTransition: true, noSave: true });
@@ -21213,11 +21512,12 @@ function normalizeFxArchiveSnapshot(raw) {
     shelfShowPodcasts: raw.shelfShowPodcasts !== false,
     shelfMergeCollections: raw.shelfMergeCollections === true,
     shelfDetailView: normalizeShelfDetailView(raw.shelfDetailView || fxDefaults.shelfDetailView),
-    shelfSize: archiveNumber(raw, 'shelfSize', fxDefaults.shelfSize, 0.65, 1.45),
-    shelfOffsetX: archiveNumber(raw, 'shelfOffsetX', fxDefaults.shelfOffsetX, -1.2, 1.2),
-    shelfOffsetY: archiveNumber(raw, 'shelfOffsetY', fxDefaults.shelfOffsetY, -0.9, 0.9),
-    shelfOffsetZ: archiveNumber(raw, 'shelfOffsetZ', fxDefaults.shelfOffsetZ, -0.9, 0.9),
-    shelfAngleY: archiveNumber(raw, 'shelfAngleY', fxDefaults.shelfAngleY, -30, 30),
+    shelfViewportLock: normalizeShelfViewportLock(raw.shelfViewportLock),
+    shelfSize: shelfControlValue('shelfSize', raw.shelfSize, fxDefaults.shelfSize),
+    shelfOffsetX: shelfControlValue('shelfOffsetX', raw.shelfOffsetX, fxDefaults.shelfOffsetX),
+    shelfOffsetY: shelfControlValue('shelfOffsetY', raw.shelfOffsetY, fxDefaults.shelfOffsetY),
+    shelfOffsetZ: shelfControlValue('shelfOffsetZ', raw.shelfOffsetZ, fxDefaults.shelfOffsetZ),
+    shelfAngleY: shelfControlValue('shelfAngleY', raw.shelfAngleY, fxDefaults.shelfAngleY),
     shelfAngleYManual: raw.shelfAngleYManual === true,
     shelfOpacity: archiveNumber(raw, 'shelfOpacity', fxDefaults.shelfOpacity, 0.25, 1),
     shelfBgOpacity: archiveNumber(raw, 'shelfBgOpacity', fxDefaults.shelfBgOpacity, 0.25, 0.98),
@@ -22505,6 +22805,9 @@ function updateFxInputs() {
   if (shelfPodcastsToggle) shelfPodcastsToggle.classList.toggle('on', fx.shelfShowPodcasts !== false);
   var shelfMergeToggle = document.getElementById('t-shelfMergeCollections');
   if (shelfMergeToggle) shelfMergeToggle.classList.toggle('on', fx.shelfMergeCollections === true);
+  fx.shelfViewportLock = normalizeShelfViewportLock(fx.shelfViewportLock);
+  var shelfViewportLockToggle = document.getElementById('t-shelfViewportLock');
+  if (shelfViewportLockToggle) shelfViewportLockToggle.classList.toggle('on', fx.shelfViewportLock !== false);
   fx.shelfDetailView = normalizeShelfDetailView(fx.shelfDetailView || fxDefaults.shelfDetailView);
   document.querySelectorAll('#shelf-detail-view-seg [data-shelf-detail-view]').forEach(function(btn){
     btn.classList.toggle('active', btn.getAttribute('data-shelf-detail-view') === fx.shelfDetailView);
@@ -23184,13 +23487,13 @@ function bindFxPanel() {
       if (pair[1] === 'desktopLyricsOpacity') fx.desktopLyricsOpacity = clampRange(fx.desktopLyricsOpacity, 0.28, 1);
       if (pair[1] === 'desktopLyricsY') fx.desktopLyricsY = clampRange(fx.desktopLyricsY, 0.08, 0.92);
       if (pair[1] === 'wallpaperOpacity') fx.wallpaperOpacity = clampRange(fx.wallpaperOpacity, 0.35, 1);
-      if (pair[1] === 'shelfSize') fx.shelfSize = clampRange(fx.shelfSize, 0.65, 1.45);
-      if (pair[1] === 'shelfOffsetX') fx.shelfOffsetX = clampRange(fx.shelfOffsetX, -1.2, 1.2);
-      if (pair[1] === 'shelfOffsetY') fx.shelfOffsetY = clampRange(fx.shelfOffsetY, -0.9, 0.9);
-      if (pair[1] === 'shelfOffsetZ') fx.shelfOffsetZ = clampRange(fx.shelfOffsetZ, -0.9, 0.9);
+      if (pair[1] === 'shelfSize') fx.shelfSize = shelfControlNumber('shelfSize', fxDefaults.shelfSize);
+      if (pair[1] === 'shelfOffsetX') fx.shelfOffsetX = shelfControlNumber('shelfOffsetX', fxDefaults.shelfOffsetX);
+      if (pair[1] === 'shelfOffsetY') fx.shelfOffsetY = shelfControlNumber('shelfOffsetY', fxDefaults.shelfOffsetY);
+      if (pair[1] === 'shelfOffsetZ') fx.shelfOffsetZ = shelfControlNumber('shelfOffsetZ', fxDefaults.shelfOffsetZ);
       if (pair[1] === 'shelfAngleY') {
         fx.shelfAngleYManual = true;
-        fx.shelfAngleY = Math.round(clampRange(fx.shelfAngleY, -30, 30));
+        fx.shelfAngleY = Math.round(shelfControlNumber('shelfAngleY', fxDefaults.shelfAngleY));
       }
       if (pair[1] === 'shelfOpacity') fx.shelfOpacity = clampRange(fx.shelfOpacity, 0.25, 1);
       if (pair[1] === 'shelfBgOpacity') fx.shelfBgOpacity = clampRange(fx.shelfBgOpacity, 0.25, 0.98);
@@ -23379,7 +23682,7 @@ function toggleFx(key) {
   var toggle = document.getElementById(toggleId);
   if (toggle) toggle.classList.toggle('on', fx[key]);
   syncFxUniforms();
-  if (key === 'lyricCameraLock' || key === 'lyricGlow' || key === 'lyricGlowBeat' || key === 'lyricGlowParticles' || key === 'bloom' || key === 'edge' || key === 'cinema' || key === 'desktopLyrics' || key === 'desktopLyricsClickThrough' || key === 'desktopLyricsCinema' || key === 'desktopLyricsHighlight' || key === 'wallpaperMode' || key === 'shelfShowPodcasts' || key === 'shelfMergeCollections' || key === 'liveBackgroundKeep') saveLyricLayout();
+  if (key === 'lyricCameraLock' || key === 'lyricGlow' || key === 'lyricGlowBeat' || key === 'lyricGlowParticles' || key === 'bloom' || key === 'edge' || key === 'cinema' || key === 'desktopLyrics' || key === 'desktopLyricsClickThrough' || key === 'desktopLyricsCinema' || key === 'desktopLyricsHighlight' || key === 'wallpaperMode' || key === 'shelfShowPodcasts' || key === 'shelfMergeCollections' || key === 'shelfViewportLock' || key === 'liveBackgroundKeep') saveLyricLayout();
   if (key === 'floatLayer') { if (fx.floatLayer) createFloatLayer(); else destroyFloatLayer(); }
   if (key === 'desktopLyrics') applyDesktopLyricsState(true);
   if (key === 'desktopLyricsClickThrough' || key === 'desktopLyricsCinema' || key === 'desktopLyricsHighlight') pushDesktopLyricsState(true);
@@ -23389,6 +23692,7 @@ function toggleFx(key) {
     if (shelfManager && shelfManager.rebuild) shelfManager.rebuild(true);
     if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   }
+  if (key === 'shelfViewportLock') resetShelfViewportAnchor();
   if (key === 'liveBackgroundKeep') {
     fx.performanceBackground = fx.liveBackgroundKeep ? 'keep' : 'auto';
     updatePerformanceControls();
@@ -23411,6 +23715,7 @@ function toggleFx(key) {
   if (key === 'wallpaperMode') showToast(fx.wallpaperMode ? '壁纸模式已开启' : '壁纸模式已关闭');
   if (key === 'shelfShowPodcasts') showToast(fx.shelfShowPodcasts !== false ? '3D歌单架已显示播客歌单' : '3D歌单架已隐藏播客歌单');
   if (key === 'shelfMergeCollections') showToast(fx.shelfMergeCollections === true ? '我的歌单与收藏歌单已合并滚动' : '收藏歌单恢复滚到底切页');
+  if (key === 'shelfViewportLock') showToast(fx.shelfViewportLock !== false ? '歌单架独立视图已开启' : '歌单架恢复跟随主视角');
   if (key === 'liveBackgroundKeep') showToast(fx.liveBackgroundKeep ? '直播后台保持已开启' : '直播后台保持已关闭');
   if (key === 'lyricCameraLock') showToast(fx.lyricCameraLock ? '歌词已绑定镜头' : '歌词已恢复自由漂浮');
   if (key === 'bloom') showToast(fx.bloom ? '溢光已开启' : '溢光已关闭');
@@ -23513,6 +23818,7 @@ function refreshShelfVisuals(reason) {
 }
 function setShelfCameraMode(mode) {
   fx.shelfCameraMode = normalizeShelfCameraMode(mode);
+  resetShelfViewportAnchor();
   applyShelfCameraDefaultAngle(true);
   setRange('fx-shelfangle', fx.shelfAngleY);
   updateShelfControlUi();
@@ -23534,6 +23840,7 @@ function setShelfPresence(mode) {
 }
 function setShelfDetailView(view) {
   fx.shelfDetailView = normalizeShelfDetailView(view);
+  resetShelfViewportAnchor();
   updateShelfControlUi();
   if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   saveLyricLayout();
@@ -27131,7 +27438,7 @@ function dismissSplash() {
   if (typeof shouldUseIdleWallpaperPreview === 'function'
     ? shouldUseIdleWallpaperPreview(true)
     : (typeof shouldShowEmptyHomeAfterSplash === 'function' && shouldShowEmptyHomeAfterSplash())) {
-    activateHomeWallpaperPreview();
+    activateHomeWallpaperPreview({ ignoreSplash: true });
   }
   revealIdleParticles(0, reduceSplashMotion ? 700 : 2400);
   document.body.classList.add('splash-revealing');
@@ -27149,6 +27456,7 @@ function dismissSplash() {
     splashAnimating = false;
     document.body.classList.remove('splash-active');
     document.body.classList.remove('splash-revealing');
+    if (typeof resetShelfViewportAnchor === 'function') resetShelfViewportAnchor('splash-end', 520);
     markAppPerf('home-revealed');
     if (s && s.parentNode) s.style.display = 'none';
     requestAnimationFrame(function(){
@@ -27896,7 +28204,6 @@ function animate() {
 
   updateRipples(dt);
   updateFloatLayer(dt);
-  if (shelfManager) shelfManager.update(dt);
   tickLyricsParticles();
   updateHomeAudioVisual(dt);
 
@@ -27929,6 +28236,7 @@ function animate() {
   }
   updateSkullParticleLayer(dt);
   updateStageLyrics3D(dt);
+  if (shelfManager) shelfManager.update(dt);
   syncDesktopOverlayState();
 
   // 缩略图脉动
