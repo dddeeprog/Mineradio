@@ -11,7 +11,7 @@ test('maintenance baseline scripts are wired', () => {
 
   assert.equal(
     scripts.check,
-    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js'
+    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js'
   );
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
@@ -20,6 +20,14 @@ test('maintenance baseline scripts are wired', () => {
     scripts['verify:release'],
     'npm run check && npm run test && npm run audit:prod && npm run build:win:dir'
   );
+});
+
+test('playback session restore script is wired', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
+  assert.match(html, /restoreLastPlaybackSession\(\);/);
+  assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
 });
 
 test('development context document exists', () => {

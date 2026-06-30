@@ -15,6 +15,7 @@
 <script src="performance.js"></script>
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
+<script src="playback-session-state.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -2726,6 +2727,10 @@ var lastStrongDrop = 0;           // 用于 burst 预设的强 drop 时刻
 
 var lyricsLines = [], lyricsVisible = false, lyricsHasNativeKaraoke = false, lyricsTimingSource = 'none';
 var playlist = [], playQueue = [], currentIdx = -1, playing = false, playToggleBusy = false;
+var PLAYBACK_SESSION_STORE_KEY = 'mineradio-playback-session-v1';
+var pendingPlaybackResumeSeconds = 0;
+var pendingPlaybackResumeIndex = -1;
+var restoredPlaybackSessionActive = false;
 var searchMode = 'song', podcastResults = [], podcastPrograms = [], podcastCurrentRadio = null;
 var loginStatus = { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
 var qqLoginStatus = { provider: 'qq', loggedIn: false, preview: false, nickname: 'QQ 音乐', userId: '', avatar: '', vipType: 0 };
@@ -4144,6 +4149,8 @@ function flushPersistentVisualState() {
   try { saveFreeCameraState(); } catch (e) {}
 }
 window.addEventListener('beforeunload', flushPersistentVisualState);
+window.addEventListener('pagehide', function(){ savePlaybackSessionNow('pagehide'); });
+window.addEventListener('beforeunload', function(){ savePlaybackSessionNow('beforeunload'); });
 window.addEventListener('pagehide', flushPersistentVisualState);
 
 function resetBeatCameraSync(t) {
@@ -16461,6 +16468,95 @@ function setLocalStorageJson(key, value, options) {
   }
   try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
 }
+function getLocalStorageJson(key, fallback) {
+  var store = mineradioStorageApi();
+  if (store && typeof store.getJson === 'function') return store.getJson(key, fallback);
+  try {
+    var raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function removeLocalStorageItem(key) {
+  var store = mineradioStorageApi();
+  if (store && typeof store.removeItem === 'function') return store.removeItem(key);
+  try { localStorage.removeItem(key); return true; } catch (e) { return false; }
+}
+function playbackSessionStateApi() {
+  return window.MineradioPlaybackSessionState || null;
+}
+function playbackSessionCurrentSecondsForSave() {
+  if (audio && isFinite(audio.currentTime) && audio.currentTime > 0) return Number(audio.currentTime);
+  return pendingPlaybackResumeSeconds > 0 ? pendingPlaybackResumeSeconds : 0;
+}
+function playbackSessionDurationForSave() {
+  var duration = getPlaybackDurationSeconds();
+  if (duration > 0) return duration;
+  return currentIdx >= 0 && playQueue[currentIdx] ? playbackDurationFromSong(playQueue[currentIdx]) : 0;
+}
+function createCurrentPlaybackSessionSnapshot() {
+  var helper = playbackSessionStateApi();
+  if (!helper || typeof helper.createPlaybackSessionSnapshot !== 'function') return null;
+  return helper.createPlaybackSessionSnapshot({
+    playQueue: playQueue,
+    currentIdx: currentIdx,
+    currentTime: playbackSessionCurrentSecondsForSave(),
+    duration: playbackSessionDurationForSave(),
+    playing: !!playing,
+    now: Date.now(),
+  });
+}
+function savePlaybackSessionNow(reason) {
+  var snapshot = createCurrentPlaybackSessionSnapshot();
+  if (!snapshot) return removeLocalStorageItem(PLAYBACK_SESSION_STORE_KEY);
+  return setLocalStorageJson(PLAYBACK_SESSION_STORE_KEY, snapshot);
+}
+function savePlaybackSessionDebounced(reason) {
+  var snapshot = createCurrentPlaybackSessionSnapshot();
+  if (!snapshot) return removeLocalStorageItem(PLAYBACK_SESSION_STORE_KEY);
+  return setLocalStorageJson(PLAYBACK_SESSION_STORE_KEY, snapshot, { debounceMs: 900 });
+}
+function clearPlaybackSession(reason) {
+  pendingPlaybackResumeSeconds = 0;
+  pendingPlaybackResumeIndex = -1;
+  restoredPlaybackSessionActive = false;
+  removeLocalStorageItem(PLAYBACK_SESSION_STORE_KEY);
+}
+function restoreLastPlaybackSession() {
+  var helper = playbackSessionStateApi();
+  if (!helper || typeof helper.normalizePlaybackSessionSnapshot !== 'function') return false;
+  var session = helper.normalizePlaybackSessionSnapshot(getLocalStorageJson(PLAYBACK_SESSION_STORE_KEY, null), { now: Date.now() });
+  if (!session) {
+    removeLocalStorageItem(PLAYBACK_SESSION_STORE_KEY);
+    return false;
+  }
+  playQueue = session.queue.map(function(song){ return cloneSong(song); });
+  currentIdx = session.currentIdx;
+  pendingPlaybackResumeSeconds = session.currentTime || 0;
+  pendingPlaybackResumeIndex = currentIdx;
+  restoredPlaybackSessionActive = true;
+  playing = false;
+  setPlayIcon(false);
+  var song = playQueue[currentIdx] || null;
+  currentLocalSong = null;
+  activeRadioContext = song && song.radioContext || null;
+  if (song) {
+    document.getElementById('hint').classList.add('hidden');
+    document.getElementById('thumb-title').textContent = song.name || song.title || '未知歌曲';
+    document.getElementById('thumb-artist').textContent = song.artist || song.author || '';
+    updateControlTrackInfo(song);
+    document.getElementById('thumb-wrap').classList.add('visible');
+    updateLikeButtons(song);
+  }
+  updateCustomCoverButton();
+  updateCustomLyricControls();
+  updatePlaybackProgressUi();
+  safeRenderQueuePanel('restore-playback-session', { scrollCurrent: true });
+  safeShelfRebuild('restore-playback-session');
+  updateEmptyHomeVisibility({ forceLoad: false });
+  return true;
+}
 async function apiJson(url, opts) {
   if (window.MineradioApi && typeof window.MineradioApi.request === 'function') {
     return window.MineradioApi.request(url, opts || {});
@@ -19512,6 +19608,7 @@ function queueSong(song, opts) {
   }
   safeRenderQueuePanel('queue-song');
   safeShelfRebuild('queue-song');
+  savePlaybackSessionDebounced('queue-song');
   return insertAt;
 }
 function queueSongNext(song) {
@@ -19811,6 +19908,9 @@ function scheduleAudioResumePosition(media, seconds, token) {
     try {
       media.currentTime = target;
       applied = true;
+      pendingPlaybackResumeSeconds = 0;
+      pendingPlaybackResumeIndex = -1;
+      restoredPlaybackSessionActive = false;
       if (typeof syncBeatMapPlaybackCursor === 'function') syncBeatMapPlaybackCursor(target, true);
       if (typeof syncPodcastDjMapCursor === 'function') syncPodcastDjMapCursor(target, true);
       updatePlaybackProgressUi();
@@ -19825,6 +19925,14 @@ function scheduleAudioResumePosition(media, seconds, token) {
 async function playQueueAt(idx, opts) {
   opts = opts || {};
   if (idx < 0 || idx >= playQueue.length) return;
+  if (opts.resumeAt == null && restoredPlaybackSessionActive && idx === pendingPlaybackResumeIndex && pendingPlaybackResumeSeconds > 0) {
+    opts = Object.assign({}, opts, { resumeAt: pendingPlaybackResumeSeconds });
+  }
+  if (idx !== pendingPlaybackResumeIndex || opts.resumeAt == null) {
+    pendingPlaybackResumeSeconds = 0;
+    pendingPlaybackResumeIndex = -1;
+    restoredPlaybackSessionActive = false;
+  }
   markRenderInteraction('track-switch', 1500);
   var playPhase = 'start';
   function markPlayPhase(name) { playPhase = name; }
@@ -20160,14 +20268,17 @@ function shuffleQueue() {
   currentIdx = 0; safeRenderQueuePanel('shuffle-queue');
   showToast('队列已随机');
   safeShelfRebuild('shuffle-queue');
+  savePlaybackSessionDebounced('shuffle-queue');
 }
 function clearQueue() {
   playQueue = []; currentIdx = -1;
+  clearPlaybackSession('clear-queue');
   safeRenderQueuePanel('clear-queue');
   safeShelfRebuild('clear-queue');
   updateCustomCoverButton();
   updateCustomLyricControls();
   updateEmptyHomeVisibility({ forceLoad: false });
+  savePlaybackSessionDebounced('remove-queue-item');
 }
 function removeFromQueue(idx) {
   if (idx < 0 || idx >= playQueue.length) return;
@@ -21346,7 +21457,8 @@ function getPlaybackDurationSeconds() {
   return playbackDurationFromSong(currentCoverSong());
 }
 function getPlaybackCurrentSeconds() {
-  return audio && isFinite(audio.currentTime) && audio.currentTime > 0 ? audio.currentTime : 0;
+  if (audio && isFinite(audio.currentTime) && audio.currentTime > 0) return audio.currentTime;
+  return pendingPlaybackResumeSeconds > 0 ? pendingPlaybackResumeSeconds : 0;
 }
 function setProgressVisual(percent) {
   percent = clampRange(percent || 0, 0, 100);
@@ -21368,6 +21480,10 @@ function bindPlaybackProgressEvents(audioEl) {
   audioEl._mineradioProgressBound = true;
   ['loadedmetadata', 'durationchange', 'timeupdate', 'seeked', 'play', 'pause', 'emptied'].forEach(function(name){
     audioEl.addEventListener(name, updatePlaybackProgressUi);
+  });
+  audioEl.addEventListener('timeupdate', function(){ savePlaybackSessionDebounced('timeupdate'); });
+  ['loadedmetadata', 'durationchange', 'seeked', 'play', 'pause'].forEach(function(name){
+    audioEl.addEventListener(name, function(){ savePlaybackSessionDebounced(name); });
   });
   ['play', 'playing', 'pause', 'ended', 'emptied', 'abort', 'error'].forEach(function(name){
     audioEl.addEventListener(name, function(){ syncPlaybackStateFromAudioEvent(name); });
@@ -21397,8 +21513,12 @@ function seekFromProgressPointer(e, emitParticles) {
   var rect = bar.getBoundingClientRect();
   var ratio = clampRange((e.clientX - rect.left) / rect.width, 0, 1);
   audio.currentTime = ratio * durationSec;
+  pendingPlaybackResumeSeconds = 0;
+  pendingPlaybackResumeIndex = -1;
+  restoredPlaybackSessionActive = false;
   setProgressVisual(ratio * 100);
   syncBeatMapPlaybackCursor(audio.currentTime);
+  savePlaybackSessionDebounced('seek');
   if (emitParticles) emitProgressDragParticles(e.clientX, rect.top + rect.height / 2);
 }
 var progressBar = document.getElementById('progress-bar');
@@ -28087,6 +28207,7 @@ if (customLyricInput) {
     }
   });
 }
+restoreLastPlaybackSession();
 safeRenderQueuePanel('startup');
 updateCustomCoverButton();
 updateCustomLyricControls();
