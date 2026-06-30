@@ -61,6 +61,32 @@
     return !normalizeShelfViewportLock(viewportLockEnabled);
   }
 
+  function shelfRenderCameraMode(viewportLockEnabled) {
+    return normalizeShelfViewportLock(viewportLockEnabled) ? 'reference' : 'main';
+  }
+
+  function resolveShelfLayoutPreset(viewportLockEnabled, preset) {
+    if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
+    var id = Math.floor(Number(preset));
+    return isFinite(id) && id >= 0 ? id : 0;
+  }
+
+  var SHELF_REFERENCE_CAMERA_ORBITS = [
+    { theta: 0, phi: 0.08, radius: 6.6 },
+    { theta: 0, phi: 0.03, radius: 6.2 },
+    { theta: 0, phi: 0.15, radius: 7.0 },
+    { theta: 0, phi: 0.05, radius: 8.0 },
+    { theta: 0, phi: 0.04, radius: 6.5 },
+    { theta: -0.52, phi: 0.34, radius: 9.4 },
+    { theta: 0.18, phi: 0.10, radius: 7.4 },
+  ];
+
+  function shelfReferenceCameraOrbit(viewportLockEnabled, preset) {
+    var id = resolveShelfLayoutPreset(viewportLockEnabled, preset);
+    var ref = SHELF_REFERENCE_CAMERA_ORBITS[id] || SHELF_REFERENCE_CAMERA_ORBITS[0];
+    return { theta: ref.theta, phi: ref.phi, radius: ref.radius };
+  }
+
   function shelfBeatMotion(state) {
     state = state || {};
     function positive(value, max) {
@@ -269,7 +295,9 @@
     recordShelfCardAction: recordShelfCardAction,
     recordStageStep: recordStageStep,
     recordToolbarLayout: recordToolbarLayout,
+    resolveShelfLayoutPreset: resolveShelfLayoutPreset,
     resolveDetailOrientation: resolveDetailOrientation,
+    shelfReferenceCameraOrbit: shelfReferenceCameraOrbit,
     shelfControlBounds: shelfControlBounds,
     shelfBeatMotion: shelfBeatMotion,
     shelfMotionBinding: shelfMotionBinding,
@@ -279,6 +307,7 @@
     shouldBindShelfToPresetCamera: shouldBindShelfToPresetCamera,
     shouldBindShelfToBackgroundMotion: shouldBindShelfToBackgroundMotion,
     shouldUsePresetShelfLayout: shouldUsePresetShelfLayout,
+    shelfRenderCameraMode: shelfRenderCameraMode,
     shouldApplyStartupStarfieldPreview: shouldApplyStartupStarfieldPreview,
     shouldCaptureShelfViewportAnchor: shouldCaptureShelfViewportAnchor,
     shouldContentShelfHandleWheel: shouldContentShelfHandleWheel,

@@ -80,6 +80,7 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   const forecastUrl = buildOpenMeteoForecastUrl({ latitude: 31.2, longitude: 121.5, timezone: 'Asia/Shanghai' });
   assert.match(forecastUrl, /latitude=31\.2/);
   assert.match(forecastUrl, /current=temperature_2m/);
+  assert.match(forecastUrl, /hourly=precipitation_probability/);
 
   const weather = normalizeOpenMeteoWeather({
     timezone: 'Asia/Shanghai',
@@ -94,9 +95,20 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
       is_day: 1,
       time: '2026-06-28T09:00',
     },
+    hourly: {
+      time: ['2026-06-28T08:00', '2026-06-28T09:00', '2026-06-28T10:00', '2026-06-28T11:00'],
+      weather_code: [3, 61, 0, null],
+      temperature_2m: [17.8, 18.2, 20.3, 21.1],
+      precipitation_probability: [10, 65, 5, 0],
+    },
   }, { name: '上海', country: 'China', latitude: 31.2, longitude: 121.5, timezone: 'Asia/Shanghai' }, new Date('2026-06-28T09:00:00+08:00'));
 
   assert.equal(weather.label, '雨');
+  assert.deepEqual(weather.hourlyForecast.slice(0, 2), [
+    { time: '2026-06-28T09:00', hourLabel: '09:00', temperature: 18.2, precipitationProbability: 65, weatherCode: 61, label: '雨' },
+    { time: '2026-06-28T10:00', hourLabel: '10:00', temperature: 20.3, precipitationProbability: 5, weatherCode: 0, label: '晴' },
+  ]);
+  assert.equal(weather.hourlyForecast[2].label, '天气');
   assert.equal(weather.mood.key, 'rain');
   assert.equal(buildWeatherMood({ weatherCode: 0, temperature: 22, isDay: 0 }, new Date('2026-06-28T22:00:00')).key, 'clear-night');
   assert.deepEqual(weatherRadioSeedQueries({ key: 'rain-night' }).slice(0, 2), ['陈奕迅 阴天快乐', '周杰伦 雨下一整晚']);

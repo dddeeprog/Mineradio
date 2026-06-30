@@ -16,6 +16,9 @@
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
+<script src="home-weather-hero-state.js"></script>
+<script src="comment-barrage-state.js"></script>
+<script src="visual-cover-state.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -253,16 +256,44 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-hero::after{content:'';position:absolute;left:28px;right:28px;bottom:22px;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--home-accent) 0%,transparent),color-mix(in srgb,var(--home-accent) 52%,transparent),rgba(36,66,255,.24),rgba(248,244,238,.18),color-mix(in srgb,var(--home-accent) 0%,transparent));opacity:.82;pointer-events:none}
 .home-hero-inner{position:relative;z-index:2;height:100%;display:grid;grid-template-columns:minmax(0,1.16fr) minmax(150px,.64fr);grid-template-rows:auto auto auto auto minmax(150px,1fr);column-gap:18px}
 .home-hero-inner.home-construction-inner{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:18px;padding:4px 2px;min-height:100%}
+.home-weather-hero-inner{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto auto auto minmax(118px,1fr);align-content:start;row-gap:0}
 .home-kicker{grid-column:1;font-size:10px;font-weight:780;letter-spacing:.18em;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.36));text-transform:uppercase;margin-bottom:14px}
 .home-title{grid-column:1;font-size:clamp(34px,4.6vw,58px);line-height:.98;font-weight:760;letter-spacing:0;color:rgba(255,255,255,.98);max-width:380px;text-shadow:0 10px 36px rgba(0,0,0,.26)}
 .home-title.home-construction-title{max-width:620px;font-size:clamp(32px,4.5vw,64px);line-height:1.08}
+.home-weather-title{display:flex;align-items:flex-start;gap:12px;max-width:100%;font-size:clamp(44px,6vw,78px);line-height:.92}
+.home-weather-degree{font-size:.42em;margin-top:.1em;color:color-mix(in srgb,var(--home-accent) 52%,rgba(255,255,255,.82));text-shadow:0 0 28px color-mix(in srgb,var(--home-accent) 18%,transparent)}
+.home-weather-place{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:12px}
+.home-weather-city{font-size:22px;font-weight:760;color:rgba(255,255,255,.94)}
+.home-weather-label{height:28px;padding:0 10px;border-radius:999px;border:1px solid color-mix(in srgb,var(--home-accent) 28%,rgba(255,255,255,.10));background:color-mix(in srgb,var(--home-accent) 10%,rgba(255,255,255,.050));display:inline-flex;align-items:center;color:rgba(255,255,255,.80);font-size:11px;font-weight:760}
 .home-sub{grid-column:1;margin-top:14px;font-size:13px;line-height:1.62;color:rgba(255,255,255,.62);max-width:348px}
 .home-weather-meta{grid-column:1;display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .home-weather-pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.050);display:inline-flex;align-items:center;color:rgba(255,255,255,.70);font-size:11px;font-weight:680}
+.home-lyric-card{grid-column:1;margin-top:24px;padding:18px 18px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.075);background:linear-gradient(145deg,rgba(255,255,255,.072),rgba(255,255,255,.026));box-shadow:inset 0 1px 0 rgba(255,255,255,.065),0 18px 44px rgba(0,0,0,.18);min-height:108px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+.home-lyric-label{font-size:10px;font-weight:780;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 60%,rgba(255,255,255,.42));margin-bottom:10px}
+.home-lyric-line{font-size:clamp(20px,2.5vw,34px);line-height:1.22;font-weight:760;color:rgba(255,255,255,.94);letter-spacing:0;text-shadow:0 16px 46px rgba(0,0,0,.30);transition:opacity .26s ease,transform .26s ease}
+.home-lyric-line.switching{opacity:0;transform:translateY(6px)}
+.home-weather-note{margin-top:12px;font-size:12px;line-height:1.55;color:rgba(255,255,255,.50);max-width:420px}
+.home-weather-forecast{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin-top:16px}
+.home-weather-hour{min-width:0;border-radius:12px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);padding:8px 6px;text-align:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.home-weather-hour-time{font-size:10px;font-weight:760;color:rgba(255,255,255,.48)}
+.home-weather-hour-temp{margin-top:4px;font-size:15px;font-weight:820;color:rgba(255,255,255,.92)}
+.home-weather-hour-rain{margin-top:2px;font-size:10px;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.50));white-space:nowrap}
+.home-weather-hour-label{margin-top:3px;font-size:10px;color:rgba(255,255,255,.54);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-weather-advice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.home-weather-advice-card{min-width:0;border-radius:13px;border:1px solid rgba(255,255,255,.075);background:linear-gradient(145deg,rgba(255,255,255,.060),rgba(255,255,255,.024));padding:9px 10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.055)}
+.home-weather-advice-title{font-size:10px;font-weight:820;letter-spacing:.10em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.44));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-weather-advice-text{margin-top:5px;font-size:11px;line-height:1.35;color:rgba(255,255,255,.64);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .home-quick-row{grid-column:1;position:relative;z-index:3;display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
 .home-chip{height:32px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.060);color:rgba(255,255,255,.76);font-family:inherit;font-size:11.5px;font-weight:680;cursor:pointer;transition:background .18s,border-color .18s,color .18s,transform .18s,box-shadow .18s}
 .home-chip:hover{background:color-mix(in srgb,var(--home-accent) 10%,transparent);border-color:color-mix(in srgb,var(--home-accent) 38%,rgba(255,255,255,.10));color:#fff;box-shadow:0 10px 26px color-mix(in srgb,var(--home-accent) 8%,transparent);transform:translateY(-1px)}
+.home-quick-row .home-chip{height:36px;background:var(--saved-button-glass-bg);border-color:transparent;box-shadow:var(--saved-button-glass-shadow);backdrop-filter:var(--saved-button-glass-filter);-webkit-backdrop-filter:var(--saved-button-glass-filter)}
+.home-quick-row .home-chip:hover{background:var(--saved-button-glass-hover-bg);box-shadow:var(--saved-button-glass-hover-shadow);border-color:transparent}
 .home-console-chip{height:36px;border-color:color-mix(in srgb,var(--home-accent) 34%,rgba(255,255,255,.12));background:color-mix(in srgb,var(--home-accent) 12%,rgba(255,255,255,.055));color:#fff}
+.home-weather-city-editor-wrap{position:relative;display:inline-flex}
+.home-weather-city-pop{position:absolute;left:0;top:44px;width:248px;padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:var(--saved-panel-glass-bg);box-shadow:var(--saved-panel-glass-shadow);backdrop-filter:var(--saved-panel-glass-filter);-webkit-backdrop-filter:var(--saved-panel-glass-filter);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-6px) scale(.98);transition:opacity .18s,visibility .18s,transform .18s}
+.home-weather-city-editor-wrap.open .home-weather-city-pop{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0) scale(1)}
+.home-weather-city-pop input{width:100%;height:36px;border-radius:12px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);color:rgba(255,255,255,.92);font-family:inherit;font-size:13px;padding:0 11px;outline:none}
+.home-weather-city-pop input:focus{border-color:color-mix(in srgb,var(--home-accent) 42%,rgba(255,255,255,.14));background:rgba(255,255,255,.075)}
 .home-visual{grid-column:2;grid-row:2 / span 2;position:relative;align-self:center;justify-self:end;width:100%;max-width:300px;height:74px;margin-top:0;pointer-events:none;filter:drop-shadow(0 18px 34px rgba(0,0,0,.28))}
 .home-visual.generated .home-sleeve,.home-visual.generated .home-disc{display:none}
 .home-radio-img{display:none}
@@ -342,6 +373,22 @@ body.empty-home-active.controls-visible #empty-home{bottom:128px}
 
 /* ---------- 顶部右侧按钮 ---------- */
 #top-right{position:fixed;z-index:10;top:24px;right:24px;display:flex;align-items:center;gap:10px}
+.weather-city-wrap{position:relative;display:flex;align-items:center}
+.weather-city-chip{height:44px;max-width:190px;padding:0 14px;border-radius:24px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:rgba(255,255,255,.78);font-family:inherit;font-size:12px;font-weight:700;letter-spacing:.2px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:background .22s,border-color .22s,color .22s,box-shadow .22s,transform .22s}
+.weather-city-chip:hover,.weather-city-wrap.open .weather-city-chip{background:rgba(255,255,255,.085);border-color:color-mix(in srgb,var(--home-accent) 38%,rgba(255,255,255,.16));color:#fff;box-shadow:0 14px 38px rgba(0,0,0,.18),0 0 24px color-mix(in srgb,var(--home-accent) 10%,transparent);transform:translateY(-1px)}
+.weather-city-chip .weather-city-dot{width:7px;height:7px;border-radius:50%;background:var(--home-accent);box-shadow:0 0 14px color-mix(in srgb,var(--home-accent) 68%,transparent);flex-shrink:0}
+.weather-city-chip span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.weather-city-pop{position:absolute;right:0;top:52px;width:286px;padding:14px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:var(--saved-panel-glass-bg);box-shadow:var(--saved-panel-glass-shadow);backdrop-filter:var(--saved-panel-glass-filter);-webkit-backdrop-filter:var(--saved-panel-glass-filter);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-6px) scale(.98);transition:opacity .18s,visibility .18s,transform .18s}
+.weather-city-wrap.open .weather-city-pop{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0) scale(1)}
+.weather-detail-title{font-size:15px;font-weight:820;color:rgba(255,255,255,.94)}
+.weather-detail-sub{margin-top:4px;font-size:11px;color:rgba(255,255,255,.50)}
+.weather-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.weather-detail-item{border-radius:12px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);padding:9px 10px}
+.weather-detail-item b{display:block;font-size:10px;color:rgba(255,255,255,.44);font-weight:740;margin-bottom:4px}
+.weather-detail-item span{font-size:12px;font-weight:760;color:rgba(255,255,255,.82)}
+.weather-city-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:9px}
+.weather-city-actions button{height:30px;border-radius:10px;border:1px solid rgba(255,255,255,.085);background:rgba(255,255,255,.050);color:rgba(255,255,255,.70);font-family:inherit;font-size:11px;font-weight:720;cursor:pointer}
+.weather-city-actions button:hover{border-color:color-mix(in srgb,var(--home-accent) 36%,rgba(255,255,255,.12));background:color-mix(in srgb,var(--home-accent) 9%,rgba(255,255,255,.055));color:#fff}
 .icon-btn{width:44px;height:44px;border:1px solid rgba(255,255,255,0.08);border-radius:50%;background:rgba(255,255,255,0.035);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:rgba(255,255,255,0.55);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .3s;font-family:inherit;padding:0}
 .icon-btn:hover{background:rgba(255,255,255,0.09);border-color:rgba(255,255,255,0.18);color:#fff;transform:scale(1.04)}
 .icon-btn.active{color:var(--champagne);border-color:rgba(244,210,138,0.44);background:rgba(244,210,138,0.10)}
@@ -571,6 +618,9 @@ body.home-controls-locked #bottom-bar{opacity:0!important;pointer-events:none!im
 .ctrl-btn.active{color:rgba(210,244,241,.90);text-shadow:0 0 12px rgba(0,245,212,.16)}
 .ctrl-btn.liked{color:#ff7a90;text-shadow:0 0 18px rgba(255,122,144,.36)}
 .ctrl-btn.busy{opacity:.55;pointer-events:none}
+.comment-barrage-toggle{font-size:19px;font-weight:820;line-height:1;letter-spacing:0}
+.comment-barrage-toggle.active{color:#fff3c2;text-shadow:0 0 16px rgba(244,210,138,.28)}
+#comment-barrage-layer{display:none}
 #play-mode-btn[data-mode="loop"]{color:rgba(255,255,255,.70)}
 #play-mode-btn[data-mode="shuffle"],#play-mode-btn[data-mode="single"]{color:rgba(210,244,241,.90);text-shadow:0 0 12px rgba(0,245,212,.15)}
 #play-mode-btn.mode-switching #play-mode-icon{animation:play-mode-pop .42s cubic-bezier(.16,1,.3,1)}
@@ -734,7 +784,6 @@ body.immersive-mode #search-area,
 body.immersive-mode #top-right,
 body.immersive-mode #thumb-wrap,
 body.immersive-mode #fx-fab,
-body.immersive-mode #record-shelf-fab-actions,
 body.immersive-mode #fx-panel,
 body.immersive-mode #trial-banner,
 body.immersive-mode #ai-depth-chip,
@@ -1033,12 +1082,6 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 #fx-fab:hover,#fx-fab.active{transform:translateY(-2px) scale(1.04);background:rgba(0,245,212,.075);border-color:rgba(0,245,212,.50);color:#fff}
 #fx-fab svg{transition:transform .38s cubic-bezier(.16,1,.3,1)}
 #fx-fab.active svg{transform:rotate(90deg)}
-#record-shelf-fab-actions{position:fixed;z-index:18;right:24px;bottom:90px;display:flex;flex-direction:column;gap:10px;opacity:0;pointer-events:none;transform:translateY(8px) scale(.96);transition:bottom .38s cubic-bezier(.16,1,.3,1),opacity .22s,transform .28s cubic-bezier(.16,1,.3,1)}
-body.record-shelf-actions-visible #record-shelf-fab-actions{opacity:1;pointer-events:auto;transform:translateY(0) scale(1)}
-#record-shelf-fab-actions .record-shelf-fab-btn{width:54px;height:54px;border-radius:50%;border:1px solid rgba(0,245,212,.30);background:linear-gradient(145deg,rgba(255,255,255,.16),rgba(255,255,255,.055) 48%,rgba(0,245,212,.055));color:rgba(232,236,239,.88);display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(26px) saturate(1.34);-webkit-backdrop-filter:blur(26px) saturate(1.34);box-shadow:0 14px 40px rgba(0,0,0,.34),0 0 24px rgba(0,245,212,.07),inset 0 1px 0 rgba(255,255,255,.18);transition:transform .28s cubic-bezier(.16,1,.3,1),background .28s,border-color .28s,color .28s,box-shadow .28s}
-#record-shelf-fab-actions .record-shelf-fab-btn:hover{transform:translateY(-2px) scale(1.04);background:rgba(0,245,212,.075);border-color:rgba(0,245,212,.50);color:#fff}
-#record-shelf-fab-actions .record-shelf-fab-btn svg{width:22px;height:22px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
-body.controls-visible #record-shelf-fab-actions,body.desktop-shell.diy-mode.controls-visible #record-shelf-fab-actions{bottom:192px}
 #fx-fab-hide-btn{position:fixed;z-index:20;right:84px;bottom:37px;width:18px;height:28px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);color:rgba(255,255,255,.34);font-size:11px;line-height:1;opacity:0;transform:translateX(6px) scale(.92);transition:right .28s cubic-bezier(.16,1,.3,1),bottom .38s cubic-bezier(.16,1,.3,1),opacity .18s,transform .18s,background .18s,color .18s,border-color .18s;cursor:pointer}
 #fx-fab:hover + #fx-fab-hide-btn,#fx-fab-hide-btn:hover,#fx-fab-hide-btn.on{opacity:1;transform:translateX(0) scale(1)}
 #fx-fab-hide-btn:hover,#fx-fab-hide-btn.on{border-color:rgba(var(--fc-accent-rgb),.34);background:rgba(var(--fc-accent-rgb),.10);color:#fff}
@@ -1051,7 +1094,6 @@ body.desktop-shell.diy-mode.controls-visible #fx-fab-hide-btn{bottom:139px}
 body.immersive-mode #fx-fab-hide-btn{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 body.desktop-shell.diy-mode #fx-panel{top:64px;bottom:132px;max-height:none}
 body.desktop-shell.diy-mode #fx-fab{bottom:24px}
-body.desktop-shell.diy-mode #record-shelf-fab-actions{bottom:90px}
 body.desktop-shell.diy-mode #fx-fab-hide-btn{bottom:37px}
 body.controls-visible #fx-fab,
 body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:126px}
@@ -1060,10 +1102,8 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 @media (max-height:760px){
   body.desktop-shell.diy-mode #fx-panel{top:56px;bottom:116px;width:min(410px,calc(100vw - 48px));padding:14px}
   body.desktop-shell.diy-mode #fx-fab{bottom:22px}
-  body.desktop-shell.diy-mode #record-shelf-fab-actions{bottom:88px}
   body.desktop-shell.diy-mode #fx-fab-hide-btn{bottom:35px}
   body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:112px}
-  body.desktop-shell.diy-mode.controls-visible #record-shelf-fab-actions{bottom:178px}
   body.desktop-shell.diy-mode.controls-visible #fx-fab-hide-btn{bottom:125px}
 }
 @media (max-width:980px){
@@ -1356,7 +1396,7 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .podcast-inline-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 7px}
 .podcast-inline-head .pl-section-label{margin:0}
 .panel-tab.active,.queue-item.now,.mini-queue-item.now,.preset-card.active,.fx-toggle.on,.fx-seg button.active{border-color:rgba(var(--fc-accent-rgb),.34)!important;background:rgba(var(--fc-accent-rgb),.085)!important;color:#fff!important}
-#search-box:focus-within,#fx-panel,#fx-fab,#fx-fab:hover,#fx-fab.active,#record-shelf-fab-actions .record-shelf-fab-btn:hover,#upload-btn:hover,#home-btn:hover{border-color:rgba(var(--fc-accent-rgb),.42)!important;box-shadow:0 16px 46px rgba(var(--fc-accent-rgb),.08),inset 0 1px 0 rgba(255,255,255,.10)}
+#search-box:focus-within,#fx-panel,#fx-fab,#fx-fab:hover,#fx-fab.active,#upload-btn:hover,#home-btn:hover{border-color:rgba(var(--fc-accent-rgb),.42)!important;box-shadow:0 16px 46px rgba(var(--fc-accent-rgb),.08),inset 0 1px 0 rgba(255,255,255,.10)}
 #search-mode-tabs button.active{background:rgba(var(--fc-accent-rgb),.12)!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(var(--fc-accent-rgb),.28),0 8px 24px rgba(var(--fc-accent-rgb),.07)!important}
 #search-results::-webkit-scrollbar-thumb,#fx-panel::-webkit-scrollbar-thumb{background:rgba(var(--fc-accent-rgb),.30)!important}
 #fx-panel{scrollbar-color:rgba(var(--fc-accent-rgb),.30) transparent!important}
@@ -1950,9 +1990,36 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <section id="empty-home" aria-label="Mineradio home">
   <div class="empty-home-shell">
     <div class="home-hero">
-      <div class="home-hero-inner home-construction-inner">
-        <div class="home-title home-construction-title">🚧此处施工，敬请期待🚧</div>
-        <button class="home-chip home-console-chip" type="button" onclick="openHomePlayerConsole()">展开播放器控制台</button>
+      <div class="home-hero-inner home-weather-hero-inner">
+        <div class="home-kicker" id="home-weather-kicker">Weather · Lyric Drift</div>
+        <div class="home-title home-weather-title"><span id="home-weather-temp">--</span><span class="home-weather-degree">°</span></div>
+        <div class="home-weather-place">
+          <span class="home-weather-city" id="home-weather-city">上海</span>
+          <span class="home-weather-label" id="home-weather-label">正在整理天气</span>
+        </div>
+        <div class="home-weather-meta" id="home-weather-meta"></div>
+        <div class="home-lyric-card">
+          <div class="home-lyric-label">Random Lyric</div>
+          <div class="home-lyric-line" id="home-random-lyric">天气加载的时候，先听一口空气。</div>
+          <div class="home-weather-note" id="home-weather-note">让今天的天气替你挑一段旋律。</div>
+          <div class="home-weather-forecast" id="home-weather-forecast"></div>
+          <div class="home-weather-advice" id="home-weather-advice"></div>
+        </div>
+        <div class="home-quick-row">
+          <button class="home-chip home-console-chip" type="button" data-home-radio-start>天气电台</button>
+          <span id="home-weather-city-editor-wrap" class="home-weather-city-editor-wrap">
+            <button id="home-weather-city-switch" class="home-chip" type="button" onclick="openHomeWeatherCityEditor(event)">切换城市</button>
+            <div id="home-weather-city-pop" class="home-weather-city-pop" onclick="event.stopPropagation()">
+              <input id="home-weather-city-input" type="text" value="上海" placeholder="输入城市名">
+              <div class="weather-city-actions">
+                <button id="home-weather-city-submit-btn" type="button">确定</button>
+                <button id="home-weather-city-locate-btn" type="button">定位</button>
+                <button id="home-weather-city-cancel-btn" type="button">取消</button>
+              </div>
+            </div>
+          </span>
+          <button class="home-chip" type="button" onclick="openHomePlayerConsole()">播放器控制台</button>
+        </div>
       </div>
     </div>
 
@@ -2008,6 +2075,16 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <!-- 顶部右侧 (只保留用户) -->
 <div id="top-right">
   <button id="user-capsule-hide-btn" class="user-capsule-hide-btn" type="button" onclick="toggleUserCapsuleAutoHide(event)" title="自动隐藏账号胶囊">‹</button>
+  <div id="weather-city-wrap" class="weather-city-wrap">
+    <button id="weather-city-chip" class="weather-city-chip" type="button" title="查看天气详情" aria-label="查看天气详情">
+      <span class="weather-city-dot"></span><span id="weather-city-chip-label">上海 · 天气</span>
+    </button>
+    <div id="weather-detail-pop" class="weather-city-pop weather-detail-pop" onclick="event.stopPropagation()">
+      <div class="weather-detail-title" id="weather-detail-title">上海 · 天气</div>
+      <div class="weather-detail-sub" id="weather-detail-sub">正在整理天气详情</div>
+      <div class="weather-detail-grid" id="weather-detail-grid"></div>
+    </div>
+  </div>
   <button id="home-btn" class="icon-btn" onclick="goHome()" title="回到 Home" aria-label="回到 Home">
     <svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8"/><path d="M5 10v10h14V10"/><path d="M9.5 20v-5h5v5"/></svg>
   </button>
@@ -2020,15 +2097,6 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   <svg width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M4 7h8"/><path d="M16 7h4"/><circle cx="14" cy="7" r="2"/><path d="M4 17h4"/><path d="M12 17h8"/><circle cx="10" cy="17" r="2"/></svg>
 </button>
 <button id="fx-fab-hide-btn" type="button" onclick="toggleFxFabAutoHide(event)" title="自动隐藏视觉控制台">‹</button>
-<div id="record-shelf-fab-actions" aria-hidden="true">
-  <button class="record-shelf-fab-btn" type="button" data-record-shelf-action="top" title="返回顶部" aria-label="返回顶部">
-    <svg viewBox="0 0 24 24"><path d="M6 5h12"/><path d="M12 19V8"/><path d="M7.5 12.5 12 8l4.5 4.5"/></svg>
-  </button>
-  <button class="record-shelf-fab-btn" type="button" data-record-shelf-action="locate" title="定位当前歌曲" aria-label="定位当前歌曲">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/></svg>
-  </button>
-</div>
-
 <!-- 控制台 (右侧贴边自动显示, 无关闭按钮) -->
 <div id="fx-panel">
   <div class="fx-head">
@@ -2164,6 +2232,13 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
       <div class="fx-slider"><label>景深位置</label><input id="fx-lyricz" type="range" min="-1.6" max="1.6" step="0.01"><output></output></div>
       <div class="fx-slider"><label>上下角度</label><input id="fx-lyrictiltx" type="range" min="-42" max="42" step="1"><output></output></div>
       <div class="fx-slider"><label>左右角度</label><input id="fx-lyrictilty" type="range" min="-42" max="42" step="1"><output></output></div>
+      <div class="fx-section-label">3D 评论</div>
+      <div class="fx-slider"><label>评论大小</label><input id="fx-comment-size" type="range" min="0.55" max="1.35" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>散开范围</label><input id="fx-comment-spread" type="range" min="0.7" max="1.8" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>空间深度</label><input id="fx-comment-depth" type="range" min="0.6" max="2.2" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>评论透明</label><input id="fx-comment-opacity" type="range" min="0.2" max="1" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>评论密度</label><input id="fx-comment-density" type="range" min="0.55" max="3.4" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>存在时长</label><input id="fx-comment-lifetime" type="range" min="0.55" max="2.2" step="0.01"><output></output></div>
     </div>
   </div>
 
@@ -2474,6 +2549,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
     <button id="mini-queue-btn" class="ctrl-btn" onclick="toggleMiniQueue(event)" title="当前队列"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
     </div>
     <div class="control-cluster modes">
+    <button id="comment-barrage-btn" class="ctrl-btn comment-barrage-toggle" onclick="toggleCommentBarrage()" title="评论弹幕" aria-label="评论弹幕" aria-pressed="false">弹</button>
     <button class="ctrl-btn lyrics-toggle-btn" onclick="toggleLyricsPanel()" title="歌词"><span class="lyrics-word-icon">词</span></button>
     <div id="volume-control" class="volume-control">
       <button id="volume-btn" class="ctrl-btn" onclick="toggleVolumePanel(event)" title="音量 / 静音"><svg id="volume-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15 9.5a4 4 0 0 1 0 5"/></svg></button>
@@ -2489,6 +2565,8 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
     </div>
   </div>
 </div>
+
+<div id="comment-barrage-layer" aria-hidden="true"></div>
 
 <input type="file" id="file-input" accept=".mp3,.flac,.wav,.ogg,.m4a,.jpg,.jpeg,.png,.webp" multiple style="display:none">
 <input type="file" id="background-image-input" accept=".jpg,.jpeg,.png,.webp,.mp4,.webm,.mov,image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" style="display:none">
@@ -2807,11 +2885,35 @@ var homeVisualPresetActive = false;
 var homeVisualPrevPreset = 0;
 var HOME_LISTEN_STATS_KEY = 'mineradio-listen-stats-v1';
 var HOME_WEATHER_CITY_KEY = 'mineradio-weather-city';
+var HOME_WEATHER_CACHE_KEY = 'mineradio-weather-radio-cache-v1';
+var HOME_WEATHER_FRESH_MS = 30 * 60 * 1000;
+var HOME_WEATHER_STALE_MS = 6 * 60 * 60 * 1000;
 var homeWeatherRadioState = { loading: false, loaded: false, city: localStorage.getItem(HOME_WEATHER_CITY_KEY) || '上海', weather: null, radio: null, error: '', updatedAt: 0 };
 var homeWeatherToken = 0;
 var homeWeatherLoadTimer = null;
+var homeWeatherLoadTimerDueAt = 0;
 var homeWeatherLoadPromise = null;
 var weatherRadioStartBusy = false;
+var homeLyricRotateTimer = null;
+var homeCurrentLyricSnippet = '';
+var COMMENT_BARRAGE_STORE_KEY = 'mineradio-comment-barrage-enabled-v1';
+var COMMENT_BARRAGE_FETCH_LIMIT = 0;
+var commentBarrageEnabled = normalizeCommentBarrageEnabledSafe(localStorage.getItem(COMMENT_BARRAGE_STORE_KEY));
+var commentBarrageCache = {};
+var commentBarrageTimer = null;
+var commentBarrageSeq = 0;
+var commentBarrageLastEmptyKey = '';
+var commentBarrage3D = {
+  group: null,
+  comments: [],
+  active: [],
+  localIndex: 0,
+  nextSpawnAt: 0,
+  lastPreset: -1,
+  textureCache: {},
+};
+var commentBarrageBasisCache = null;
+var commentBarrageViewportFitCache = null;
 var activeRadioContext = null;
 var listenStatsState = loadListenStatsState();
 var listenSession = null;
@@ -2851,6 +2953,7 @@ var smoothWheelScrollBound = false;
 var coverProcessToken = 0, aiDepthPipeline = null, aiDepthReady = false, aiDepthBusy = false, aiDepthFailUntil = 0;
 var coverDepthCache = Object.create(null), coverDepthCacheKeys = [];
 var aiDepthLastRunAt = 0, aiDepthMinGapMs = 18000;
+var visualCoverHandoffTimer = null, visualCoverHandoffSeq = 0, pendingVisualCoverSource = null;
 var UPDATE_NOTICE_SUPPRESSED_FOR_MAINTENANCE = true;
 var updatePreviewState = {
   visible: false,
@@ -3294,6 +3397,12 @@ var fxDefaults = {
   lyricLetterSpacing: 0,
   lyricLineHeight: 1.0,
   lyricWeight: 900,
+  commentBarrageSize: 1,
+  commentBarrageSpread: 1,
+  commentBarrageDepth: 1,
+  commentBarrageOpacity: 1,
+  commentBarrageDensity: 1.35,
+  commentBarrageLifetime: 1,
   visualTintMode: 'auto',
   visualTintColor: '#9db8cf',
   uiAccentColor: '#ffffff',
@@ -3380,6 +3489,12 @@ var PACKAGED_DEFAULT_FX_SNAPSHOT = Object.freeze({
   lyricLetterSpacing: 0,
   lyricLineHeight: 1,
   lyricWeight: 900,
+  commentBarrageSize: 1,
+  commentBarrageSpread: 1,
+  commentBarrageDepth: 1,
+  commentBarrageOpacity: 1,
+  commentBarrageDensity: 1.35,
+  commentBarrageLifetime: 1,
   visualTintMode: 'auto',
   visualTintColor: '#9db8cf',
   uiAccentColor: '#ffffff',
@@ -5604,7 +5719,7 @@ var particlePointerLocalHit = new THREE.Vector3();
 var particlePointerQuat = new THREE.Quaternion();
 var particlePointerFrame = { dirty:false, ndcX:0, ndcY:0 };
 var CLICK_THRESHOLD = 6;  // 像素, 拖动 > 6px 视为 drag
-var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#record-shelf-fab-actions,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
+var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
 
 function isPointerOverUi(e) {
   if (!e) return false;
@@ -5808,7 +5923,7 @@ renderer.domElement.addEventListener('dblclick', function(e){
     var mx = (e.clientX / innerWidth) * 2 - 1;
     var my = -(e.clientY / innerHeight) * 2 + 1;
     var rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2(mx, my), camera);
+    rc.setFromCamera(new THREE.Vector2(mx, my), currentShelfRenderCamera());
     if (shelfManager.raycastCards(rc)) return;
   }
   recenterCamera();
@@ -7720,6 +7835,12 @@ function readSavedLyricLayout() {
       lyricLetterSpacing: clampRange(Number(raw.lyricLetterSpacing) || 0, -0.04, 0.18),
       lyricLineHeight: clampRange(Number(raw.lyricLineHeight) || 1, 0.86, 1.35),
       lyricWeight: clampRange(Number(raw.lyricWeight) || 900, 500, 900),
+      commentBarrageSize: commentBarrageControlValue('commentBarrageSize', raw.commentBarrageSize, fxDefaults.commentBarrageSize),
+      commentBarrageSpread: commentBarrageControlValue('commentBarrageSpread', raw.commentBarrageSpread, fxDefaults.commentBarrageSpread),
+      commentBarrageDepth: commentBarrageControlValue('commentBarrageDepth', raw.commentBarrageDepth, fxDefaults.commentBarrageDepth),
+      commentBarrageOpacity: commentBarrageControlValue('commentBarrageOpacity', raw.commentBarrageOpacity, fxDefaults.commentBarrageOpacity),
+      commentBarrageDensity: normalizeSavedCommentBarrageDensity(raw.commentBarrageDensity),
+      commentBarrageLifetime: commentBarrageControlValue('commentBarrageLifetime', raw.commentBarrageLifetime, fxDefaults.commentBarrageLifetime),
       lyricGlow: raw.lyricGlow !== false,
       lyricGlowBeat: raw.lyricGlowBeat !== false,
       lyricGlowParticles: !!raw.lyricGlowParticles,
@@ -7813,6 +7934,12 @@ function saveLyricLayout() {
       lyricLetterSpacing: clampRange(Number(fx.lyricLetterSpacing) || 0, -0.04, 0.18),
       lyricLineHeight: clampRange(Number(fx.lyricLineHeight) || 1, 0.86, 1.35),
       lyricWeight: clampRange(Number(fx.lyricWeight) || 900, 500, 900),
+      commentBarrageSize: commentBarrageControlValue('commentBarrageSize', fx.commentBarrageSize, fxDefaults.commentBarrageSize),
+      commentBarrageSpread: commentBarrageControlValue('commentBarrageSpread', fx.commentBarrageSpread, fxDefaults.commentBarrageSpread),
+      commentBarrageDepth: commentBarrageControlValue('commentBarrageDepth', fx.commentBarrageDepth, fxDefaults.commentBarrageDepth),
+      commentBarrageOpacity: commentBarrageControlValue('commentBarrageOpacity', fx.commentBarrageOpacity, fxDefaults.commentBarrageOpacity),
+      commentBarrageDensity: commentBarrageControlValue('commentBarrageDensity', fx.commentBarrageDensity, fxDefaults.commentBarrageDensity),
+      commentBarrageLifetime: commentBarrageControlValue('commentBarrageLifetime', fx.commentBarrageLifetime, fxDefaults.commentBarrageLifetime),
       lyricGlow: !!fx.lyricGlow,
       lyricGlowBeat: !!fx.lyricGlowBeat,
       lyricGlowParticles: !!fx.lyricGlowParticles,
@@ -7957,6 +8084,45 @@ function shouldUsePresetShelfLayout(viewportLockEnabled) {
   var helper = contentShelfStateHelper();
   if (helper && typeof helper.shouldUsePresetShelfLayout === 'function') return helper.shouldUsePresetShelfLayout(viewportLockEnabled);
   return !normalizeShelfViewportLock(viewportLockEnabled);
+}
+function shelfRenderCameraMode(viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfRenderCameraMode === 'function') return helper.shelfRenderCameraMode(viewportLockEnabled);
+  return normalizeShelfViewportLock(viewportLockEnabled) ? 'reference' : 'main';
+}
+function shelfUsesReferenceRenderCamera() {
+  return shelfRenderCameraMode(fx && fx.shelfViewportLock) === 'reference';
+}
+function resolveShelfLayoutPreset(viewportLockEnabled, preset) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.resolveShelfLayoutPreset === 'function') return helper.resolveShelfLayoutPreset(viewportLockEnabled, preset);
+  if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
+  var id = Math.floor(Number(preset));
+  return isFinite(id) && id >= 0 ? id : 0;
+}
+function currentShelfLayoutPreset() {
+  return resolveShelfLayoutPreset(fx && fx.shelfViewportLock, fx && fx.preset);
+}
+function shelfReferenceCameraOrbit(viewportLockEnabled, preset) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfReferenceCameraOrbit === 'function') return helper.shelfReferenceCameraOrbit(viewportLockEnabled, preset);
+  var id = resolveShelfLayoutPreset(viewportLockEnabled, preset);
+  var refs = [
+    { theta: 0, phi: 0.08, radius: 6.6 },
+    { theta: 0, phi: 0.03, radius: 6.2 },
+    { theta: 0, phi: 0.15, radius: 7.0 },
+    { theta: 0, phi: 0.05, radius: 8.0 },
+    { theta: 0, phi: 0.04, radius: 6.5 },
+    { theta: -0.52, phi: 0.34, radius: 9.4 },
+    { theta: 0.18, phi: 0.10, radius: 7.4 },
+  ];
+  return refs[id] || refs[0];
+}
+function currentShelfReferenceCameraOrbit() {
+  return shelfReferenceCameraOrbit(fx && fx.shelfViewportLock, fx && fx.preset);
+}
+function currentShelfRenderCamera() {
+  return shelfUsesReferenceRenderCamera() ? updateShelfViewportReferenceCamera() : camera;
 }
 function shelfBeatMotion(state) {
   var helper = contentShelfStateHelper();
@@ -9420,12 +9586,60 @@ function showStageLine(text, redrawOnly) {
   stageLyrics.current = mesh;
 }
 
+function copyLyricRuntimeVisualState(oldMesh, newMesh) {
+  if (!oldMesh || !newMesh || !oldMesh.userData || !newMesh.userData) return;
+  var oldData = oldMesh.userData.lyric || {};
+  var newData = newMesh.userData.lyric || {};
+  if (oldData.textMat && newData.textMat) {
+    newData.textMat.uniforms.uOpacity.value = oldData.textMat.uniforms.uOpacity.value;
+    newData.textMat.uniforms.uSolar.value = oldData.textMat.uniforms.uSolar.value;
+  }
+  if (oldData.readabilityMat && newData.readabilityMat) newData.readabilityMat.opacity = oldData.readabilityMat.opacity;
+  if (oldData.glowMat && newData.glowMat) newData.glowMat.opacity = oldData.glowMat.opacity;
+  if (oldData.sunMat && newData.sunMat) newData.sunMat.opacity = oldData.sunMat.opacity;
+  if (oldData.sparkMat && newData.sparkMat) {
+    setLyricSparkOpacity(newData, getLyricSparkOpacity(oldData));
+    setLyricSparkSize(newData, getLyricSparkSize(oldData));
+  }
+  if (oldData.sun && newData.sun) {
+    newData.sun.position.copy(oldData.sun.position);
+    newData.sun.rotation.copy(oldData.sun.rotation);
+    newData.sun.scale.copy(oldData.sun.scale);
+  }
+  if (oldData.glow && newData.glow) {
+    newData.glow.position.copy(oldData.glow.position);
+    newData.glow.rotation.copy(oldData.glow.rotation);
+  }
+  if (oldData.sparks && newData.sparks) {
+    newData.sparks.position.copy(oldData.sparks.position);
+    newData.sparks.rotation.copy(oldData.sparks.rotation);
+    newData.sparks.visible = oldData.sparks.visible;
+  }
+}
+function replaceCurrentLyricMeshStyle() {
+  if (!stageLyrics || !stageLyrics.currentText || !stageLyrics.current || !stageLyrics.group) return;
+  var oldMesh = stageLyrics.current;
+  var oldUser = oldMesh.userData || {};
+  var progress = oldUser.lastLyricProgress || 0;
+  var nextMesh = buildLyricMesh(stageLyrics.currentText);
+  if (!nextMesh) return;
+  nextMesh.position.copy(oldMesh.position);
+  nextMesh.quaternion.copy(oldMesh.quaternion);
+  nextMesh.scale.copy(oldMesh.scale);
+  nextMesh.rotation.copy(oldMesh.rotation);
+  nextMesh.userData.age = Number.isFinite(oldUser.age) ? oldUser.age : 0.52;
+  nextMesh.userData.state = oldUser.state || 'in';
+  nextMesh.userData.floatSeed = Number.isFinite(oldUser.floatSeed) ? oldUser.floatSeed : nextMesh.userData.floatSeed;
+  nextMesh.userData.lastLyricProgress = progress;
+  nextMesh.userData.skullMouthMeshLocked = !!oldUser.skullMouthMeshLocked;
+  copyLyricRuntimeVisualState(oldMesh, nextMesh);
+  stageLyrics.group.add(nextMesh);
+  stageLyrics.current = nextMesh;
+  updateLyricMeshProgress(nextMesh, progress);
+  disposeLyricMesh(oldMesh);
+}
 function refreshCurrentLyricStyle() {
-  if (!stageLyrics || !stageLyrics.currentText || !stageLyrics.current) return;
-  var progress = stageLyrics.current.userData ? (stageLyrics.current.userData.lastLyricProgress || 0) : 0;
-  showStageLine(stageLyrics.currentText, true);
-  updateLyricMeshProgress(stageLyrics.current, progress);
-  if (stageLyrics.current && stageLyrics.current.userData) stageLyrics.current.userData.age = 0.48;
+  replaceCurrentLyricMeshStyle();
 }
 
 function clearStageLyrics() {
@@ -10303,6 +10517,119 @@ function setCoverDepthState(depthTo, aiTo, durationMs) {
 function coverApplyStillCurrent(opts) {
   opts = opts || {};
   return !opts.trackToken || opts.trackToken === trackSwitchToken;
+}
+
+function visualCoverStateApi() {
+  return window.MineradioVisualCoverState || null;
+}
+function visualCoverPolicySafe(preset) {
+  var api = visualCoverStateApi();
+  if (api && typeof api.visualCoverPolicy === 'function') return api.visualCoverPolicy(preset);
+  var id = Math.floor(Number(preset));
+  if (id === 0 || id === 4) return 'cover-texture';
+  if (id === 1 || id === 2) return 'palette-only';
+  if (id === 3 || id === 5 || id === 6) return 'static-motion';
+  return 'cover-texture';
+}
+function shouldApplyCoverTextureForPresetSafe(state) {
+  var api = visualCoverStateApi();
+  state = Object.assign({ preset: fx && fx.preset }, state || {});
+  if (api && typeof api.shouldApplyCoverTextureForPreset === 'function') return api.shouldApplyCoverTextureForPreset(state);
+  if (state.force || state.manual || state.fromResolutionChange || state.presetChangedToCoverTexture) return true;
+  return visualCoverPolicySafe(state.preset) === 'cover-texture';
+}
+function shouldDebounceCoverTextureUpdateSafe(state) {
+  var api = visualCoverStateApi();
+  state = Object.assign({ preset: fx && fx.preset }, state || {});
+  if (api && typeof api.shouldDebounceCoverTextureUpdate === 'function') return api.shouldDebounceCoverTextureUpdate(state);
+  if (state.force || state.manual || state.fromResolutionChange || state.firstVisualPlay) return false;
+  if (state.reason && state.reason !== 'track-switch') return false;
+  return visualCoverPolicySafe(state.preset) === 'cover-texture';
+}
+function shouldKeepPresetMotionOnTrackChangeSafe(state) {
+  var api = visualCoverStateApi();
+  state = Object.assign({ preset: fx && fx.preset }, state || {});
+  if (api && typeof api.shouldKeepPresetMotionOnTrackChange === 'function') return api.shouldKeepPresetMotionOnTrackChange(state);
+  if (state.force || state.manual || state.fromResolutionChange) return false;
+  if (state.reason && state.reason !== 'track-switch') return false;
+  return visualCoverPolicySafe(state.preset) !== 'cover-texture';
+}
+function updateImmediateCoverArtwork(src) {
+  var thumb = document.getElementById('thumb-cover');
+  if (!src) {
+    setAlbumBackground('');
+    if (thumb) thumb.removeAttribute('src');
+    setControlCoverSrc('');
+    if (shelfManager) shelfManager.onCoverChange('');
+    return;
+  }
+  setAlbumBackground(src);
+  if (thumb) thumb.src = src;
+  setControlCoverSrc(src);
+  if (shelfManager) shelfManager.onCoverChange(src);
+}
+function clearVisualCoverHandoffTimer() {
+  if (visualCoverHandoffTimer) {
+    clearTimeout(visualCoverHandoffTimer);
+    visualCoverHandoffTimer = null;
+  }
+}
+function applyVisualCoverSourceNow(source, extraOpts) {
+  source = source || pendingVisualCoverSource;
+  if (!source) return;
+  var opts = Object.assign({}, source.opts || {}, extraOpts || {}, { visualPolicyApply: true });
+  if (!coverApplyStillCurrent(opts)) return;
+  if (source.kind === 'data') applyCoverDataUrl(source.src, opts);
+  else if (source.kind === 'url') loadCoverFromUrl(source.src || '', opts);
+  else loadCoverFromUrl('', opts);
+}
+function scheduleVisualCoverHandoff(source, opts) {
+  opts = opts || {};
+  source = source || { kind: 'none', src: '' };
+  var uiSrc = source.src || '';
+  pendingVisualCoverSource = {
+    kind: source.kind || (uiSrc ? 'url' : 'none'),
+    src: uiSrc,
+    opts: Object.assign({}, opts),
+  };
+  currentCoverSource = uiSrc ? { kind: pendingVisualCoverSource.kind, src: uiSrc } : null;
+  updateImmediateCoverArtwork(uiSrc);
+  var state = {
+    preset: fx && fx.preset,
+    reason: opts.reason || 'track-switch',
+    firstVisualPlay: !!opts.firstVisualPlay,
+    force: !!opts.forceVisualCover,
+    manual: !!opts.manual,
+    fromResolutionChange: !!opts.fromResolutionChange,
+  };
+  if (shouldKeepPresetMotionOnTrackChangeSafe(state) || !shouldApplyCoverTextureForPresetSafe(state)) {
+    clearVisualCoverHandoffTimer();
+    return;
+  }
+  if (!shouldDebounceCoverTextureUpdateSafe(state)) {
+    clearVisualCoverHandoffTimer();
+    applyVisualCoverSourceNow(pendingVisualCoverSource, opts);
+    return;
+  }
+  clearVisualCoverHandoffTimer();
+  var seq = ++visualCoverHandoffSeq;
+  visualCoverHandoffTimer = setTimeout(function() {
+    visualCoverHandoffTimer = null;
+    if (seq !== visualCoverHandoffSeq) return;
+    if (visualCoverPolicySafe(fx && fx.preset) !== 'cover-texture') return;
+    applyVisualCoverSourceNow(pendingVisualCoverSource, Object.assign({}, opts, { colorMixDuration: opts.colorMixDuration || 780 }));
+  }, 720);
+}
+function applyLatestVisualCoverForCurrentPreset(reason) {
+  if (!pendingVisualCoverSource) return;
+  if (visualCoverPolicySafe(fx && fx.preset) !== 'cover-texture') return;
+  clearVisualCoverHandoffTimer();
+  applyVisualCoverSourceNow(pendingVisualCoverSource, {
+    reason: reason || 'preset-change',
+    presetChangedToCoverTexture: true,
+    forceVisualCover: true,
+    colorMixDuration: 620,
+  });
 }
 
 function setControlCoverSrc(src) {
@@ -13229,6 +13556,7 @@ var shelfViewportTargetLocal = new THREE.Vector3();
 var shelfViewportAnchorView = new THREE.Vector3();
 var shelfViewportCurrentView = new THREE.Vector3();
 var shelfViewportScaleVec = new THREE.Vector3();
+var shelfViewportReferenceCamera = null;
 var shelfViewportWarmupUntil = 0;
 var shelfStageControlsLiftSnapPending = true;
 function isPortraitShelfViewport() {
@@ -13237,31 +13565,6 @@ function isPortraitShelfViewport() {
 function shelfViewportLockActive() {
   return normalizeShelfViewportLock(fx && fx.shelfViewportLock);
 }
-function activeRecordShelfContentList() {
-  if (!shelfManager || !shelfManager.hasOpenContent || !shelfManager.hasOpenContent()) return null;
-  var cl = shelfManager.getContentList && shelfManager.getContentList();
-  return cl && cl.isRecordView && cl.isRecordView() ? cl : null;
-}
-function syncRecordShelfFabActions(show) {
-  var actions = document.getElementById('record-shelf-fab-actions');
-  show = !!(show && activeRecordShelfContentList());
-  document.body.classList.toggle('record-shelf-actions-visible', show);
-  if (actions) actions.setAttribute('aria-hidden', show ? 'false' : 'true');
-}
-function runRecordShelfFabAction(action, event) {
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-  var cl = activeRecordShelfContentList();
-  if (!cl || !cl.runChromeAction) return false;
-  return !!cl.runChromeAction(action);
-}
-document.addEventListener('click', function(e) {
-  var target = e.target && e.target.closest ? e.target.closest('[data-record-shelf-action]') : null;
-  if (!target) return;
-  runRecordShelfFabAction(target.getAttribute('data-record-shelf-action'), e);
-}, true);
 function resetShelfViewportAnchor(reason, warmupMs) {
   if (shouldPreserveShelfViewportAnchorOnReset({
     viewportLockEnabled: shelfViewportLockActive(),
@@ -13294,15 +13597,49 @@ function shelfViewportAnchorSignature(kind) {
     presetPart
   ].join(':');
 }
+function updateShelfViewportReferenceCamera() {
+  if (!camera || typeof THREE === 'undefined' || !THREE.PerspectiveCamera) return camera;
+  if (!shelfViewportReferenceCamera) {
+    shelfViewportReferenceCamera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, camera.near || 0.1, camera.far || 100);
+  }
+  var anchorCamera = shelfViewportReferenceCamera;
+  var ref = currentShelfReferenceCameraOrbit();
+  var theta = Number(ref.theta);
+  var phi = Number(ref.phi);
+  var radius = Number(ref.radius);
+  if (!isFinite(theta)) theta = 0;
+  if (!isFinite(phi)) phi = 0.08;
+  if (!isFinite(radius) || radius <= 0) radius = 6.6;
+  var cy = Math.cos(phi);
+  var sy = Math.sin(phi);
+  var ct = Math.cos(theta);
+  var st = Math.sin(theta);
+  anchorCamera.aspect = innerWidth / innerHeight;
+  anchorCamera.near = camera.near || 0.1;
+  anchorCamera.far = camera.far || 100;
+  anchorCamera.fov = BASE_FOV;
+  anchorCamera.position.set(
+    radius * cy * st,
+    radius * sy,
+    radius * cy * ct
+  );
+  anchorCamera.up.copy(camera.up);
+  anchorCamera.lookAt(ZERO_VEC);
+  anchorCamera.updateMatrixWorld(true);
+  anchorCamera.updateProjectionMatrix();
+  return anchorCamera;
+}
 function captureShelfViewportAnchor(key) {
   if (!camera) return null;
-  camera.updateMatrixWorld(true);
-  camera.updateProjectionMatrix();
+  var anchorCamera = shelfViewportLockActive() ? updateShelfViewportReferenceCamera() : camera;
+  if (!anchorCamera) return null;
+  anchorCamera.updateMatrixWorld(true);
+  anchorCamera.updateProjectionMatrix();
   shelfViewportAnchor = {
     key: key,
-    fov: camera.fov || BASE_FOV,
-    matrixWorldInverse: camera.matrixWorldInverse.clone(),
-    projectionViewMatrix: new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    fov: anchorCamera.fov || BASE_FOV,
+    matrixWorldInverse: anchorCamera.matrixWorldInverse.clone(),
+    projectionViewMatrix: new THREE.Matrix4().multiplyMatrices(anchorCamera.projectionMatrix, anchorCamera.matrixWorldInverse)
   };
   shelfViewportAnchorKey = key;
   return shelfViewportAnchor;
@@ -13336,6 +13673,7 @@ function ensureShelfViewportAnchor(kind) {
 }
 function applyShelfViewportLockToMesh(mesh, kind) {
   if (!mesh || !camera || !shelfViewportLockActive()) return;
+  if (shelfUsesReferenceRenderCamera()) return;
   var anchor = ensureShelfViewportAnchor(kind);
   if (!anchor) return;
   camera.updateMatrixWorld(true);
@@ -13383,7 +13721,8 @@ function updateShelfStageControlsLift(dt) {
 function shelfLayoutProfile() {
   var portrait = isPortraitShelfViewport();
   var narrow = !portrait && innerWidth < 980;
-  var skullShelf = shouldUsePresetShelfLayout(fx && fx.shelfViewportLock) && shouldUseSkullSafeShelfCamera();
+  var shelfLayoutPreset = currentShelfLayoutPreset();
+  var skullShelf = shouldUsePresetShelfLayout(fx && fx.shelfViewportLock) && shelfLayoutPreset === SKULL_PRESET_INDEX;
   var detailScale = portrait ? clampRange(innerWidth / 820, 0.70, 0.86) : (narrow ? 0.92 : 1.04);
   var shelfCtl = shelfSettings();
   var shelfGap = shelfCtl.gap || 1;
@@ -14007,8 +14346,9 @@ function makeShelfManager() {
       var paneRaw = Math.max(0, Math.min(1, (nowT - paneSwitchAt - absD * 0.030) / 0.72));
       var paneEase = 1 - paneRaw * paneRaw * (3 - 2 * paneRaw);
       var presetShelfCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
-      var wallpaperShelfPose = presetShelfCameraBound && shouldUseWallpaperSafeShelfCamera();
-      var skullShelfPose = presetShelfCameraBound && shouldUseSkullSafeShelfCamera();
+      var shelfPosePreset = currentShelfLayoutPreset();
+      var wallpaperShelfPose = presetShelfCameraBound && shelfPosePreset === 5;
+      var skullShelfPose = presetShelfCameraBound && shelfPosePreset === SKULL_PRESET_INDEX;
       var safeShelfPose = wallpaperShelfPose || skullShelfPose;
       var px = layout.sideX + absD * layout.sideXStep - (detailOpenSide ? layout.sideDetailShift : 0) + entry * layout.sideEntryX;
       var py = (layout.sideY || 0) - delta * layout.sideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18);
@@ -14239,8 +14579,22 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     pulseCard(cards.find(function(c){ return c.index === nextTarget; }), 0.55);
   }
 
+  function shelfGroupHitVisible() {
+    if (!group) return false;
+    if (group.visible) return true;
+    if (!shelfUsesReferenceRenderCamera()) return false;
+    if (document.body.classList.contains('splash-active')) return false;
+    if (mode === 'stage') return allItems.length > 0 || !!(contentList && contentList.isOpen());
+    return !!(
+      contentList && contentList.isOpen() ||
+      shelfPinnedOpen ||
+      shelfAlwaysVisible() ||
+      shelfPreviewIsVisible()
+    );
+  }
+
   function screenHitCard(card, sx, sy, pad) {
-    if (!card || !card.mesh || !card.mesh.visible || !group || !group.visible) return null;
+    if (!card || !card.mesh || !card.mesh.visible || !shelfGroupHitVisible()) return null;
     var params = card.mesh.geometry && card.mesh.geometry.parameters || {};
     var hw = (params.width || 1.7) / 2;
     var hh = (params.height || 0.85) / 2;
@@ -14253,7 +14607,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     card.mesh.updateMatrixWorld(true);
     for (var i = 0; i < pts.length; i++) {
-      pts[i].applyMatrix4(card.mesh.matrixWorld).project(camera);
+      pts[i].applyMatrix4(card.mesh.matrixWorld).project(currentShelfRenderCamera());
       var x = (pts[i].x + 1) * innerWidth / 2;
       var y = (1 - pts[i].y) * innerHeight / 2;
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -14267,7 +14621,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
   }
 
   function pickCardAtScreen(sx, sy, pad) {
-    if (!cards.length || !group || !group.visible) return null;
+    if (!cards.length || !shelfGroupHitVisible()) return null;
     var ordered = cards.slice().sort(function(a, b){ return (b.mesh.renderOrder || 0) - (a.mesh.renderOrder || 0); });
     for (var i = 0; i < ordered.length; i++) {
       var uv = screenHitCard(ordered[i], sx, sy, pad == null ? 72 : pad);
@@ -14411,8 +14765,16 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       });
       if (contentList && contentList.refreshTheme) contentList.refreshTheme();
     },
+    getRenderRoots: function() {
+      var roots = [];
+      if (group) roots.push(group);
+      if (connectorParticles) roots.push(connectorParticles);
+      if (floorMirror) roots.push(floorMirror);
+      if (contentList && contentList.getRenderRoots) roots = roots.concat(contentList.getRenderRoots());
+      return roots.filter(Boolean);
+    },
     raycastCards: function(raycaster) {
-      if (!group || !group.visible || !cards.length) return null;
+      if (!shelfGroupHitVisible() || !cards.length) return null;
       var visibleMeshes = cards.filter(function(c){ return c.mesh.visible; }).map(function(c){ return c.mesh; });
       var hits = raycaster.intersectObjects(visibleMeshes, false);
       if (!hits.length) return null;
@@ -14631,28 +14993,24 @@ function makeContentListManager() {
   var RECORD_TOOLBAR_LAYOUTS = {
     horizontal: {
       name: 'horizontal',
-      canvasW: 380,
+      canvasW: 140,
       canvasH: 78,
-      worldW: 1.48,
+      worldW: 0.56,
       worldH: 0.30,
-      shell: { x: 8, y: 8, w: 364, h: 62, r: 24 },
+      shell: { x: 8, y: 8, w: 124, h: 62, r: 24 },
       actions: [
-        { key: 'back', label: '返回', x: 20, y: 16, w: 102, h: 46 },
-        { key: 'top', label: '顶部', x: 134, y: 16, w: 102, h: 46 },
-        { key: 'locate', label: '定位', x: 248, y: 16, w: 102, h: 46 },
+        { key: 'back', label: '返回', x: 19, y: 16, w: 102, h: 46 },
       ]
     },
     vertical: {
       name: 'vertical',
       canvasW: 124,
-      canvasH: 210,
+      canvasH: 76,
       worldW: 0.48,
-      worldH: 0.82,
-      shell: { x: 8, y: 8, w: 108, h: 194, r: 22 },
+      worldH: 0.30,
+      shell: { x: 8, y: 8, w: 108, h: 60, r: 22 },
       actions: [
         { key: 'back', label: '返回', x: 14, y: 14, w: 96, h: 48 },
-        { key: 'top', label: '顶部', x: 14, y: 81, w: 96, h: 48 },
-        { key: 'locate', label: '定位', x: 14, y: 148, w: 96, h: 48 },
       ]
     }
   };
@@ -14937,14 +15295,12 @@ function makeContentListManager() {
     if (isRecordChromeMode()) {
       disposePanel();
       disposeRecordToolbar();
-      syncRecordShelfFabActions(true);
       drawRecordToolbarIfNeeded(force, nowT);
       panelDirty = false;
       panelDrawAt = nowT;
       return;
     }
     disposeRecordToolbar();
-    syncRecordShelfFabActions(false);
     if (!force && !panelDirty && (!isLoadingContent() || nowT - panelDrawAt < LOADING_ANIM_INTERVAL)) return;
     drawPanel();
     panelDirty = false;
@@ -14953,7 +15309,6 @@ function makeContentListManager() {
 
   function drawRecordToolbarIfNeeded(force, nowT) {
     nowT = nowT == null ? (uniforms.uTime.value || 0) : nowT;
-    syncRecordShelfFabActions(true);
   }
 
   function applyRecordShelfGroupPose() {
@@ -15305,8 +15660,9 @@ function makeContentListManager() {
     var shelfLook = shelfSettings();
     var shelfLayout = shelfLayoutProfile();
     var presetShelfCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
-    var wallpaperShelfPose = presetShelfCameraBound && shouldUseWallpaperSafeShelfCamera();
-    var skullShelfPose = presetShelfCameraBound && shouldUseSkullSafeShelfCamera();
+    var shelfPosePreset = currentShelfLayoutPreset();
+    var wallpaperShelfPose = presetShelfCameraBound && shelfPosePreset === 5;
+    var skullShelfPose = presetShelfCameraBound && shelfPosePreset === SKULL_PRESET_INDEX;
     var safeShelfPose = wallpaperShelfPose || skullShelfPose;
     var orientation = currentDetailOrientation();
     var isStageRecord = orientation === 'stage';
@@ -15508,7 +15864,7 @@ function makeContentListManager() {
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     mesh.updateMatrixWorld(true);
     for (var pi = 0; pi < pts.length; pi++) {
-      pts[pi].applyMatrix4(mesh.matrixWorld).project(camera);
+      pts[pi].applyMatrix4(mesh.matrixWorld).project(currentShelfRenderCamera());
       var x = (pts[pi].x + 1) * innerWidth / 2;
       var y = (1 - pts[pi].y) * innerHeight / 2;
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -15536,6 +15892,9 @@ function makeContentListManager() {
 
   return {
     isOpen: function() { return open; },
+    getRenderRoots: function() {
+      return group ? [group] : [];
+    },
     refreshTheme: function() {
       panelDirty = true;
       rowsDirty = true;
@@ -15668,7 +16027,6 @@ function makeContentListManager() {
     },
     close: function(reason) {
       open = false;
-      syncRecordShelfFabActions(false);
       if (shouldResetShelfAnchorForContentClose({
         viewportLockEnabled: shelfViewportLockActive(),
         hasReusableAnchor: !!shelfViewportAnchor,
@@ -15850,7 +16208,7 @@ function makeContentListManager() {
         var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         row.mesh.updateMatrixWorld(true);
         for (var pi = 0; pi < pts.length; pi++) {
-          pts[pi].applyMatrix4(row.mesh.matrixWorld).project(camera);
+          pts[pi].applyMatrix4(row.mesh.matrixWorld).project(currentShelfRenderCamera());
           var x = (pts[pi].x + 1) * innerWidth / 2;
           var y = (1 - pts[pi].y) * innerHeight / 2;
           minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -15899,7 +16257,7 @@ function makeContentListManager() {
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       panel.mesh.updateMatrixWorld(true);
       for (var pi = 0; pi < pts.length; pi++) {
-        pts[pi].applyMatrix4(panel.mesh.matrixWorld).project(camera);
+        pts[pi].applyMatrix4(panel.mesh.matrixWorld).project(currentShelfRenderCamera());
         var x = (pts[pi].x + 1) * innerWidth / 2;
         var y = (1 - pts[pi].y) * innerHeight / 2;
         minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -15946,7 +16304,7 @@ function makeContentListManager() {
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       panel.mesh.updateMatrixWorld(true);
       for (var pi = 0; pi < pts.length; pi++) {
-        pts[pi].applyMatrix4(panel.mesh.matrixWorld).project(camera);
+        pts[pi].applyMatrix4(panel.mesh.matrixWorld).project(currentShelfRenderCamera());
         var x = (pts[pi].x + 1) * innerWidth / 2;
         var y = (1 - pts[pi].y) * innerHeight / 2;
         minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -15998,7 +16356,7 @@ function makeContentListManager() {
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       row.mesh.updateMatrixWorld(true);
       for (var i = 0; i < corners.length; i++) {
-        corners[i].applyMatrix4(row.mesh.matrixWorld).project(camera);
+        corners[i].applyMatrix4(row.mesh.matrixWorld).project(currentShelfRenderCamera());
         var x = (corners[i].x + 1) * innerWidth / 2;
         var y = (1 - corners[i].y) * innerHeight / 2;
         minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -16133,7 +16491,7 @@ function raycasterFromPointerEvent(e) {
   var mx = (e.clientX / innerWidth) * 2 - 1;
   var my = -(e.clientY / innerHeight) * 2 + 1;
   var rc = new THREE.Raycaster();
-  rc.setFromCamera(new THREE.Vector2(mx, my), camera);
+  rc.setFromCamera(new THREE.Vector2(mx, my), currentShelfRenderCamera());
   return rc;
 }
 function pointerCardHit(rc, e, screenPad) {
@@ -16938,6 +17296,357 @@ function homeListenSummary() {
   var totalPlays = Object.keys(listenStatsState.songs || {}).reduce(function(sum, key){ return sum + ((listenStatsState.songs[key] && listenStatsState.songs[key].plays) || 0); }, 0);
   return { recent: recent, topSong: topSong, topArtist: topArtist, totalPlays: totalPlays };
 }
+function homeWeatherHeroStateApi() {
+  return window.MineradioHomeWeatherHeroState || {};
+}
+function commentBarrageStateApi() {
+  return window.MineradioCommentBarrageState || {};
+}
+function normalizeCommentBarrageEnabledSafe(value) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.normalizeCommentBarrageEnabled === 'function') return api.normalizeCommentBarrageEnabled(value);
+  return value === true || value === 1 || value === '1' || value === 'true' || value === 'on';
+}
+function buildHomeWeatherHeroFieldsSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherHeroFields === 'function') {
+    return api.buildWeatherHeroFields(homeWeatherRadioState.weather, {
+      city: homeWeatherRadioState.city || '上海',
+      loading: !!homeWeatherRadioState.loading,
+    });
+  }
+  var weather = homeWeatherRadioState.weather || {};
+  return {
+    city: weather.location && weather.location.name || homeWeatherRadioState.city || '上海',
+    label: weather.label || (homeWeatherRadioState.loading ? '正在整理天气' : '天气暂不可用'),
+    temperatureText: isFinite(weather.temperature) ? Math.round(weather.temperature) + '°' : '--°',
+    apparentText: isFinite(weather.apparentTemperature) ? ('体感 ' + Math.round(weather.apparentTemperature) + '°') : '体感 --°',
+    humidityText: isFinite(weather.humidity) ? ('湿度 ' + Math.round(weather.humidity) + '%') : '湿度 --',
+    windText: isFinite(weather.windSpeed) ? ('风 ' + Math.round(weather.windSpeed) + ' km/h') : '风速 --',
+    precipitationText: isFinite(weather.precipitation) ? ('降水 ' + weather.precipitation + ' mm') : '降水 --',
+    cloudText: isFinite(weather.cloudCover) ? ('云量 ' + Math.round(weather.cloudCover) + '%') : '云量 --',
+    moodTitle: weather.mood && weather.mood.title || '天气电台',
+    moodTagline: weather.mood && weather.mood.tagline || '让今天的天气替你挑一段旋律',
+  };
+}
+function buildHomeWeatherCacheStateSafe(cache, now) {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherCacheState === 'function') return api.buildWeatherCacheState(cache, now);
+  now = Number(now) || Date.now();
+  var updatedAt = Number(cache && cache.updatedAt);
+  if (!cache || !isFinite(updatedAt) || updatedAt <= 0) return { status: 'empty', usable: false, fresh: false };
+  var ageMs = Math.max(0, now - updatedAt);
+  if (ageMs <= HOME_WEATHER_FRESH_MS) return { status: 'fresh', ageMs: ageMs, usable: true, fresh: true };
+  if (ageMs <= HOME_WEATHER_STALE_MS) return { status: 'stale', ageMs: ageMs, usable: true, fresh: false };
+  return { status: 'expired', ageMs: ageMs, usable: false, fresh: false };
+}
+function buildHomeWeatherForecastFieldsSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherForecastFields === 'function') return api.buildWeatherForecastFields(homeWeatherRadioState.weather, { limit: 6 });
+  var rows = homeWeatherRadioState.weather && homeWeatherRadioState.weather.hourlyForecast || [];
+  return rows.slice(0, 6).map(function(row) {
+    var time = String(row && row.time || '');
+    return {
+      time: time,
+      hourLabel: row && row.hourLabel || (time.match(/T(\d{2}:\d{2})/) || [])[1] || '--:--',
+      temperatureText: isFinite(row && row.temperature) ? Math.round(row.temperature) + '°' : '--°',
+      rainText: isFinite(row && row.precipitationProbability) ? Math.round(row.precipitationProbability) + '%' : '--',
+      label: row && row.label || '天气',
+    };
+  });
+}
+function buildHomeWeatherAdviceSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherAdvice === 'function') return api.buildWeatherAdvice(homeWeatherRadioState.weather);
+  var fields = buildHomeWeatherHeroFieldsSafe();
+  return [
+    { title: '出行', text: fields.precipitationText && fields.precipitationText !== '降水 --' ? '看一下路面和雨具。' : '适合轻装出门。' },
+    { title: '体感', text: fields.apparentText || '体感刷新中。' },
+    { title: fields.moodTitle || '天气电台', text: fields.moodTagline || '让今天的天气替你挑一段旋律。' },
+  ];
+}
+function readHomeWeatherRadioCache() {
+  try {
+    var raw = JSON.parse(localStorage.getItem(HOME_WEATHER_CACHE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    return raw;
+  } catch (e) {
+    return null;
+  }
+}
+function applyHomeWeatherRadioCache(cache) {
+  if (!cache || typeof cache !== 'object') return false;
+  var state = buildHomeWeatherCacheStateSafe(cache);
+  if (!state.usable) {
+    if (cache.city) homeWeatherRadioState.city = String(cache.city);
+    return false;
+  }
+  homeWeatherRadioState.city = cache.city || (cache.weather && cache.weather.location && cache.weather.location.name) || homeWeatherRadioState.city || '上海';
+  homeWeatherRadioState.weather = cache.weather || null;
+  homeWeatherRadioState.radio = cache.radio || null;
+  homeWeatherRadioState.updatedAt = Number(cache.updatedAt) || Date.now();
+  homeWeatherRadioState.loaded = !!(homeWeatherRadioState.weather || homeWeatherRadioState.radio);
+  homeWeatherRadioState.error = state.status === 'stale' ? 'WEATHER_CACHE_STALE' : '';
+  localStorage.setItem(HOME_WEATHER_CITY_KEY, homeWeatherRadioState.city);
+  return true;
+}
+function restoreCachedHomeWeatherRadio() {
+  var cache = readHomeWeatherRadioCache();
+  var restored = applyHomeWeatherRadioCache(cache);
+  updateWeatherCityChip();
+  renderHomeWeatherHero(false);
+  return restored;
+}
+function saveHomeWeatherRadioCache() {
+  if (!homeWeatherRadioState.weather && !homeWeatherRadioState.radio) return;
+  try {
+    localStorage.setItem(HOME_WEATHER_CACHE_KEY, JSON.stringify({
+      city: homeWeatherRadioState.city || '上海',
+      weather: homeWeatherRadioState.weather || null,
+      radio: homeWeatherRadioState.radio || null,
+      updatedAt: homeWeatherRadioState.updatedAt || Date.now(),
+    }));
+  } catch (e) {}
+}
+function shouldRefreshHomeWeatherRadio(force, opts) {
+  opts = opts || {};
+  if (force || opts.lat != null || opts.lon != null || opts.city) return true;
+  var cacheState = buildHomeWeatherCacheStateSafe({ updatedAt: homeWeatherRadioState.updatedAt });
+  return !cacheState.fresh;
+}
+function collectHomeLyricSnippets() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.collectLyricSnippets === 'function') {
+    return api.collectLyricSnippets({
+      currentLines: lyricsLines,
+      customLyricMap: customLyricMap,
+      maxLength: 34,
+    });
+  }
+  return [];
+}
+function chooseHomeLyricSnippet(fallbackText) {
+  var snippets = collectHomeLyricSnippets();
+  if (!snippets.length && fallbackText) snippets = [fallbackText];
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.selectRotatingLyric === 'function') {
+    return api.selectRotatingLyric(snippets, homeCurrentLyricSnippet);
+  }
+  return snippets[0] || '';
+}
+function setHomeRandomLyric(text, animate) {
+  var el = document.getElementById('home-random-lyric');
+  if (!el) return;
+  text = String(text || '').trim() || '天气加载的时候，先听一口空气。';
+  if (text === homeCurrentLyricSnippet && el.textContent) return;
+  homeCurrentLyricSnippet = text;
+  if (!animate) {
+    el.textContent = text;
+    el.classList.remove('switching');
+    return;
+  }
+  el.classList.add('switching');
+  setTimeout(function(){
+    el.textContent = text;
+    el.classList.remove('switching');
+  }, 180);
+}
+function updateWeatherCityChip(fields) {
+  fields = fields || buildHomeWeatherHeroFieldsSafe();
+  var label = document.getElementById('weather-city-chip-label');
+  var input = document.getElementById('home-weather-city-input');
+  if (label) {
+    var temp = fields.temperatureText && fields.temperatureText !== '--°' ? (' ' + fields.temperatureText) : '';
+    label.textContent = (fields.city || homeWeatherRadioState.city || '上海') + ' · ' + (fields.label || '天气') + temp;
+  }
+  if (input && document.activeElement !== input) input.value = homeWeatherRadioState.city || fields.city || '上海';
+}
+function renderWeatherDetailPopover(fields) {
+  fields = fields || buildHomeWeatherHeroFieldsSafe();
+  var title = document.getElementById('weather-detail-title');
+  var sub = document.getElementById('weather-detail-sub');
+  var grid = document.getElementById('weather-detail-grid');
+  if (title) title.textContent = (fields.city || homeWeatherRadioState.city || '上海') + ' · ' + (fields.label || '天气');
+  if (sub) {
+    var updated = homeWeatherRadioState.updatedAt ? new Date(homeWeatherRadioState.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '未更新';
+    sub.textContent = (homeWeatherRadioState.error === 'WEATHER_CACHE_STALE' ? '缓存天气 · ' : '天气详情 · ') + updated;
+  }
+  if (grid) {
+    var details = [
+      ['温度', fields.temperatureText || '--°'],
+      ['体感', fields.apparentText || '体感 --°'],
+      ['湿度', fields.humidityText || '湿度 --'],
+      ['风速', fields.windText || '风速 --'],
+      ['降水', fields.precipitationText || '降水 --'],
+      ['云量', fields.cloudText || '云量 --'],
+    ];
+    grid.innerHTML = details.map(function(item){
+      return '<div class="weather-detail-item"><b>' + escHtml(item[0]) + '</b><span>' + escHtml(item[1]) + '</span></div>';
+    }).join('');
+  }
+}
+function renderHomeWeatherHero(rotateLyric) {
+  var fields = buildHomeWeatherHeroFieldsSafe();
+  var temp = document.getElementById('home-weather-temp');
+  var city = document.getElementById('home-weather-city');
+  var label = document.getElementById('home-weather-label');
+  var meta = document.getElementById('home-weather-meta');
+  var note = document.getElementById('home-weather-note');
+  var kicker = document.getElementById('home-weather-kicker');
+  var forecast = document.getElementById('home-weather-forecast');
+  var advice = document.getElementById('home-weather-advice');
+  if (temp) temp.textContent = String(fields.temperatureText || '--°').replace(/°$/, '');
+  if (city) city.textContent = fields.city || '上海';
+  if (label) label.textContent = fields.label || '天气';
+  if (kicker) kicker.textContent = fields.moodTitle || 'Weather · Lyric Drift';
+  if (note) note.textContent = fields.moodTagline || '让今天的天气替你挑一段旋律';
+  if (meta) {
+    var pills = [fields.apparentText, fields.humidityText, fields.windText, fields.precipitationText, fields.cloudText]
+      .filter(Boolean);
+    meta.innerHTML = pills.map(function(text){ return '<span class="home-weather-pill">' + escHtml(text) + '</span>'; }).join('');
+  }
+  if (forecast) {
+    var forecastRows = buildHomeWeatherForecastFieldsSafe();
+    forecast.innerHTML = forecastRows.length
+      ? forecastRows.map(function(row){
+        return '<div class="home-weather-hour"><div class="home-weather-hour-time">' + escHtml(row.hourLabel) + '</div><div class="home-weather-hour-temp">' + escHtml(row.temperatureText) + '</div><div class="home-weather-hour-rain">' + escHtml(row.rainText) + '</div><div class="home-weather-hour-label">' + escHtml(row.label) + '</div></div>';
+      }).join('')
+      : '<div class="home-weather-hour"><div class="home-weather-hour-time">--:--</div><div class="home-weather-hour-temp">--°</div><div class="home-weather-hour-rain">--</div><div class="home-weather-hour-label">待刷新</div></div>';
+  }
+  if (advice) {
+    var adviceRows = buildHomeWeatherAdviceSafe().slice(0, 3);
+    advice.innerHTML = adviceRows.map(function(item){
+      return '<div class="home-weather-advice-card"><div class="home-weather-advice-title">' + escHtml(item.title || '建议') + '</div><div class="home-weather-advice-text">' + escHtml(item.text || '') + '</div></div>';
+    }).join('');
+  }
+  updateWeatherCityChip(fields);
+  renderWeatherDetailPopover(fields);
+  if (rotateLyric || !homeCurrentLyricSnippet) setHomeRandomLyric(chooseHomeLyricSnippet(fields.moodTagline), !!homeCurrentLyricSnippet);
+}
+function syncHomeLyricRotationTimer() {
+  if (homeLyricRotateTimer && !emptyHomeActive) {
+    clearInterval(homeLyricRotateTimer);
+    homeLyricRotateTimer = null;
+    return;
+  }
+  if (emptyHomeActive && !homeLyricRotateTimer) {
+    homeLyricRotateTimer = setInterval(function(){
+      if (emptyHomeActive) renderHomeWeatherHero(true);
+    }, 10000);
+  }
+}
+function closeWeatherDetailPopover() {
+  var wrap = document.getElementById('weather-city-wrap');
+  if (wrap) wrap.classList.remove('open');
+}
+function toggleWeatherDetailPopover(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  var wrap = document.getElementById('weather-city-wrap');
+  if (!wrap) return;
+  var open = !wrap.classList.contains('open');
+  wrap.classList.toggle('open', open);
+  if (open) renderWeatherDetailPopover();
+}
+function closeHomeWeatherCityEditor() {
+  var wrap = document.getElementById('home-weather-city-editor-wrap');
+  if (wrap) wrap.classList.remove('open');
+}
+function openHomeWeatherCityEditor(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  closeWeatherDetailPopover();
+  var wrap = document.getElementById('home-weather-city-editor-wrap');
+  var input = document.getElementById('home-weather-city-input');
+  if (!wrap) return;
+  wrap.classList.add('open');
+  if (input) {
+    input.value = homeWeatherRadioState.city || '上海';
+    setTimeout(function(){ input.focus(); input.select(); }, 40);
+  }
+}
+function openWeatherCityEditor(e) {
+  openHomeWeatherCityEditor(e);
+}
+function bindWeatherCityEditorControls() {
+  var homeBtn = document.getElementById('home-weather-city-switch');
+  var chip = document.getElementById('weather-city-chip');
+  var submitBtn = document.getElementById('home-weather-city-submit-btn');
+  var locateBtn = document.getElementById('home-weather-city-locate-btn');
+  var cancelBtn = document.getElementById('home-weather-city-cancel-btn');
+  if (homeBtn && !homeBtn._weatherCityBound) {
+    homeBtn._weatherCityBound = true;
+    homeBtn.addEventListener('click', openHomeWeatherCityEditor);
+  }
+  if (chip && !chip._weatherCityBound) {
+    chip._weatherCityBound = true;
+    chip.addEventListener('click', toggleWeatherDetailPopover);
+  }
+  if (submitBtn && !submitBtn._weatherCityBound) {
+    submitBtn._weatherCityBound = true;
+    submitBtn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); submitHomeWeatherCityInput(); });
+  }
+  if (locateBtn && !locateBtn._weatherCityBound) {
+    locateBtn._weatherCityBound = true;
+    locateBtn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); locateWeatherRadio(); closeWeatherCityEditor(); });
+  }
+  if (cancelBtn && !cancelBtn._weatherCityBound) {
+    cancelBtn._weatherCityBound = true;
+    cancelBtn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closeWeatherCityEditor(); });
+  }
+}
+function closeWeatherCityEditor() {
+  closeWeatherDetailPopover();
+  closeHomeWeatherCityEditor();
+}
+function applyWeatherCity(city) {
+  city = String(city || '').trim();
+  if (!city) return;
+  homeWeatherRadioState.city = city;
+  localStorage.setItem(HOME_WEATHER_CITY_KEY, city);
+  homeWeatherRadioState.loaded = false;
+  homeWeatherRadioState.error = '';
+  homeWeatherRadioState.weather = null;
+  homeWeatherRadioState.radio = null;
+  homeWeatherRadioState.updatedAt = 0;
+  try { localStorage.removeItem(HOME_WEATHER_CACHE_KEY); } catch (e) {}
+  updateWeatherCityChip();
+  renderHomeWeatherHero(false);
+  closeWeatherCityEditor();
+  loadHomeWeatherRadio(true, { city: city });
+  showToast('天气城市已切换到 ' + city);
+}
+function submitHomeWeatherCityInput() {
+  var input = document.getElementById('home-weather-city-input');
+  applyWeatherCity(input ? input.value : '');
+}
+function submitWeatherCityInput() {
+  submitHomeWeatherCityInput();
+}
+document.addEventListener('click', function(e) {
+  var detailWrap = document.getElementById('weather-city-wrap');
+  var homeWrap = document.getElementById('home-weather-city-editor-wrap');
+  var clickedDetail = detailWrap && detailWrap.contains(e.target);
+  var clickedHome = homeWrap && homeWrap.contains(e.target);
+  if (detailWrap && detailWrap.classList.contains('open') && !clickedDetail) closeWeatherDetailPopover();
+  if (homeWrap && homeWrap.classList.contains('open') && !clickedHome) closeHomeWeatherCityEditor();
+});
+document.addEventListener('keydown', function(e) {
+  var input = document.getElementById('home-weather-city-input');
+  if (!input || document.activeElement !== input) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitHomeWeatherCityInput();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeWeatherCityEditor();
+  }
+});
+bindWeatherCityEditorControls();
 function fallbackHomeTiles() {
   return [
     { kind: 'login', title: '登录同步歌单', sub: '网易云 / QQ 音乐' },
@@ -17041,6 +17750,7 @@ function renderHomeDiscover() {
   var weather = homeWeatherRadioState.weather;
   var radio = homeWeatherRadioState.radio;
   var weatherLocation = weather && weather.location && weather.location.name || homeWeatherRadioState.city || '上海';
+  renderHomeWeatherHero(false);
   var weatherTitle = document.getElementById('home-weather-title');
   var weatherKicker = document.getElementById('home-weather-kicker');
   var weatherMeta = document.getElementById('home-weather-meta');
@@ -17165,7 +17875,7 @@ async function loadHomeWeatherRadio(force, opts) {
     return homeWeatherLoadPromise;
   }
   if (homeWeatherRadioState.loading && !force) return homeWeatherRadioState;
-  if (homeWeatherRadioState.loaded && !force && !opts.lat) return homeWeatherRadioState;
+  if (!shouldRefreshHomeWeatherRadio(force, opts)) return homeWeatherRadioState;
   var token = ++homeWeatherToken;
   homeWeatherRadioState.loading = true;
   homeWeatherRadioState.error = '';
@@ -17185,9 +17895,13 @@ async function loadHomeWeatherRadio(force, opts) {
         homeWeatherRadioState.city = opts.city;
         localStorage.setItem(HOME_WEATHER_CITY_KEY, homeWeatherRadioState.city);
       }
+      saveHomeWeatherRadioCache();
     } catch (e) {
       console.warn('weather radio failed:', e);
-      if (token === homeWeatherToken) homeWeatherRadioState.error = 'WEATHER_FAILED';
+      if (token === homeWeatherToken) {
+        if (!homeWeatherRadioState.weather && !homeWeatherRadioState.radio) restoreCachedHomeWeatherRadio();
+        homeWeatherRadioState.error = 'WEATHER_FAILED';
+      }
     } finally {
       if (token === homeWeatherToken) {
         homeWeatherRadioState.loading = false;
@@ -17204,13 +17918,22 @@ async function loadHomeWeatherRadio(force, opts) {
   }
 }
 function scheduleHomeWeatherLoad(delay) {
-  if (homeWeatherLoadTimer) return;
+  delay = delay || 760;
+  var dueAt = Date.now() + delay;
+  if (homeWeatherLoadTimer && homeWeatherLoadTimerDueAt <= dueAt) return;
+  if (homeWeatherLoadTimer) clearTimeout(homeWeatherLoadTimer);
+  homeWeatherLoadTimerDueAt = dueAt;
   homeWeatherLoadTimer = setTimeout(function(){
     homeWeatherLoadTimer = null;
-    if (!emptyHomeActive) return;
-    loadHomeWeatherRadio(false);
-  }, delay || 760);
+    homeWeatherLoadTimerDueAt = 0;
+    loadHomeWeatherRadio(false).finally(function(){
+      scheduleHomeWeatherLoad(HOME_WEATHER_FRESH_MS);
+    });
+  }, delay);
 }
+document.addEventListener('visibilitychange', function(){
+  if (!document.hidden && shouldRefreshHomeWeatherRadio(false, {})) scheduleHomeWeatherLoad(80);
+});
 function weatherRadioContext() {
   var weather = homeWeatherRadioState.weather || {};
   var radio = homeWeatherRadioState.radio || {};
@@ -17319,13 +18042,7 @@ function locateWeatherRadio() {
   useIpFallback();
 }
 function changeWeatherCity() {
-  var city = window.prompt('输入城市名', homeWeatherRadioState.city || '上海');
-  city = String(city || '').trim();
-  if (!city) return;
-  homeWeatherRadioState.city = city;
-  localStorage.setItem(HOME_WEATHER_CITY_KEY, city);
-  homeWeatherRadioState.loaded = false;
-  loadHomeWeatherRadio(true, { city: city });
+  openHomeWeatherCityEditor();
 }
 function shouldShowEmptyHomeCore(ignoreSplash) {
   if (!ignoreSplash && document.body.classList.contains('splash-active')) return false;
@@ -17483,6 +18200,7 @@ function updateEmptyHomeVisibility(opts) {
   var show = shouldShowEmptyHome();
   emptyHomeActive = show;
   document.body.classList.toggle('empty-home-active', show);
+  syncHomeLyricRotationTimer();
   if (!show) setHomeControlsLocked(false);
   if (show) activateHomeWallpaperPreview();
   else deactivateHomeWallpaperPreview(false);
@@ -17928,6 +18646,800 @@ function renderDetailComments(comments) {
     '</div>';
   }).join('') + '</div>';
 }
+function commentBarrageSongKeySafe(song) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageSongKey === 'function') return api.commentBarrageSongKey(song);
+  if (!song || song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return '';
+  if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return 'qq:' + (song.mid || song.songmid || song.qqId || song.id || '');
+  return song.id != null && song.id !== '' ? 'netease:' + song.id : '';
+}
+function commentBarrageLimitSafe(limit) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageLimit === 'function') return api.commentBarrageLimit(limit == null ? COMMENT_BARRAGE_FETCH_LIMIT : limit);
+  if (limit == null || limit === '' || limit === 0 || limit === '0' || limit === 'all' || limit === 'unlimited') return 0;
+  var value = Math.floor(Number(limit));
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+function commentBarrageCommentsUrlSafe(song) {
+  var api = commentBarrageStateApi();
+  var limit = commentBarrageLimitSafe(COMMENT_BARRAGE_FETCH_LIMIT);
+  if (api && typeof api.commentBarrageCommentsUrl === 'function') return api.commentBarrageCommentsUrl(song, limit);
+  var key = commentBarrageSongKeySafe(song);
+  var limitParam = limit > 0 ? String(limit) : 'all';
+  if (!key) return '';
+  if (key.indexOf('qq:') === 0) {
+    return '/api/qq/song/comments?id=' + encodeURIComponent(song.qqId || '') + '&mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&limit=' + encodeURIComponent(limitParam);
+  }
+  return '/api/song/comments?id=' + encodeURIComponent(song.id) + '&limit=' + encodeURIComponent(limitParam);
+}
+function sanitizeBarrageCommentsSafe(comments) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.sanitizeBarrageComments === 'function') return api.sanitizeBarrageComments(comments, { maxLength: 84 });
+  var seen = {};
+  return (comments || []).map(function(c){
+    var text = stripUnsupportedEmojiSafe(c.content).replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 84 || seen[text]) return null;
+    seen[text] = true;
+    return { id: c.id || c.content, text: text };
+  }).filter(function(c){ return c && c.text; });
+}
+function stripUnsupportedEmojiSafe(text) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.stripUnsupportedEmoji === 'function') return api.stripUnsupportedEmoji(text);
+  return String(text || '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').replace(/[\u2600-\u27BF]/g, '').replace(/\s+/g, ' ').trim();
+}
+function wrapBarrageTextSafe(text, options) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.wrapBarrageText === 'function') return api.wrapBarrageText(text, options);
+  var value = stripUnsupportedEmojiSafe(text);
+  var maxChars = Math.max(8, Math.min(36, Math.floor(Number(options && options.maxCharsPerLine) || 22)));
+  var maxLines = Math.max(1, Math.min(4, Math.floor(Number(options && options.maxLines) || 3)));
+  if (value.length > maxChars * maxLines) return [];
+  var lines = [];
+  for (var i = 0; i < value.length && lines.length < maxLines; i += maxChars) lines.push(value.slice(i, i + maxChars));
+  return lines.filter(Boolean);
+}
+function assignBarrageTrackSafe(index) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.assignBarrageTrack === 'function') return api.assignBarrageTrack(index, 14);
+  return (Number(index) || 0) % 14;
+}
+function shouldShowCommentBarrageSafe(song) {
+  var api = commentBarrageStateApi();
+  var state = {
+    playing: !!playing,
+    audioActive: !!(audio && audio.src && !audio.paused && !audio.ended),
+  };
+  if (api && typeof api.shouldShowCommentBarrage === 'function') return api.shouldShowCommentBarrage(song, state);
+  return !!(commentBarrageSongKeySafe(song) && (state.playing || state.audioActive));
+}
+function commentBarrageMotionBindingSafe() {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageMotionBinding === 'function') return api.commentBarrageMotionBinding();
+  return { anchor: 'visual-world', billboard: 'lyric-rotation', rotation: 'lyric' };
+}
+function commentBarrageControlBoundsSafe(key) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageControlBounds === 'function') {
+    var bounds = api.commentBarrageControlBounds(key);
+    if (bounds) return bounds;
+  }
+  var map = {
+    commentBarrageSize: { min: 0.55, max: 1.35, fallback: 1 },
+    commentBarrageSpread: { min: 0.7, max: 1.8, fallback: 1 },
+    commentBarrageDepth: { min: 0.6, max: 2.2, fallback: 1 },
+    commentBarrageOpacity: { min: 0.2, max: 1, fallback: 1 },
+    commentBarrageDensity: { min: 0.55, max: 3.4, fallback: 1.35 },
+    commentBarrageLifetime: { min: 0.55, max: 2.2, fallback: 1 },
+  };
+  return map[key] || { min: 0, max: 1, fallback: 1 };
+}
+function commentBarrageControlValue(key, value, fallback) {
+  var bounds = commentBarrageControlBoundsSafe(key);
+  var fb = fallback == null ? bounds.fallback : fallback;
+  var n = Number(value);
+  if (!isFinite(n)) n = fb;
+  return clampRange(n, bounds.min, bounds.max);
+}
+function normalizeSavedCommentBarrageDensity(value) {
+  var n = Number(value);
+  if (value == null || value === '' || n === 1) return fxDefaults.commentBarrageDensity;
+  return commentBarrageControlValue('commentBarrageDensity', value, fxDefaults.commentBarrageDensity);
+}
+function commentBarrageLaneOffsetSafe(index, maxTracks, profile) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageLaneOffset === 'function') return api.commentBarrageLaneOffset(index, maxTracks, profile);
+  var tracks = Math.max(1, Math.min(14, Math.floor(Number(maxTracks) || 1)));
+  var lane = assignBarrageTrackSafe(index);
+  lane = lane % tracks;
+  var safeY = Math.max(1.04, Number(profile && profile.lyricSafeY) || 1.08);
+  var gap = Math.max(0.38, Number(profile && profile.laneGap) || 0.50);
+  var depth = Math.max(1.8, Number(profile && (profile.spaceDepth || profile.spreadZ)) || 2.2) / 3.4;
+  var side = lane % 2 === 0 ? 1 : -1;
+  var tier = Math.floor(lane / 2);
+  return { lane: lane, x: ((lane % 3) - 1) * 0.18, y: side * (safeY + tier * gap), z: ((lane % 3) - 1) * depth + tier * 0.18 };
+}
+function fitBarrageRectToViewportSafe(rect, viewport, options) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.fitBarrageRectToViewport === 'function') return api.fitBarrageRectToViewport(rect, viewport, options);
+  var vw = Math.max(1, Number(viewport && viewport.width) || innerWidth || 1);
+  var vh = Math.max(1, Number(viewport && viewport.height) || innerHeight || 1);
+  var margin = Math.max(0, Math.min(96, Number(options && options.margin) || 56));
+  var left = Number(rect && rect.left) || 0;
+  var top = Number(rect && rect.top) || 0;
+  var width = Math.max(1, Number(rect && rect.width) || 1);
+  var height = Math.max(1, Number(rect && rect.height) || 1);
+  var scale = Math.max(0.38, Math.min(1, (vw - margin * 2) / width, (vh - margin * 2) / height));
+  var w = width * scale;
+  var h = height * scale;
+  var cx = clampRange(left + width * 0.5, margin + w * 0.5, vw - margin - w * 0.5);
+  var cy = clampRange(top + height * 0.5, margin + h * 0.5, vh - margin - h * 0.5);
+  return { left: cx - w * 0.5, top: cy - h * 0.5, width: w, height: h, scale: scale, dx: cx - (left + width * 0.5), dy: cy - (top + height * 0.5), changed: true };
+}
+function commentBarrageTextStyleSafe(lineCount) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageTextStyle === 'function') return api.commentBarrageTextStyle(lineCount);
+  return { fontSize: lineCount > 1 ? 40 : 46, minFontSize: 25, lineHeight: lineCount > 1 ? 50 : 54, weight: 700 };
+}
+function commentBarrageOpacityAtSafe(ageSec, durationSec) {
+  var api = commentBarrageStateApi();
+  if (api && typeof api.commentBarrageOpacityAt === 'function') return api.commentBarrageOpacityAt(ageSec, durationSec);
+  var age = Number(ageSec);
+  var duration = Number(durationSec);
+  if (!isFinite(age) || !isFinite(duration) || duration <= 0 || age <= 0 || age >= duration) return 0;
+  function smooth(value) {
+    var t = clampRange(Number(value) || 0, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  var fadeIn = Math.max(0.18, Math.min(0.72, duration * 0.30));
+  var fadeOut = Math.max(0.24, Math.min(1.35, duration * 0.36));
+  return smooth(age / fadeIn) * smooth((duration - age) / fadeOut);
+}
+function commentBarrageVisualProfileSafe(preset) {
+  var api = commentBarrageStateApi();
+  var profile = api && typeof api.commentBarrageVisualProfile === 'function' ? api.commentBarrageVisualProfile(preset) : {
+    renderer: 'three-text-plane',
+    kind: 'lyric-cloud',
+    x: -0.55,
+    y: 0,
+    z: 1.72,
+    spreadX: 5.7,
+    spreadY: 2.72,
+    spreadZ: 2.2,
+    spaceDepth: 2.2,
+    driftX: 0.36,
+    driftY: 0.24,
+    driftZ: 0.42,
+    tiltX: -4,
+    tiltY: 0,
+    opacity: 0.58,
+    scale: 0.36,
+    maxActive: 8,
+    durationSec: 12,
+    spawnMs: 1080,
+    lyricSafeY: 1.08,
+    laneGap: 0.50,
+  };
+  return commentBarrageProfileWithFx(profile);
+}
+function commentBarrageProfileWithFx(profile) {
+  profile = Object.assign({}, profile || {});
+  var size = commentBarrageControlValue('commentBarrageSize', fx && fx.commentBarrageSize, fxDefaults.commentBarrageSize);
+  var spread = commentBarrageControlValue('commentBarrageSpread', fx && fx.commentBarrageSpread, fxDefaults.commentBarrageSpread);
+  var depth = commentBarrageControlValue('commentBarrageDepth', fx && fx.commentBarrageDepth, fxDefaults.commentBarrageDepth);
+  var opacity = commentBarrageControlValue('commentBarrageOpacity', fx && fx.commentBarrageOpacity, fxDefaults.commentBarrageOpacity);
+  var density = commentBarrageControlValue('commentBarrageDensity', fx && fx.commentBarrageDensity, fxDefaults.commentBarrageDensity);
+  var lifetime = commentBarrageControlValue('commentBarrageLifetime', fx && fx.commentBarrageLifetime, fxDefaults.commentBarrageLifetime);
+  profile.spreadX = Math.max(3.6, (Number(profile.spreadX) || 5.4) * spread);
+  profile.spreadY = Math.max(2.1, (Number(profile.spreadY) || 2.6) * spread);
+  profile.spreadZ = Math.max(1.5, (Number(profile.spreadZ) || 2.1) * depth);
+  profile.spaceDepth = Math.max(1.5, (Number(profile.spaceDepth) || Number(profile.spreadZ) || 2.1) * depth);
+  profile.scale = Math.max(0.18, Math.min(0.52, (Number(profile.scale) || 0.34) * size));
+  profile.opacity = clampRange((Number(profile.opacity) || 0.56) * opacity, 0.08, 1);
+  profile.maxActive = Math.max(4, Math.min(14, Math.round((Number(profile.maxActive) || 7) * density)));
+  profile.spawnMs = Math.max(300, Math.min(2400, (Number(profile.spawnMs) || 1100) / Math.max(0.75, density)));
+  profile.durationSec = Math.max(4.2, Math.min(32, (Number(profile.durationSec) || 10) * lifetime));
+  profile.lyricSafeY = Math.max(0.92, (Number(profile.lyricSafeY) || 1.08) * Math.max(1, spread * 0.82));
+  profile.laneGap = Math.max(0.38, (Number(profile.laneGap) || 0.50) * Math.max(1, spread * 0.72));
+  return profile;
+}
+function ensureCommentBarrage3DGroup() {
+  if (commentBarrage3D.group) return commentBarrage3D.group;
+  if (typeof THREE === 'undefined' || !scene) return null;
+  commentBarrage3D.group = new THREE.Group();
+  commentBarrage3D.group.name = 'comment-barrage-3d-layer';
+  commentBarrage3D.group.renderOrder = 36;
+  commentBarrage3D.group.visible = false;
+  scene.add(commentBarrage3D.group);
+  return commentBarrage3D.group;
+}
+function commentBarragePaletteColor(profile) {
+  var pal = stageLyrics && stageLyrics.palette || {};
+  var fallback = '#d6f8ff';
+  if (profile && profile.kind === 'requiem') fallback = '#d9b8ff';
+  else if (profile && profile.kind === 'starfield') fallback = '#bfe8ff';
+  else if (profile && profile.kind === 'groove') fallback = '#fff0b8';
+  else if (profile && profile.kind === 'void-whisper') fallback = '#d8d6ff';
+  return lyricThreeColor(pal.highlight || pal.primary || fallback, fallback, 0.46);
+}
+function makeCommentBarrageTextTexture(text, profile) {
+  text = stripUnsupportedEmojiSafe(text).replace(/\s+/g, ' ').trim();
+  var lines = wrapBarrageTextSafe(text, { maxCharsPerLine: 24, maxLines: 3 });
+  if (!lines.length) return null;
+  var canvas = document.createElement('canvas');
+  var W = 1280;
+  var H = 150 + Math.max(0, lines.length - 1) * 76;
+  canvas.width = W;
+  canvas.height = H;
+  var ctx = canvas.getContext('2d');
+  var maxWidth = W - 150;
+  var textStyle = commentBarrageTextStyleSafe(lines.length);
+  var fontSize = Math.max(26, Math.floor(Number(textStyle.fontSize) || (lines.length > 1 ? 42 : 48)));
+  var minFontSize = Math.max(22, Math.floor(Number(textStyle.minFontSize) || 26));
+  var fontWeight = Math.max(500, Math.min(900, Math.floor(Number(textStyle.weight) || 720)));
+  var fontFamily = '"Noto Sans SC","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif';
+  function setFont(size) {
+    ctx.font = fontWeight + ' ' + size + 'px ' + fontFamily;
+  }
+  setFont(fontSize);
+  var measured = lines.reduce(function(max, line){ return Math.max(max, ctx.measureText(line).width); }, 1);
+  while (fontSize > minFontSize && measured > maxWidth) {
+    fontSize -= 3;
+    setFont(fontSize);
+    measured = lines.reduce(function(max, line){ return Math.max(max, ctx.measureText(line).width); }, 1);
+  }
+  measured = Math.max(1, Math.min(maxWidth, measured));
+  ctx.clearRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var color = commentBarragePaletteColor(profile);
+  var rgb = {
+    r: Math.round(color.r * 255),
+    g: Math.round(color.g * 255),
+    b: Math.round(color.b * 255),
+  };
+  var glowA = profile && profile.kind === 'void-whisper' ? 0.18 : 0.28;
+  var lineHeight = Math.max(40, Number(textStyle.lineHeight) || fontSize * 1.15);
+  var startY = H * 0.5 - (lines.length - 1) * lineHeight * 0.5;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.filter = 'blur(18px)';
+  ctx.globalAlpha = glowA;
+  ctx.fillStyle = 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')';
+  lines.forEach(function(line, i){ ctx.fillText(line, W / 2, startY + i * lineHeight); });
+  ctx.filter = 'blur(44px)';
+  ctx.globalAlpha = glowA * 0.62;
+  lines.forEach(function(line, i){ ctx.fillText(line, W / 2, startY + i * lineHeight); });
+  ctx.restore();
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(5, fontSize * 0.075);
+  ctx.strokeStyle = 'rgba(0,0,0,0.34)';
+  lines.forEach(function(line, i){ ctx.strokeText(line, W / 2, startY + i * lineHeight + fontSize * 0.018); });
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  lines.forEach(function(line, i){ ctx.fillText(line, W / 2, startY + i * lineHeight); });
+  ctx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  var grad = ctx.createLinearGradient(W / 2 - measured / 2, 0, W / 2 + measured / 2, 0);
+  grad.addColorStop(0, 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.70)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.96)');
+  grad.addColorStop(1, 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.80)');
+  ctx.fillStyle = grad;
+  lines.forEach(function(line, i){ ctx.fillText(line, W / 2, startY + i * lineHeight); });
+  ctx.restore();
+  var tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  if (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy) {
+    tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  }
+  return {
+    texture: tex,
+    width: W,
+    height: H,
+    textWidth: measured,
+    worldW: clampRange(1.58 + measured / maxWidth * 3.20, 1.70, 4.85),
+    worldH: clampRange(0.46 + (lines.length - 1) * 0.28, 0.48, 1.10),
+  };
+}
+function buildCommentBarrageTextMesh(comment, profile, seq) {
+  if (typeof THREE === 'undefined' || !comment || !comment.text) return null;
+  var cleanText = stripUnsupportedEmojiSafe(comment.text);
+  if (!cleanText) return null;
+  profile = profile || commentBarrageVisualProfileSafe(fx && fx.preset);
+  var tex = makeCommentBarrageTextTexture(cleanText, profile);
+  if (!tex) return null;
+  var mat = new THREE.MeshBasicMaterial({
+    map: tex.texture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(tex.worldW, tex.worldH, 1, 1), mat);
+  mesh.renderOrder = 37;
+  mesh.frustumCulled = false;
+  var seed = (seq * 97.13 + String(comment.id || comment.text).length * 13.7) % 997;
+  function fract(v) { return v - Math.floor(v); }
+  var randA = fract(Math.sin(seed * 12.9898) * 43758.5453);
+  var randB = fract(Math.sin(seed * 78.233) * 12731.313);
+  var randC = fract(Math.sin(seed * 37.719) * 8317.127);
+  var laneOffset = commentBarrageLaneOffsetSafe(seq, profile.maxActive || 5, profile);
+  var laneJitterY = Math.min(0.20, Math.max(0.10, (Number(profile.spreadY) || 2) * 0.07));
+  mesh.userData.commentBarrage = {
+    seq: seq,
+    start: uniforms && uniforms.uTime ? uniforms.uTime.value : performance.now() / 1000,
+    duration: Math.max(4.2, Number(profile.durationSec) || 9),
+    profile: profile,
+    seed: seed,
+    randA: randA,
+    randB: randB,
+    randC: randC,
+    lane: laneOffset.lane,
+    laneSign: laneOffset.y < 0 ? -1 : 1,
+    x: laneOffset.x + (randA - 0.5) * (profile.spreadX || 3.8),
+    y: laneOffset.y + (randB - 0.5) * laneJitterY,
+    z: laneOffset.z + (randC - 0.5) * (profile.spreadZ || 0.8),
+    scale: 0.84 + fract(randA + randB) * 0.22,
+    spin: (fract(randC + randA) - 0.5) * 0.16,
+    opacity: 0.78 + fract(randB + randC) * 0.20,
+  };
+  return mesh;
+}
+function retargetCommentBarrageMesh(mesh, profile, seqOverride) {
+  var d = mesh && mesh.userData && mesh.userData.commentBarrage;
+  if (!d || !profile) return;
+  var seq = seqOverride == null ? (Number(d.seq) || 0) : seqOverride;
+  var laneOffset = commentBarrageLaneOffsetSafe(seq, profile.maxActive || 8, profile);
+  var laneJitterY = Math.min(0.20, Math.max(0.10, (Number(profile.spreadY) || 2) * 0.07));
+  var randA = Number.isFinite(d.randA) ? d.randA : 0.5;
+  var randB = Number.isFinite(d.randB) ? d.randB : 0.5;
+  var randC = Number.isFinite(d.randC) ? d.randC : 0.5;
+  d.profile = profile;
+  d.seq = seq;
+  d.duration = Math.max(4.2, Number(profile.durationSec) || Number(d.duration) || 9);
+  d.lane = laneOffset.lane;
+  d.laneSign = laneOffset.y < 0 ? -1 : 1;
+  d.x = laneOffset.x + (randA - 0.5) * (profile.spreadX || 3.8);
+  d.y = laneOffset.y + (randB - 0.5) * laneJitterY;
+  d.z = laneOffset.z + (randC - 0.5) * (profile.spreadZ || 0.8);
+}
+function retireCommentBarrageMesh(mesh) {
+  var d = mesh && mesh.userData && mesh.userData.commentBarrage;
+  if (!d || d.expired) return;
+  d.expired = true;
+  d.expireStart = uniforms && uniforms.uTime ? uniforms.uTime.value : performance.now() / 1000;
+  d.expireDuration = 1.15;
+}
+function disposeCommentBarrageMesh(mesh) {
+  if (!mesh) return;
+  if (mesh.parent) mesh.parent.remove(mesh);
+  if (mesh.material) {
+    if (mesh.material.map && mesh.material.map.dispose) mesh.material.map.dispose();
+    mesh.material.dispose();
+  }
+  if (mesh.geometry) mesh.geometry.dispose();
+}
+function clearCommentBarrage3D(keepComments) {
+  if (commentBarrage3D.active && commentBarrage3D.active.length) {
+    commentBarrage3D.active.forEach(disposeCommentBarrageMesh);
+  }
+  commentBarrage3D.active = [];
+  commentBarrage3D.localIndex = 0;
+  commentBarrage3D.nextSpawnAt = 0;
+  if (!keepComments) commentBarrage3D.comments = [];
+  if (commentBarrage3D.group) commentBarrage3D.group.visible = false;
+}
+function syncCommentBarrageButton() {
+  var btn = document.getElementById('comment-barrage-btn');
+  var layer = document.getElementById('comment-barrage-layer');
+  if (btn) {
+    btn.classList.toggle('active', !!commentBarrageEnabled);
+    btn.setAttribute('aria-pressed', commentBarrageEnabled ? 'true' : 'false');
+    btn.title = commentBarrageEnabled ? '关闭评论弹幕' : '开启评论弹幕';
+  }
+  if (layer) layer.classList.toggle('active', !!commentBarrageEnabled);
+}
+function clearCommentBarrageLayer(keepComments) {
+  if (commentBarrageTimer) {
+    clearInterval(commentBarrageTimer);
+    commentBarrageTimer = null;
+  }
+  var layer = document.getElementById('comment-barrage-layer');
+  if (layer) layer.innerHTML = '';
+  clearCommentBarrage3D(!!keepComments);
+}
+function setCommentBarrageEnabled(on, silent) {
+  commentBarrageEnabled = !!on;
+  localStorage.setItem(COMMENT_BARRAGE_STORE_KEY, commentBarrageEnabled ? '1' : '0');
+  syncCommentBarrageButton();
+  if (!commentBarrageEnabled) {
+    clearCommentBarrageLayer();
+    if (!silent) showToast('评论弹幕已关闭');
+    return;
+  }
+  if (!silent) showToast('评论弹幕已开启');
+  resetCommentBarrageForCurrentSong('toggle-on');
+}
+function toggleCommentBarrage() {
+  setCommentBarrageEnabled(!commentBarrageEnabled, false);
+}
+function spawnCommentBarrageItem(comment) {
+  if (!commentBarrageEnabled || !comment || !comment.text) return;
+  if (!shouldShowCommentBarrageSafe(currentCoverSong())) return;
+  var group = ensureCommentBarrage3DGroup();
+  if (!group) return;
+  var seq = commentBarrageSeq++;
+  var profile = commentBarrageVisualProfileSafe(fx && fx.preset);
+  var maxActive = Math.max(4, Math.min(14, Math.floor(Number(profile.maxActive) || 8)));
+  while (commentBarrage3D.active.filter(function(item){
+    var d = item && item.userData && item.userData.commentBarrage;
+    return d && !d.expired;
+  }).length >= maxActive) {
+    var oldest = commentBarrage3D.active.find(function(item){
+      var d = item && item.userData && item.userData.commentBarrage;
+      return d && !d.expired;
+    });
+    if (!oldest) break;
+    retireCommentBarrageMesh(oldest);
+  }
+  var mesh = buildCommentBarrageTextMesh(comment, profile, seq);
+  if (!mesh) return;
+  group.visible = true;
+  group.add(mesh);
+  commentBarrage3D.active.push(mesh);
+}
+function startCommentBarrageLoop(comments) {
+  clearCommentBarrageLayer();
+  syncCommentBarrageButton();
+  if (!shouldShowCommentBarrageSafe(currentCoverSong())) return;
+  if (!commentBarrageEnabled || !comments || !comments.length) return;
+  commentBarrage3D.comments = comments.slice();
+  commentBarrage3D.localIndex = 0;
+  commentBarrage3D.nextSpawnAt = 0;
+  commentBarrage3D.lastPreset = fx && fx.preset;
+  ensureCommentBarrage3DGroup();
+}
+function resetCommentBarrageVisualForPreset() {
+  clearCommentBarrage3D(true);
+  commentBarrage3D.lastPreset = fx && fx.preset;
+  commentBarrage3D.nextSpawnAt = 0;
+}
+function applyCommentBarrageFxLive(reason) {
+  if (!commentBarrage3D) return;
+  var profile = commentBarrageVisualProfileSafe(fx && fx.preset);
+  var maxActive = Math.max(4, Math.min(14, Math.floor(Number(profile.maxActive) || 8)));
+  var active = commentBarrage3D.active || [];
+  for (var i = 0; i < active.length; i++) retargetCommentBarrageMesh(active[i], profile, i);
+  var visibleCount = active.filter(function(item){
+    var d = item && item.userData && item.userData.commentBarrage;
+    return d && !d.expired;
+  }).length;
+  for (var j = 0; visibleCount > maxActive && j < active.length; j++) {
+    var data = active[j] && active[j].userData && active[j].userData.commentBarrage;
+    if (data && !data.expired) {
+      retireCommentBarrageMesh(active[j]);
+      visibleCount -= 1;
+    }
+  }
+  commentBarrage3D.active = active;
+  commentBarrage3D.lastPreset = fx && fx.preset;
+  if (commentBarrageEnabled && commentBarrage3D.comments && commentBarrage3D.comments.length && active.length < maxActive) {
+    commentBarrage3D.nextSpawnAt = 0;
+  }
+  if (commentBarrage3D.group) commentBarrage3D.group.visible = !!(active.length || (commentBarrage3D.comments && commentBarrage3D.comments.length));
+}
+function commentBarrageVisualBasis(profile) {
+  if (!commentBarrageBasisCache && typeof THREE !== 'undefined') {
+    commentBarrageBasisCache = {
+      position: new THREE.Vector3(),
+      quaternion: new THREE.Quaternion(),
+      scaleVec: new THREE.Vector3(1, 1, 1),
+      right: new THREE.Vector3(1, 0, 0),
+      up: new THREE.Vector3(0, 1, 0),
+      forward: new THREE.Vector3(0, 0, 1),
+      scale: 1,
+    };
+  }
+  var basis = commentBarrageBasisCache;
+  if (!basis) return null;
+  var binding = commentBarrageMotionBindingSafe();
+  var anchor = null;
+  if (binding && binding.anchor === 'visual-world') {
+    var skullPresetIndex = typeof SKULL_PRESET_INDEX !== 'undefined' ? SKULL_PRESET_INDEX : -1;
+    if (fx && fx.preset === skullPresetIndex && skullParticleGroup && skullParticleGroup.visible) anchor = skullParticleGroup;
+    else if (particles && particles.visible) anchor = particles;
+    else if (backCoverGroup && backCoverGroup.visible) anchor = backCoverGroup;
+    else if (floatGroup && floatGroup.visible) anchor = floatGroup;
+  }
+  if (anchor) {
+    anchor.updateMatrixWorld(true);
+    anchor.getWorldPosition(basis.position);
+    anchor.getWorldQuaternion(basis.quaternion);
+    anchor.getWorldScale(basis.scaleVec);
+    basis.scale = clampRange((Math.abs(basis.scaleVec.x) + Math.abs(basis.scaleVec.y) + Math.abs(basis.scaleVec.z)) / 3, 0.35, 2.8);
+  } else {
+    basis.position.set(0, 0, 0);
+    basis.quaternion.identity();
+    basis.scaleVec.set(1, 1, 1);
+    basis.scale = 1;
+  }
+  basis.right.set(1, 0, 0).applyQuaternion(basis.quaternion).normalize();
+  basis.up.set(0, 1, 0).applyQuaternion(basis.quaternion).normalize();
+  basis.forward.set(0, 0, 1).applyQuaternion(basis.quaternion).normalize();
+  return basis;
+}
+function commentBarrageLyricQuaternion(basis) {
+  if (stageLyrics && stageLyrics.group) {
+    stageLyrics.group.updateMatrixWorld(true);
+    return stageLyrics.group.quaternion;
+  }
+  if (basis && basis.quaternion) return basis.quaternion;
+  return camera ? camera.quaternion : null;
+}
+function commentBarrageViewportCache() {
+  if (!commentBarrageViewportFitCache && typeof THREE !== 'undefined') {
+    commentBarrageViewportFitCache = {
+      corners: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()],
+      world: new THREE.Vector3(),
+      right: new THREE.Vector3(),
+      up: new THREE.Vector3(),
+      forward: new THREE.Vector3(),
+    };
+  }
+  return commentBarrageViewportFitCache;
+}
+function commentBarrageProjectedRect(mesh) {
+  if (!mesh || !mesh.geometry || !camera || typeof THREE === 'undefined') return null;
+  var params = mesh.geometry.parameters || {};
+  var w = Math.max(0.01, Number(params.width) || 1);
+  var h = Math.max(0.01, Number(params.height) || 0.4);
+  var cache = commentBarrageViewportCache();
+  if (!cache) return null;
+  var corners = cache.corners;
+  corners[0].set(-w * 0.5, -h * 0.5, 0);
+  corners[1].set(w * 0.5, -h * 0.5, 0);
+  corners[2].set(w * 0.5, h * 0.5, 0);
+  corners[3].set(-w * 0.5, h * 0.5, 0);
+  mesh.updateMatrixWorld(true);
+  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (var i = 0; i < corners.length; i++) {
+    corners[i].applyMatrix4(mesh.matrixWorld).project(camera);
+    if (!isFinite(corners[i].x) || !isFinite(corners[i].y)) return null;
+    var sx = (corners[i].x * 0.5 + 0.5) * innerWidth;
+    var sy = (-corners[i].y * 0.5 + 0.5) * innerHeight;
+    minX = Math.min(minX, sx);
+    maxX = Math.max(maxX, sx);
+    minY = Math.min(minY, sy);
+    maxY = Math.max(maxY, sy);
+  }
+  return { left: minX, top: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+function commentBarrageLyricSafeRect() {
+  var w = Math.max(1, innerWidth || 1);
+  var h = Math.max(1, innerHeight || 1);
+  var shelfDetailOpen = !!(shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent());
+  var safeW = shelfDetailOpen ? 0.48 : 0.56;
+  var safeH = shelfDetailOpen ? 0.23 : 0.26;
+  return {
+    left: w * (0.5 - safeW * 0.5),
+    top: h * (0.5 - safeH * 0.5),
+    width: w * safeW,
+    height: h * safeH,
+  };
+}
+function fitCommentBarrageMeshToViewport(mesh) {
+  if (!mesh || !camera || !camera.isPerspectiveCamera) return;
+  var rect = commentBarrageProjectedRect(mesh);
+  if (!rect) return;
+  var fit = fitBarrageRectToViewportSafe(rect, { width: innerWidth, height: innerHeight }, {
+    margin: Math.max(44, Math.min(86, Math.min(innerWidth, innerHeight) * 0.060)),
+    lyricRect: commentBarrageLyricSafeRect(),
+  });
+  if (!fit || !fit.changed) return;
+  var cache = commentBarrageViewportCache();
+  if (!cache) return;
+  mesh.getWorldPosition(cache.world);
+  cache.forward.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+  cache.right.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  cache.up.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+  var distance = Math.max(0.35, Math.abs(cache.world.clone().sub(camera.position).dot(cache.forward)));
+  var fov = (camera.fov || 45) * Math.PI / 180;
+  var visibleH = 2 * Math.tan(fov * 0.5) * distance;
+  var visibleW = visibleH * (camera.aspect || (innerWidth / Math.max(1, innerHeight)) || 1.78);
+  var worldPerPxX = visibleW / Math.max(1, innerWidth);
+  var worldPerPxY = visibleH / Math.max(1, innerHeight);
+  var pushX = clampRange(Number(fit.dx) || 0, -innerWidth * 0.24, innerWidth * 0.24);
+  var pushY = clampRange(Number(fit.dy) || 0, -innerHeight * 0.24, innerHeight * 0.24);
+  mesh.position.addScaledVector(cache.right, pushX * worldPerPxX * 0.82);
+  mesh.position.addScaledVector(cache.up, -pushY * worldPerPxY * 0.82);
+  var fitScale = clampRange(Number(fit.scale) || 1, 0.44, 1);
+  if (fitScale < 0.995) mesh.scale.multiplyScalar(fitScale);
+}
+function commentBarrageApplyPresetPose(mesh, profile, ageSec, durationSec, nowT, exitAlpha) {
+  var d = mesh && mesh.userData && mesh.userData.commentBarrage;
+  if (!mesh || !d || !profile) return;
+  var duration = Math.max(0.1, Number(durationSec) || Number(profile.durationSec) || 9);
+  var progress = duration > 0 ? (Number(ageSec) || 0) / duration : 0;
+  var p = clampRange(progress || 0, 0, 1);
+  var ease = p * p * (3 - 2 * p);
+  var alpha = commentBarrageOpacityAtSafe(ageSec, duration) * (exitAlpha == null ? 1 : exitAlpha) * (profile.opacity || 0.7) * d.opacity;
+  var x = (profile.x || 0) + d.x + (profile.driftX || 0) * ease;
+  var y = (profile.y || 0) + d.y + (profile.driftY || 0) * ease;
+  var z = (profile.z || 0) + d.z + (profile.driftZ || 0) * ease;
+  var rotZ = d.spin * ease;
+  var scale = (profile.scale || 0.55) * d.scale * (1 + Math.min(0.16, beatPulse * 0.08 + bass * 0.035));
+  var phase = nowT * 0.64 + d.seed * 0.017;
+  if (profile.kind === 'tunnel-echo') {
+    z -= ease * 1.12;
+    scale *= 1.08 - ease * 0.18;
+    rotZ += Math.sin(phase) * 0.045;
+  } else if (profile.kind === 'orbital') {
+    var orbitA = phase + ease * Math.PI * 0.86;
+    x += Math.cos(orbitA) * 0.64;
+    y += Math.sin(orbitA) * 0.26;
+    z += Math.sin(orbitA * 0.7) * 0.20;
+    rotZ += Math.sin(orbitA) * 0.08;
+  } else if (profile.kind === 'void-whisper') {
+    y += Math.sin(phase * 0.54) * 0.10;
+    alpha *= 0.78 + 0.22 * Math.sin(phase * 1.7 + ease * 2.0);
+  } else if (profile.kind === 'groove') {
+    var groove = (ease - 0.5) * Math.PI;
+    x += Math.sin(groove) * 0.42;
+    y += Math.cos(groove) * 0.12;
+    rotZ += Math.sin(groove) * 0.12;
+  } else if (profile.kind === 'starfield') {
+    z -= ease * 0.52;
+    x += Math.sin(phase * 0.72) * 0.12;
+    y += Math.cos(phase * 0.58) * 0.10;
+    alpha *= 0.74 + 0.26 * Math.pow(0.5 + 0.5 * Math.sin(phase * 2.4), 2);
+  } else if (profile.kind === 'requiem') {
+    x += Math.sin(phase * 0.62) * 0.08;
+    y += Math.sin(phase * 1.18) * 0.045 - ease * 0.12;
+    rotZ += Math.sin(phase * 2.3) * 0.030;
+  } else {
+    y += Math.sin(phase) * 0.055;
+    z += Math.cos(phase * 0.6) * 0.055;
+  }
+  var safeY = Math.max(1.0, Number(profile.lyricSafeY) || 1.08);
+  if (Math.abs(y) < safeY) y = (d.laneSign < 0 ? -1 : 1) * safeY;
+  var basis = commentBarrageVisualBasis(profile);
+  if (basis) {
+    mesh.position.copy(basis.position)
+      .addScaledVector(basis.right, x)
+      .addScaledVector(basis.up, y)
+      .addScaledVector(basis.forward, z);
+    var binding = commentBarrageMotionBindingSafe();
+    var lyricQuat = commentBarrageLyricQuaternion(basis);
+    if (binding && (binding.billboard === 'lyric-rotation' || binding.rotation === 'lyric') && lyricQuat) mesh.quaternion.copy(lyricQuat);
+    else if (camera && binding && binding.billboard === 'camera-facing') mesh.quaternion.copy(camera.quaternion);
+    else mesh.quaternion.copy(basis.quaternion);
+    mesh.rotateX(((profile.tiltX || 0) * Math.PI / 180) * (1 - ease * 0.25));
+    mesh.rotateY(((profile.tiltY || 0) * Math.PI / 180) * (1 - ease * 0.18));
+    mesh.rotateZ(rotZ);
+    scale *= basis.scale;
+  } else {
+    mesh.position.set(x, y, z);
+    mesh.rotation.set((profile.tiltX || 0) * Math.PI / 180, (profile.tiltY || 0) * Math.PI / 180, rotZ);
+  }
+  mesh.scale.setScalar(scale);
+  fitCommentBarrageMeshToViewport(mesh);
+  if (mesh.material) mesh.material.opacity = clampRange(alpha, 0, 1);
+}
+function updateCommentBarrage3D(dt) {
+  if (!commentBarrageEnabled || !shouldShowCommentBarrageSafe(currentCoverSong())) {
+    if (commentBarrage3D.active && commentBarrage3D.active.length) clearCommentBarrage3D(true);
+    if (commentBarrage3D.group) commentBarrage3D.group.visible = false;
+    return;
+  }
+  var group = ensureCommentBarrage3DGroup();
+  if (!group) return;
+  var comments = commentBarrage3D.comments || [];
+  group.visible = !!(comments.length || (commentBarrage3D.active && commentBarrage3D.active.length));
+  if (!comments.length && (!commentBarrage3D.active || !commentBarrage3D.active.length)) return;
+  var preset = fx && fx.preset;
+  if (commentBarrage3D.lastPreset !== preset) {
+    resetCommentBarrageVisualForPreset();
+    commentBarrage3D.lastPreset = preset;
+  }
+  var profile = commentBarrageVisualProfileSafe(preset);
+  var nowMs = performance.now();
+  if (comments.length && nowMs >= (commentBarrage3D.nextSpawnAt || 0)) {
+    var next = comments[commentBarrage3D.localIndex % comments.length];
+    commentBarrage3D.localIndex += 1;
+    spawnCommentBarrageItem(next);
+    commentBarrage3D.nextSpawnAt = nowMs + Math.max(300, Math.min(2400, Number(profile.spawnMs) || 1100));
+  }
+  var nowT = uniforms && uniforms.uTime ? uniforms.uTime.value : nowMs / 1000;
+  for (var i = commentBarrage3D.active.length - 1; i >= 0; i--) {
+    var mesh = commentBarrage3D.active[i];
+    var data = mesh && mesh.userData && mesh.userData.commentBarrage;
+    if (!data) {
+      commentBarrage3D.active.splice(i, 1);
+      disposeCommentBarrageMesh(mesh);
+      continue;
+    }
+    var age = nowT - data.start;
+    var duration = Math.max(4.2, Number(data.duration) || Number(profile.durationSec) || 9);
+    if (age >= duration && !data.expired) data.expired = true;
+    var exitAlpha = 1;
+    if (data.expired) {
+      if (data.expireStart == null) data.expireStart = nowT;
+      if (data.expireDuration == null) data.expireDuration = 1.15;
+      var exitAge = Math.max(0, nowT - data.expireStart);
+      var exitProgress = clampRange(exitAge / Math.max(0.1, data.expireDuration), 0, 1);
+      exitAlpha = 1 - exitProgress * exitProgress * (3 - 2 * exitProgress);
+      if (exitAge >= data.expireDuration || age >= duration + data.expireDuration) {
+        commentBarrage3D.active.splice(i, 1);
+        disposeCommentBarrageMesh(mesh);
+        continue;
+      }
+    }
+    commentBarrageApplyPresetPose(mesh, data.profile || profile, age, duration, nowT, exitAlpha);
+  }
+}
+async function loadCurrentSongBarrageComments(reason) {
+  if (!commentBarrageEnabled) return;
+  var song = currentCoverSong();
+  if (!shouldShowCommentBarrageSafe(song)) {
+    clearCommentBarrageLayer(true);
+    return;
+  }
+  if (!song) {
+    clearCommentBarrageLayer();
+    return;
+  }
+  var key = commentBarrageSongKeySafe(song);
+  var url = commentBarrageCommentsUrlSafe(song);
+  if (!key || !url) {
+    clearCommentBarrageLayer();
+    if (commentBarrageLastEmptyKey !== 'unsupported') {
+      commentBarrageLastEmptyKey = 'unsupported';
+      showToast('当前歌曲暂不支持评论弹幕');
+    }
+    return;
+  }
+  commentBarrageLastEmptyKey = '';
+  var cached = commentBarrageCache[key];
+  if (cached && cached.comments && cached.comments.length) {
+    startCommentBarrageLoop(cached.comments);
+    return;
+  }
+  if (cached && cached.loading) return;
+  commentBarrageCache[key] = { loading: true, comments: [], error: '' };
+  try {
+    var data = await apiJson(url, { timeoutMs: 12000 });
+    var comments = sanitizeBarrageCommentsSafe(data && data.comments || []);
+    commentBarrageCache[key] = { loading: false, comments: comments, error: data && data.error || '' };
+    if (!commentBarrageEnabled || key !== commentBarrageSongKeySafe(currentCoverSong())) return;
+    if (comments.length) startCommentBarrageLoop(comments);
+    else {
+      clearCommentBarrageLayer();
+      if (commentBarrageLastEmptyKey !== key) {
+        commentBarrageLastEmptyKey = key;
+        showToast('这首歌暂时没有可显示的热门评论');
+      }
+    }
+  } catch (e) {
+    console.warn('[CommentBarrage]', e);
+    commentBarrageCache[key] = { loading: false, comments: [], error: e && e.message || 'COMMENT_FAILED' };
+    clearCommentBarrageLayer();
+    if (commentBarrageLastEmptyKey !== key) {
+      commentBarrageLastEmptyKey = key;
+      showToast('评论弹幕加载失败');
+    }
+  }
+}
+function resetCommentBarrageForCurrentSong(reason) {
+  clearCommentBarrageLayer();
+  syncCommentBarrageButton();
+  if (commentBarrageEnabled) loadCurrentSongBarrageComments(reason);
+}
 function renderArtistSongList(songs) {
   detailArtistSongs = (songs || []).map(cloneSong);
   if (!detailArtistSongs.length) return '<div class="detail-empty">暂无热门歌曲</div>';
@@ -18309,6 +19821,7 @@ function applyCustomLyricState(song, silent) {
   renderLyrics();
   clearLyricTextureCache();
   updateCustomLyricControls();
+  if (emptyHomeActive) renderHomeWeatherHero(true);
   return true;
 }
 function preferredLyricSourceForSong(song) {
@@ -19876,6 +21389,10 @@ function syncPlaybackStateFromAudioEvent(reason) {
   setPlayIcon(isPlaying);
   if (!isPlaying) hideLoading();
   if (reason === 'play' || reason === 'playing') switchPlaybackVisualToEmily();
+  if (commentBarrageEnabled) {
+    if (isPlaying && (reason === 'play' || reason === 'playing')) resetCommentBarrageForCurrentSong('audio-' + reason);
+    else if (!isPlaying) clearCommentBarrage3D(true);
+  }
   forcePlaybackControlsInteractive();
 }
 
@@ -19986,9 +21503,9 @@ async function playQueueAt(idx, opts) {
   markPlayPhase('cover-load');
   safePlaybackStep('cover-load', function(){
     var customCover = getCustomCoverForSong(song);
-    var coverOpts = { trackToken: token, deferHeavy: true, delay: firstVisualPlay ? 380 : 680, timeout: firstVisualPlay ? 1400 : 1900 };
-    if (customCover) applyCoverDataUrl(customCover, coverOpts);
-    else loadCoverFromUrl(song.cover ? coverUrlWithSize(song.cover, 400) : '', coverOpts);
+    var coverOpts = { trackToken: token, deferHeavy: true, delay: firstVisualPlay ? 380 : 680, timeout: firstVisualPlay ? 1400 : 1900, reason: 'track-switch', firstVisualPlay: firstVisualPlay };
+    var coverSrc = customCover || (song.cover ? coverUrlWithSize(song.cover, 400) : '');
+    scheduleVisualCoverHandoff({ kind: customCover ? 'data' : (coverSrc ? 'url' : 'none'), src: coverSrc }, coverOpts);
   });
   safePlaybackStep('trial-banner-reset', function(){ document.getElementById('trial-banner').classList.remove('show'); });
   safePlaybackStep('show-loading', showLoading);
@@ -20147,6 +21664,7 @@ async function playQueueAt(idx, opts) {
     } else {
       fetchLyric(song, token);
     }
+    safePlaybackStep('comment-barrage-reset', function(){ resetCommentBarrageForCurrentSong('play-queue-at'); });
     safeRenderQueuePanel('play-queue-at');
     scheduleShelfRebuild('play-queue-at', true);
     safePlaybackStep('shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
@@ -20583,11 +22101,13 @@ async function fetchLyric(songOrId, token) {
     if (lines.length && lines[0].fallback) timingSource = 'fallback';
     setOriginalLyricsState(lines, hasNativeKaraoke, timingSource);
     applyPreferredLyricsForCurrent(true);
+    if (emptyHomeActive) renderHomeWeatherHero(true);
   } catch (e) {
     if (token !== trackSwitchToken) return;
     var fallbackLines = withLyricFallback([]);
     setOriginalLyricsState(fallbackLines, false, 'fallback');
     applyPreferredLyricsForCurrent(true);
+    if (emptyHomeActive) renderHomeWeatherHero(true);
   }
 }
 function currentLyricFallbackText() {
@@ -21743,6 +23263,12 @@ function normalizeFxArchiveSnapshot(raw) {
     lyricLetterSpacing: archiveNumber(raw, 'lyricLetterSpacing', fxDefaults.lyricLetterSpacing, -0.04, 0.18),
     lyricLineHeight: archiveNumber(raw, 'lyricLineHeight', fxDefaults.lyricLineHeight, 0.86, 1.35),
     lyricWeight: archiveNumber(raw, 'lyricWeight', fxDefaults.lyricWeight, 500, 900),
+    commentBarrageSize: commentBarrageControlValue('commentBarrageSize', raw.commentBarrageSize, fxDefaults.commentBarrageSize),
+    commentBarrageSpread: commentBarrageControlValue('commentBarrageSpread', raw.commentBarrageSpread, fxDefaults.commentBarrageSpread),
+    commentBarrageDepth: commentBarrageControlValue('commentBarrageDepth', raw.commentBarrageDepth, fxDefaults.commentBarrageDepth),
+    commentBarrageOpacity: commentBarrageControlValue('commentBarrageOpacity', raw.commentBarrageOpacity, fxDefaults.commentBarrageOpacity),
+    commentBarrageDensity: commentBarrageControlValue('commentBarrageDensity', raw.commentBarrageDensity, fxDefaults.commentBarrageDensity),
+    commentBarrageLifetime: commentBarrageControlValue('commentBarrageLifetime', raw.commentBarrageLifetime, fxDefaults.commentBarrageLifetime),
     visualTintMode: raw.visualTintMode === 'custom' ? 'custom' : 'auto',
     visualTintColor: normalizeHexColor(raw.visualTintColor || fxDefaults.visualTintColor),
     uiAccentColor: normalizeHexColor(raw.uiAccentColor || fxDefaults.uiAccentColor, fxDefaults.uiAccentColor),
@@ -22860,6 +24386,11 @@ function setPreset(p, opts) {
   if (!opts.noSave) {
     saveLyricLayout();
   }
+  if (changed && typeof resetCommentBarrageVisualForPreset === 'function') resetCommentBarrageVisualForPreset();
+  if (changed) {
+    if (visualCoverPolicySafe(p) === 'cover-texture') applyLatestVisualCoverForCurrentPreset('preset-change');
+    else clearVisualCoverHandoffTimer();
+  }
 }
 
 function syncFxUniforms() {
@@ -22922,6 +24453,15 @@ function setRange(id, value) {
   if (id === 'fx-lyricglow') value = Math.min(0.85, Math.max(0, value));
   if (id === 'fx-coverres') value = normalizeCoverResolution(value);
   if (id === 'fx-glassaberration') value = normalizeControlGlassChromaticOffset(value);
+  var commentControlMap = {
+    'fx-comment-size': 'commentBarrageSize',
+    'fx-comment-spread': 'commentBarrageSpread',
+    'fx-comment-depth': 'commentBarrageDepth',
+    'fx-comment-opacity': 'commentBarrageOpacity',
+    'fx-comment-density': 'commentBarrageDensity',
+    'fx-comment-lifetime': 'commentBarrageLifetime'
+  };
+  if (commentControlMap[id]) value = commentBarrageControlValue(commentControlMap[id], value, fxDefaults[commentControlMap[id]]);
   el.value = value;
   var out = el.parentElement.querySelector('output');
   if (out) out.textContent = id === 'fx-coverres'
@@ -23038,6 +24578,12 @@ function updateFxInputs() {
   setRange('fx-lyricz', fx.lyricOffsetZ);
   setRange('fx-lyrictiltx', fx.lyricTiltX);
   setRange('fx-lyrictilty', fx.lyricTiltY);
+  setRange('fx-comment-size', fx.commentBarrageSize);
+  setRange('fx-comment-spread', fx.commentBarrageSpread);
+  setRange('fx-comment-depth', fx.commentBarrageDepth);
+  setRange('fx-comment-opacity', fx.commentBarrageOpacity);
+  setRange('fx-comment-density', fx.commentBarrageDensity);
+  setRange('fx-comment-lifetime', fx.commentBarrageLifetime);
   setRange('fx-point', fx.point);
   setRange('fx-speed', fx.speed);
   setRange('fx-twist', fx.twist);
@@ -23122,6 +24668,7 @@ function resetFxSliderValue(id, key, btn) {
   setRange(id, fx[key]);
   if (key === 'coverResolution') applyCoverParticleResolution(fx[key], { reload: true });
   if (key === 'controlGlassChromaticOffset') applyControlGlassChromaticOffset();
+  if (/^commentBarrage/.test(key)) applyCommentBarrageFxLive('diy-reset');
   syncFxUniforms();
   if (key === 'lyricLetterSpacing' || key === 'lyricLineHeight' || key === 'lyricWeight') refreshCurrentLyricStyle();
   saveLyricLayout();
@@ -23730,6 +25277,7 @@ function bindFxPanel() {
     ['fx-shelfsize','shelfSize'],['fx-shelfgap','shelfGap'],['fx-shelfx','shelfOffsetX'],['fx-shelfy','shelfOffsetY'],['fx-shelfz','shelfOffsetZ'],['fx-shelfangle','shelfAngleY'],['fx-shelfopacity','shelfOpacity'],['fx-shelfbgalpha','shelfBgOpacity'],
     ['fx-lyricspacing','lyricLetterSpacing'],['fx-lyriclineheight','lyricLineHeight'],['fx-lyricweight','lyricWeight'],
     ['fx-lyricscale','lyricScale'],['fx-lyricx','lyricOffsetX'],['fx-lyricy','lyricOffsetY'],['fx-lyricz','lyricOffsetZ'],['fx-lyrictiltx','lyricTiltX'],['fx-lyrictilty','lyricTiltY'],
+    ['fx-comment-size','commentBarrageSize'],['fx-comment-spread','commentBarrageSpread'],['fx-comment-depth','commentBarrageDepth'],['fx-comment-opacity','commentBarrageOpacity'],['fx-comment-density','commentBarrageDensity'],['fx-comment-lifetime','commentBarrageLifetime'],
     ['fx-point','point'],['fx-speed','speed'],['fx-twist','twist'],
     ['fx-color','color'],['fx-bloom','bloomStrength'],['fx-scatter','scatter'],['fx-bgfade','bgFade'],
   ];
@@ -23771,11 +25319,13 @@ function bindFxPanel() {
       if (pair[1] === 'shelfOpacity') fx.shelfOpacity = clampRange(fx.shelfOpacity, 0.25, 1);
       if (pair[1] === 'shelfBgOpacity') fx.shelfBgOpacity = clampRange(fx.shelfBgOpacity, 0.25, 0.98);
       if (pair[1] === 'lyricTiltX' || pair[1] === 'lyricTiltY') fx[pair[1]] = Math.round(clampRange(fx[pair[1]], -42, 42));
+      if (/^commentBarrage/.test(pair[1])) fx[pair[1]] = commentBarrageControlValue(pair[1], fx[pair[1]], fxDefaults[pair[1]]);
       if (out) out.textContent = pair[1] === 'coverResolution'
         ? coverParticleCountLabel(fx.coverResolution)
         : (pair[1] === 'lyricWeight' || pair[1] === 'controlGlassChromaticOffset' || pair[1] === 'lyricTiltX' || pair[1] === 'lyricTiltY' || pair[1] === 'shelfAngleY' ? String(Math.round(fx[pair[1]])) : Number(el.value).toFixed(pair[1] === 'lyricLetterSpacing' ? 3 : 2));
       syncFxUniforms();
       if (/^shelf(Size|Gap|OffsetX|OffsetY|OffsetZ|AngleY|Opacity|BgOpacity)$/.test(pair[1]) && shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
+      if (/^commentBarrage/.test(pair[1])) applyCommentBarrageFxLive('diy-input');
       if (pair[1] === 'lyricLetterSpacing' || pair[1] === 'lyricLineHeight' || pair[1] === 'lyricWeight') refreshCurrentLyricStyle();
       if (pair[1] === 'lyricLetterSpacing' || pair[1] === 'lyricLineHeight' || pair[1] === 'lyricWeight' || pair[1] === 'lyricScale' || pair[1] === 'lyricGlowStrength') pushDesktopLyricsState(true);
       if (/^(desktopLyricsSize|desktopLyricsOpacity|desktopLyricsY)$/.test(pair[1])) pushDesktopLyricsState(true);
@@ -28166,6 +29716,10 @@ scheduleUiWarmTask(function(){
 applyUserCapsuleAutoHideState();
 applyFxFabAutoHideState();
 applyControlsAutoHidePreference();
+syncCommentBarrageButton();
+restoreCachedHomeWeatherRadio();
+renderHomeWeatherHero(false);
+scheduleHomeWeatherLoad(1800);
 applyDesktopLyricsState(false);
 applyWallpaperModeState(false);
 setShelfMode(fx.shelf);
@@ -28269,6 +29823,48 @@ function sampleRenderPerf(now, dt) {
     renderPerfState.lastSampleAt = now;
   }
   maybeTrimRuntimeCaches(now);
+}
+function renderSceneWithShelfOverlay() {
+  if (!shelfUsesReferenceRenderCamera() || !shelfManager || !shelfManager.getRenderRoots) {
+    renderer.render(scene, camera);
+    return;
+  }
+  var shelfRoots = shelfManager.getRenderRoots().filter(function(root) {
+    return root && root.parent === scene;
+  });
+  if (!shelfRoots.length) {
+    renderer.render(scene, camera);
+    return;
+  }
+  var rootStates = shelfRoots.map(function(root) {
+    return { obj: root, visible: root.visible };
+  });
+  var childStates = scene.children.map(function(child) {
+    return { obj: child, visible: child.visible };
+  });
+  shelfRoots.forEach(function(root) { root.visible = false; });
+  renderer.render(scene, camera);
+
+  var shelfCamera = currentShelfRenderCamera();
+  if (!shelfCamera) {
+    childStates.forEach(function(state) { state.obj.visible = state.visible; });
+    return;
+  }
+  var rootSet = new Set(shelfRoots);
+  var previousAutoClear = renderer.autoClear;
+  try {
+    scene.children.forEach(function(child) {
+      child.visible = rootSet.has(child)
+        ? !!(rootStates.find(function(state) { return state.obj === child; }) || {}).visible
+        : false;
+    });
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(scene, shelfCamera);
+  } finally {
+    renderer.autoClear = previousAutoClear;
+    childStates.forEach(function(state) { state.obj.visible = state.visible; });
+  }
 }
 function animate() {
   requestAnimationFrame(animate);
@@ -28514,6 +30110,7 @@ function animate() {
   }
   updateSkullParticleLayer(dt);
   updateStageLyrics3D(dt);
+  updateCommentBarrage3D(dt);
   if (shelfManager) shelfManager.update(dt);
   syncDesktopOverlayState();
 
@@ -28524,7 +30121,7 @@ function animate() {
     if (thumbCoverEl) thumbCoverEl.style.transform = 'scale(' + s + ')';
   }
 
-  renderer.render(scene, camera);
+  renderSceneWithShelfOverlay();
 }
 animate();
 </script>

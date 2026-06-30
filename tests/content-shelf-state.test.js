@@ -24,6 +24,8 @@ const {
   shouldBindShelfToPresetCamera,
   shouldBindShelfToBackgroundMotion,
   shouldUsePresetShelfLayout,
+  resolveShelfLayoutPreset,
+  shelfReferenceCameraOrbit,
   shouldResetShelfAnchorForContentOpen,
   shouldResetShelfAnchorForContentClose,
   shouldResetShelfAnchorForPlaybackVisual,
@@ -32,6 +34,7 @@ const {
   playlistShelfCardAction,
   shelfBeatMotion,
   shelfMotionBinding,
+  shelfRenderCameraMode,
   stageShelfControlsLift,
 } = require('../public/content-shelf-state');
 
@@ -93,6 +96,30 @@ test('keeps preset-specific shelf layout out of independent viewport lock', () =
   assert.equal(shouldUsePresetShelfLayout(undefined), false);
   assert.equal(shouldUsePresetShelfLayout(false), true);
   assert.equal(shouldUsePresetShelfLayout('off'), true);
+});
+
+test('renders independent shelf with the Emily reference camera instead of the preset camera', () => {
+  assert.equal(shelfRenderCameraMode(true), 'reference');
+  assert.equal(shelfRenderCameraMode(undefined), 'reference');
+  assert.equal(shelfRenderCameraMode(false), 'main');
+  assert.equal(shelfRenderCameraMode('off'), 'main');
+});
+
+test('resolves independent shelf layout to the Emily baseline preset', () => {
+  for (const preset of [0, 1, 2, 3, 4, 5, 6]) {
+    assert.equal(resolveShelfLayoutPreset(true, preset), 0);
+    assert.equal(resolveShelfLayoutPreset(undefined, preset), 0);
+  }
+  assert.equal(resolveShelfLayoutPreset(false, 5), 5);
+  assert.equal(resolveShelfLayoutPreset('off', 6), 6);
+  assert.equal(resolveShelfLayoutPreset(false, 'bad'), 0);
+});
+
+test('resolves independent shelf reference camera to the Emily baseline camera', () => {
+  assert.deepEqual(shelfReferenceCameraOrbit(true, 5), { theta: 0, phi: 0.08, radius: 6.6 });
+  assert.deepEqual(shelfReferenceCameraOrbit(undefined, 6), { theta: 0, phi: 0.08, radius: 6.6 });
+  assert.deepEqual(shelfReferenceCameraOrbit(false, 5), { theta: -0.52, phi: 0.34, radius: 9.4 });
+  assert.deepEqual(shelfReferenceCameraOrbit('off', 6), { theta: 0.18, phi: 0.10, radius: 7.4 });
 });
 
 test('routes playlist shelf card clicks to content instead of direct playlist playback', () => {

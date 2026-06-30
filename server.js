@@ -2137,6 +2137,33 @@ function mapQQComment(raw) {
   };
 }
 
+function parseSongCommentLimit(raw, fallback = 20) {
+  const value = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!value || value === '0' || value === 'all' || value === 'unlimited') {
+    return { unlimited: true, limit: 0 };
+  }
+  const parsed = parseInt(value, 10);
+  return { unlimited: false, limit: Number.isFinite(parsed) && parsed > 0 ? parsed : Math.max(1, fallback) };
+}
+
+function mapNeteaseComment(raw) {
+  raw = raw || {};
+  return {
+    id: raw.commentId,
+    content: raw.content || '',
+    likedCount: raw.likedCount || 0,
+    time: raw.time || 0,
+    user: raw.user ? { id: raw.user.userId, nickname: raw.user.nickname || '', avatar: raw.user.avatarUrl || '' } : null,
+  };
+}
+
+function pushUniqueSongComment(target, seen, comment) {
+  if (!comment || !comment.content) return;
+  const key = String(comment.id || '') || comment.content;
+  if (seen.has(key)) return;
+  seen.add(key);
+  target.push(comment);
+}
 async function handleQQSongComments(id, mid, limit, offset) {
   let topid = String(id || '').replace(/\D/g, '');
   if (!topid && mid) {
@@ -2148,9 +2175,13 @@ async function handleQQSongComments(id, mid, limit, offset) {
     }
   }
   if (!topid) return { provider: 'qq', error: 'Missing QQ song id', comments: [] };
-  const page = Math.max(0, Math.floor((offset || 0) / Math.max(1, limit || 20)));
+
+  const normalizedLimit = Math.floor(Number(limit) || 0);
+  const unlimited = normalizedLimit <= 0;
+  const pageSize = unlimited ? 50 : Math.max(1, normalizedLimit);
+  const firstPage = Math.max(0, Math.floor((offset || 0) / pageSize));
   const uin = qqCookieUin() || '0';
-  const body = await qqGetJSON('https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg', {
+  const fetchPage = (page, size) => qqGetJSON('https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg', {
     g_tk: '5381',
     loginUin: uin,
     hostUin: '0',
@@ -2167,8 +2198,34 @@ async function handleQQSongComments(id, mid, limit, offset) {
     cmd: '8',
     needmusiccrit: '0',
     pagenum: String(page),
-    pagesize: String(limit || 20),
+    pagesize: String(size),
   }, { headers: { Referer: 'https://y.qq.com/n/ryqq/songDetail/' + encodeURIComponent(mid || topid) } });
+
+  if (unlimited) {
+    const comments = [];
+    const seen = new Set();
+    let total = 0;
+    let hot = false;
+    let page = firstPage;
+    while (true) {
+      const body = await fetchPage(page, pageSize);
+      const hotList = page === 0 && body && body.hot_comment && Array.isArray(body.hot_comment.commentlist)
+        ? body.hot_comment.commentlist
+        : [];
+      const normalList = body && body.comment && Array.isArray(body.comment.commentlist)
+        ? body.comment.commentlist
+        : [];
+      if (hotList.length) hot = true;
+      total = Number(body && body.comment && (body.comment.commenttotal || body.comment.comment_total)) || total;
+      hotList.concat(normalList).forEach(raw => pushUniqueSongComment(comments, seen, mapQQComment(raw)));
+      if (!normalList.length || normalList.length < pageSize) break;
+      if (total && (page + 1) * pageSize >= total) break;
+      page += 1;
+    }
+    return { provider: 'qq', id: topid, total: total || comments.length, comments, hot, unlimited: true };
+  }
+
+  const body = await fetchPage(firstPage, pageSize);
   const hotList = body && body.hot_comment && body.hot_comment.commentlist;
   const normalList = body && body.comment && body.comment.commentlist;
   const raw = (offset === 0 && Array.isArray(hotList) && hotList.length) ? hotList : (normalList || []);
@@ -2966,9 +3023,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = url.searchParams.get('id') || url.searchParams.get('qqId') || '';
       const mid = url.searchParams.get('mid') || url.searchParams.get('songmid') || '';
-      const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
+      const limitInfo = parseSongCommentLimit(url.searchParams.get('limit'), 20);
       const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      const data = await handleQQSongComments(id, mid, limit, offset);
+      const data = await handleQQSongComments(id, mid, limitInfo.limit, offset);
       sendJSON(res, data);
     } catch (err) {
       console.error('[QQSongComments]', err);
@@ -3440,19 +3497,40 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/song/comments') {
     try {
       const id = url.searchParams.get('id');
-      const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
+      const limitInfo = parseSongCommentLimit(url.searchParams.get('limit'), 20);
       const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
       if (!id) { sendJSON(res, { error: 'Missing song id', comments: [] }, 400); return; }
+
+      if (limitInfo.unlimited) {
+        const pageSize = 100;
+        let currentOffset = offset;
+        let total = 0;
+        let hot = false;
+        let firstBody = null;
+        const comments = [];
+        const seen = new Set();
+        while (true) {
+          const r = await comment_music({ id, limit: pageSize, offset: currentOffset, cookie: userCookie, timestamp: Date.now() });
+          const body = r.body || r || {};
+          if (!firstBody) firstBody = body;
+          total = Number(body.total || total) || total;
+          const hotRaw = currentOffset === 0 && Array.isArray(body.hotComments) ? body.hotComments : [];
+          const normalRaw = Array.isArray(body.comments) ? body.comments : [];
+          if (hotRaw.length) hot = true;
+          hotRaw.concat(normalRaw).forEach(c => pushUniqueSongComment(comments, seen, mapNeteaseComment(c)));
+          if (!normalRaw.length || normalRaw.length < pageSize) break;
+          currentOffset += normalRaw.length;
+          if (total && currentOffset >= total) break;
+        }
+        sendJSON(res, { id, total: total || comments.length, comments, hot, unlimited: true, body: firstBody || {} });
+        return;
+      }
+
+      const limit = limitInfo.limit;
       const r = await comment_music({ id, limit, offset, cookie: userCookie, timestamp: Date.now() });
       const body = r.body || r || {};
       const raw = body.hotComments && offset === 0 ? body.hotComments : (body.comments || []);
-      const comments = (raw || []).map(c => ({
-        id: c.commentId,
-        content: c.content || '',
-        likedCount: c.likedCount || 0,
-        time: c.time || 0,
-        user: c.user ? { id: c.user.userId, nickname: c.user.nickname || '', avatar: c.user.avatarUrl || '' } : null,
-      })).filter(c => c.content);
+      const comments = (raw || []).map(mapNeteaseComment).filter(c => c.content);
       sendJSON(res, { id, total: body.total || 0, comments, hot: !!(body.hotComments && offset === 0), body });
     } catch (err) {
       console.error('[SongComments]', err);

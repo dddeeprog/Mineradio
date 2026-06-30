@@ -190,6 +190,47 @@ function locationFromParams(params) {
   };
 }
 
+function weatherHourLabel(time) {
+  const text = String(time || '');
+  const match = text.match(/T(\d{2}:\d{2})/);
+  if (match) return match[1];
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+  return '--:--';
+}
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeOpenMeteoHourlyForecast(hourly, currentTime, limit = 12) {
+  const times = Array.isArray(hourly && hourly.time) ? hourly.time : [];
+  const codes = Array.isArray(hourly && hourly.weather_code) ? hourly.weather_code : [];
+  const temps = Array.isArray(hourly && hourly.temperature_2m) ? hourly.temperature_2m : [];
+  const pops = Array.isArray(hourly && hourly.precipitation_probability) ? hourly.precipitation_probability : [];
+  const startTime = String(currentTime || '');
+  const rows = [];
+  for (let i = 0; i < times.length && rows.length < limit; i++) {
+    const time = String(times[i] || '');
+    if (!time) continue;
+    if (startTime && time < startTime) continue;
+    const weatherCode = finiteOrNull(codes[i]);
+    rows.push({
+      time,
+      hourLabel: weatherHourLabel(time),
+      temperature: finiteOrNull(temps[i]),
+      precipitationProbability: finiteOrNull(pops[i]),
+      weatherCode,
+      label: weatherCode == null ? '天气' : openMeteoWeatherLabel(weatherCode),
+    });
+  }
+  return rows;
+}
+
 function normalizeOpenMeteoWeather(body, location, date) {
   const cur = body && body.current || {};
   const weather = {
@@ -214,6 +255,7 @@ function normalizeOpenMeteoWeather(body, location, date) {
     windGusts: Number(cur.wind_gusts_10m),
     isDay: Number(cur.is_day),
     time: cur.time || '',
+    hourlyForecast: normalizeOpenMeteoHourlyForecast(body && body.hourly, cur.time, 12),
     updatedAt: Date.now(),
   };
   weather.mood = buildWeatherMood(weather, date);
@@ -254,6 +296,7 @@ function fallbackWeatherForRadio(params, err) {
     windGusts: null,
     isDay: null,
     time: '',
+    hourlyForecast: [],
     updatedAt: Date.now(),
     error: err && err.message || '',
     mood: {
