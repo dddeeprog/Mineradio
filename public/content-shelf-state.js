@@ -23,7 +23,7 @@
   }
 
   function recordToolbarLayout(orientation) {
-    return orientation === 'stage' ? 'horizontal' : 'vertical';
+    return 'fab-stack';
   }
 
   function recordCardLayout() {
@@ -47,6 +47,35 @@
 
   function shelfMotionBinding(viewportLockEnabled) {
     return normalizeShelfViewportLock(viewportLockEnabled) ? 'locked' : 'dynamic';
+  }
+
+  function shouldBindShelfToPresetCamera(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shouldBindShelfToBackgroundMotion(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shouldUsePresetShelfLayout(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shelfBeatMotion(state) {
+    state = state || {};
+    function positive(value, max) {
+      var n = Number(value);
+      if (!isFinite(n) || n <= 0) return 0;
+      return Math.min(max, n);
+    }
+    var bass = positive(state.bass, 1.2);
+    var beatPulse = positive(state.beatPulse, 1.4);
+    var beatPunch = positive(state.beatPunch, 1.6);
+    var scale = 1 + Math.min(0.055, bass * 0.014 + beatPulse * 0.024 + beatPunch * 0.012);
+    var y = Math.min(0.045, bass * 0.004 + beatPulse * 0.028 + beatPunch * 0.012);
+    var z = Math.min(0.035, bass * 0.003 + beatPulse * 0.018 + beatPunch * 0.010);
+    var rotZ = Math.min(0.012, beatPulse * 0.006 + beatPunch * 0.004);
+    return { scale: scale, y: y, z: z, rotZ: rotZ };
   }
 
   function playlistShelfCardAction(itemType, isCenter) {
@@ -80,6 +109,7 @@
 
   var SHELF_CONTROL_BOUNDS = {
     shelfSize: { min: 0.45, max: 1.9 },
+    shelfGap: { min: 0.55, max: 1.7 },
     shelfOffsetX: { min: -2.4, max: 2.4 },
     shelfOffsetY: { min: -1.8, max: 1.8 },
     shelfOffsetZ: { min: -1.8, max: 1.8 },
@@ -95,6 +125,7 @@
     state = state || {};
     if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
     if (state.splashActive || state.splashRevealing || state.warmupActive) return false;
+    if (state.presetTransitionActive) return false;
     if (state.cameraReady === false) return false;
     var now = Number(state.now);
     var warmupUntil = Number(state.warmupUntil);
@@ -130,6 +161,7 @@
   function shouldResetShelfAnchorForPlaybackVisual(state) {
     state = state || {};
     if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+    if (state.hasReusableAnchor === true) return false;
     if (state.presetChanged === true) return true;
     return !!(state.startupPreviewActive || state.homeWallpaperPreviewActive || state.homeVisualPresetActive);
   }
@@ -139,6 +171,22 @@
     if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
     if (state.reason === 'shelf-mode-reset') return true;
     return state.hasReusableAnchor !== true;
+  }
+
+  function shouldResetShelfAnchorForContentOpen(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+    if (state.reason === 'shelf-mode-reset') return true;
+    return state.hasReusableAnchor !== true;
+  }
+
+  function shouldPreserveShelfViewportAnchorOnReset(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
+    if (state.hasReusableAnchor !== true) return false;
+    var reason = String(state.reason || '');
+    if (/^(disabled|splash-end|startup-starfield-skip|viewport-resize|shelf-viewport-lock-toggle)$/.test(reason)) return false;
+    return true;
   }
 
   function shelfViewportScaleFactor(currentDistance, currentFov, anchorDistance, anchorFov) {
@@ -154,9 +202,9 @@
   }
 
   function shelfParallaxValue(value, viewportLockEnabled) {
-    if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
     var n = Number(value);
-    return isFinite(n) ? n : 0;
+    if (!isFinite(n)) return 0;
+    return Math.max(-1, Math.min(1, n));
   }
 
   function shouldContentShelfHandleWheel(hitState) {
@@ -223,15 +271,21 @@
     recordToolbarLayout: recordToolbarLayout,
     resolveDetailOrientation: resolveDetailOrientation,
     shelfControlBounds: shelfControlBounds,
+    shelfBeatMotion: shelfBeatMotion,
     shelfMotionBinding: shelfMotionBinding,
     shelfParallaxValue: shelfParallaxValue,
     shelfViewportScaleFactor: shelfViewportScaleFactor,
     canRevealBottomControlsForShelf: canRevealBottomControlsForShelf,
+    shouldBindShelfToPresetCamera: shouldBindShelfToPresetCamera,
+    shouldBindShelfToBackgroundMotion: shouldBindShelfToBackgroundMotion,
+    shouldUsePresetShelfLayout: shouldUsePresetShelfLayout,
     shouldApplyStartupStarfieldPreview: shouldApplyStartupStarfieldPreview,
     shouldCaptureShelfViewportAnchor: shouldCaptureShelfViewportAnchor,
     shouldContentShelfHandleWheel: shouldContentShelfHandleWheel,
+    shouldResetShelfAnchorForContentOpen: shouldResetShelfAnchorForContentOpen,
     shouldResetShelfAnchorForContentClose: shouldResetShelfAnchorForContentClose,
     shouldResetShelfAnchorForPlaybackVisual: shouldResetShelfAnchorForPlaybackVisual,
+    shouldPreserveShelfViewportAnchorOnReset: shouldPreserveShelfViewportAnchorOnReset,
     shouldSnapShelfControlsLift: shouldSnapShelfControlsLift,
     stageShelfControlsLift: stageShelfControlsLift,
   };

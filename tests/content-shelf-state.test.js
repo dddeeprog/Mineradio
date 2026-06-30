@@ -21,10 +21,16 @@ const {
   shouldApplyStartupStarfieldPreview,
   shouldCaptureShelfViewportAnchor,
   shouldContentShelfHandleWheel,
+  shouldBindShelfToPresetCamera,
+  shouldBindShelfToBackgroundMotion,
+  shouldUsePresetShelfLayout,
+  shouldResetShelfAnchorForContentOpen,
   shouldResetShelfAnchorForContentClose,
   shouldResetShelfAnchorForPlaybackVisual,
   shouldSnapShelfControlsLift,
+  shouldPreserveShelfViewportAnchorOnReset,
   playlistShelfCardAction,
+  shelfBeatMotion,
   shelfMotionBinding,
   stageShelfControlsLift,
 } = require('../public/content-shelf-state');
@@ -55,10 +61,10 @@ test('scales record stage spacing to match shelf card density', () => {
   assert.equal(recordStageStep('bad'), 0);
 });
 
-test('selects record toolbar layout by shelf orientation', () => {
-  assert.equal(recordToolbarLayout('stage'), 'horizontal');
-  assert.equal(recordToolbarLayout('side'), 'vertical');
-  assert.equal(recordToolbarLayout('off'), 'vertical');
+test('uses a fixed floating action stack for record toolbar controls', () => {
+  assert.equal(recordToolbarLayout('stage'), 'fab-stack');
+  assert.equal(recordToolbarLayout('side'), 'fab-stack');
+  assert.equal(recordToolbarLayout('off'), 'fab-stack');
 });
 
 test('selects shelf motion binding from independent viewport lock', () => {
@@ -66,6 +72,27 @@ test('selects shelf motion binding from independent viewport lock', () => {
   assert.equal(shelfMotionBinding(undefined), 'locked');
   assert.equal(shelfMotionBinding(false), 'dynamic');
   assert.equal(shelfMotionBinding('off'), 'dynamic');
+});
+
+test('keeps preset shelf camera binding out of independent viewport lock', () => {
+  assert.equal(shouldBindShelfToPresetCamera(true), false);
+  assert.equal(shouldBindShelfToPresetCamera(undefined), false);
+  assert.equal(shouldBindShelfToPresetCamera(false), true);
+  assert.equal(shouldBindShelfToPresetCamera('off'), true);
+});
+
+test('keeps background motion binding out of independent viewport lock', () => {
+  assert.equal(shouldBindShelfToBackgroundMotion(true), false);
+  assert.equal(shouldBindShelfToBackgroundMotion(undefined), false);
+  assert.equal(shouldBindShelfToBackgroundMotion(false), true);
+  assert.equal(shouldBindShelfToBackgroundMotion('off'), true);
+});
+
+test('keeps preset-specific shelf layout out of independent viewport lock', () => {
+  assert.equal(shouldUsePresetShelfLayout(true), false);
+  assert.equal(shouldUsePresetShelfLayout(undefined), false);
+  assert.equal(shouldUsePresetShelfLayout(false), true);
+  assert.equal(shouldUsePresetShelfLayout('off'), true);
 });
 
 test('routes playlist shelf card clicks to content instead of direct playlist playback', () => {
@@ -120,10 +147,24 @@ test('computes viewport scale compensation from camera distance and fov', () => 
   assert.equal(shelfViewportScaleFactor(0, 60, 5, 50), 1);
 });
 
-test('removes shelf parallax while viewport lock is enabled', () => {
-  assert.equal(shelfParallaxValue(0.42, true), 0);
+test('keeps shelf beat motion available while clamping unsafe input', () => {
+  assert.deepEqual(shelfBeatMotion({}), { scale: 1, y: 0, z: 0, rotZ: 0 });
+  assert.deepEqual(shelfBeatMotion({ bass: 'bad', beatPulse: NaN, beatPunch: Infinity }), { scale: 1, y: 0, z: 0, rotZ: 0 });
+
+  const motion = shelfBeatMotion({ bass: 0.8, beatPulse: 0.7, beatPunch: 0.4 });
+  assert.ok(motion.scale > 1);
+  assert.ok(motion.scale <= 1.055);
+  assert.ok(motion.y > 0 && motion.y <= 0.045);
+  assert.ok(motion.z > 0 && motion.z <= 0.035);
+  assert.ok(motion.rotZ > 0 && motion.rotZ <= 0.012);
+});
+
+test('preserves pointer parallax for shelf while clamping unsafe input', () => {
+  assert.equal(shelfParallaxValue(0.42, true), 0.42);
   assert.equal(shelfParallaxValue(-0.25, false), -0.25);
   assert.equal(shelfParallaxValue('bad', false), 0);
+  assert.equal(shelfParallaxValue(3.5, true), 1);
+  assert.equal(shelfParallaxValue(-3.5, true), -1);
 });
 
 test('routes wheel events to content shelf only when shelf chrome or rows are hit', () => {
@@ -148,6 +189,7 @@ test('exposes expanded shelf control bounds for DIY sliders and persistence', ()
   assert.deepEqual(shelfControlBounds('shelfOffsetY'), { min: -1.8, max: 1.8 });
   assert.deepEqual(shelfControlBounds('shelfOffsetZ'), { min: -1.8, max: 1.8 });
   assert.deepEqual(shelfControlBounds('shelfAngleY'), { min: -50, max: 50 });
+  assert.deepEqual(shelfControlBounds('shelfGap'), { min: 0.55, max: 1.7 });
   assert.deepEqual(shelfControlBounds('unknown'), { min: 0, max: 1 });
 });
 
@@ -175,6 +217,13 @@ test('defers shelf viewport anchor capture until startup and camera are stable',
   assert.equal(shouldCaptureShelfViewportAnchor({
     viewportLockEnabled: true,
     cameraReady: false,
+    now: 1000,
+    warmupUntil: 0,
+  }), false);
+  assert.equal(shouldCaptureShelfViewportAnchor({
+    viewportLockEnabled: true,
+    cameraReady: true,
+    presetTransitionActive: true,
     now: 1000,
     warmupUntil: 0,
   }), false);
@@ -273,6 +322,17 @@ test('keeps shelf viewport anchor during same playback visual track switches', (
   }), true);
   assert.equal(shouldResetShelfAnchorForPlaybackVisual({
     viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    presetChanged: true,
+  }), false);
+  assert.equal(shouldResetShelfAnchorForPlaybackVisual({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    presetChanged: false,
+    homeWallpaperPreviewActive: true,
+  }), false);
+  assert.equal(shouldResetShelfAnchorForPlaybackVisual({
+    viewportLockEnabled: true,
     presetChanged: false,
     startupPreviewActive: true,
   }), true);
@@ -313,6 +373,67 @@ test('keeps shelf viewport anchor while closing content in independent view', ()
     hasReusableAnchor: false,
     reason: 'content-back-button',
   }), true);
+});
+
+test('keeps shelf viewport anchor while opening content in independent view', () => {
+  assert.equal(shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'content-open',
+  }), false);
+  assert.equal(shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'content-ready',
+  }), false);
+  assert.equal(shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: false,
+    hasReusableAnchor: true,
+    reason: 'content-open',
+  }), true);
+  assert.equal(shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: true,
+    hasReusableAnchor: false,
+    reason: 'content-ready',
+  }), true);
+  assert.equal(shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'shelf-mode-reset',
+  }), true);
+});
+
+test('preserves independent shelf viewport anchor across transient reset reasons', () => {
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'unsafe-projection',
+  }), true);
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'shelf-mode',
+  }), true);
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: false,
+    hasReusableAnchor: true,
+    reason: 'unsafe-projection',
+  }), false);
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: true,
+    hasReusableAnchor: false,
+    reason: 'unsafe-projection',
+  }), false);
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'splash-end',
+  }), false);
+  assert.equal(shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: true,
+    hasReusableAnchor: true,
+    reason: 'disabled',
+  }), false);
 });
 
 test('maps content index to playable queue index while skipping unplayable rows', () => {

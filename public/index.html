@@ -733,6 +733,7 @@ body.immersive-mode #search-area,
 body.immersive-mode #top-right,
 body.immersive-mode #thumb-wrap,
 body.immersive-mode #fx-fab,
+body.immersive-mode #record-shelf-fab-actions,
 body.immersive-mode #fx-panel,
 body.immersive-mode #trial-banner,
 body.immersive-mode #ai-depth-chip,
@@ -1031,6 +1032,12 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 #fx-fab:hover,#fx-fab.active{transform:translateY(-2px) scale(1.04);background:rgba(0,245,212,.075);border-color:rgba(0,245,212,.50);color:#fff}
 #fx-fab svg{transition:transform .38s cubic-bezier(.16,1,.3,1)}
 #fx-fab.active svg{transform:rotate(90deg)}
+#record-shelf-fab-actions{position:fixed;z-index:18;right:24px;bottom:90px;display:flex;flex-direction:column;gap:10px;opacity:0;pointer-events:none;transform:translateY(8px) scale(.96);transition:bottom .38s cubic-bezier(.16,1,.3,1),opacity .22s,transform .28s cubic-bezier(.16,1,.3,1)}
+body.record-shelf-actions-visible #record-shelf-fab-actions{opacity:1;pointer-events:auto;transform:translateY(0) scale(1)}
+#record-shelf-fab-actions .record-shelf-fab-btn{width:54px;height:54px;border-radius:50%;border:1px solid rgba(0,245,212,.30);background:linear-gradient(145deg,rgba(255,255,255,.16),rgba(255,255,255,.055) 48%,rgba(0,245,212,.055));color:rgba(232,236,239,.88);display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(26px) saturate(1.34);-webkit-backdrop-filter:blur(26px) saturate(1.34);box-shadow:0 14px 40px rgba(0,0,0,.34),0 0 24px rgba(0,245,212,.07),inset 0 1px 0 rgba(255,255,255,.18);transition:transform .28s cubic-bezier(.16,1,.3,1),background .28s,border-color .28s,color .28s,box-shadow .28s}
+#record-shelf-fab-actions .record-shelf-fab-btn:hover{transform:translateY(-2px) scale(1.04);background:rgba(0,245,212,.075);border-color:rgba(0,245,212,.50);color:#fff}
+#record-shelf-fab-actions .record-shelf-fab-btn svg{width:22px;height:22px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+body.controls-visible #record-shelf-fab-actions,body.desktop-shell.diy-mode.controls-visible #record-shelf-fab-actions{bottom:192px}
 #fx-fab-hide-btn{position:fixed;z-index:20;right:84px;bottom:37px;width:18px;height:28px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);color:rgba(255,255,255,.34);font-size:11px;line-height:1;opacity:0;transform:translateX(6px) scale(.92);transition:right .28s cubic-bezier(.16,1,.3,1),bottom .38s cubic-bezier(.16,1,.3,1),opacity .18s,transform .18s,background .18s,color .18s,border-color .18s;cursor:pointer}
 #fx-fab:hover + #fx-fab-hide-btn,#fx-fab-hide-btn:hover,#fx-fab-hide-btn.on{opacity:1;transform:translateX(0) scale(1)}
 #fx-fab-hide-btn:hover,#fx-fab-hide-btn.on{border-color:rgba(var(--fc-accent-rgb),.34);background:rgba(var(--fc-accent-rgb),.10);color:#fff}
@@ -1043,6 +1050,7 @@ body.desktop-shell.diy-mode.controls-visible #fx-fab-hide-btn{bottom:139px}
 body.immersive-mode #fx-fab-hide-btn{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 body.desktop-shell.diy-mode #fx-panel{top:64px;bottom:132px;max-height:none}
 body.desktop-shell.diy-mode #fx-fab{bottom:24px}
+body.desktop-shell.diy-mode #record-shelf-fab-actions{bottom:90px}
 body.desktop-shell.diy-mode #fx-fab-hide-btn{bottom:37px}
 body.controls-visible #fx-fab,
 body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:126px}
@@ -1051,8 +1059,10 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 @media (max-height:760px){
   body.desktop-shell.diy-mode #fx-panel{top:56px;bottom:116px;width:min(410px,calc(100vw - 48px));padding:14px}
   body.desktop-shell.diy-mode #fx-fab{bottom:22px}
+  body.desktop-shell.diy-mode #record-shelf-fab-actions{bottom:88px}
   body.desktop-shell.diy-mode #fx-fab-hide-btn{bottom:35px}
   body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:112px}
+  body.desktop-shell.diy-mode.controls-visible #record-shelf-fab-actions{bottom:178px}
   body.desktop-shell.diy-mode.controls-visible #fx-fab-hide-btn{bottom:125px}
 }
 @media (max-width:980px){
@@ -1345,7 +1355,7 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .podcast-inline-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 7px}
 .podcast-inline-head .pl-section-label{margin:0}
 .panel-tab.active,.queue-item.now,.mini-queue-item.now,.preset-card.active,.fx-toggle.on,.fx-seg button.active{border-color:rgba(var(--fc-accent-rgb),.34)!important;background:rgba(var(--fc-accent-rgb),.085)!important;color:#fff!important}
-#search-box:focus-within,#fx-panel,#fx-fab,#fx-fab:hover,#fx-fab.active,#upload-btn:hover,#home-btn:hover{border-color:rgba(var(--fc-accent-rgb),.42)!important;box-shadow:0 16px 46px rgba(var(--fc-accent-rgb),.08),inset 0 1px 0 rgba(255,255,255,.10)}
+#search-box:focus-within,#fx-panel,#fx-fab,#fx-fab:hover,#fx-fab.active,#record-shelf-fab-actions .record-shelf-fab-btn:hover,#upload-btn:hover,#home-btn:hover{border-color:rgba(var(--fc-accent-rgb),.42)!important;box-shadow:0 16px 46px rgba(var(--fc-accent-rgb),.08),inset 0 1px 0 rgba(255,255,255,.10)}
 #search-mode-tabs button.active{background:rgba(var(--fc-accent-rgb),.12)!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(var(--fc-accent-rgb),.28),0 8px 24px rgba(var(--fc-accent-rgb),.07)!important}
 #search-results::-webkit-scrollbar-thumb,#fx-panel::-webkit-scrollbar-thumb{background:rgba(var(--fc-accent-rgb),.30)!important}
 #fx-panel{scrollbar-color:rgba(var(--fc-accent-rgb),.30) transparent!important}
@@ -1373,18 +1383,18 @@ html.control-glass-svg-ok #search-box,html.control-glass-svg-ok #search-results,
   backdrop-filter:var(--saved-panel-glass-svg-filter)!important;
   -webkit-backdrop-filter:var(--saved-panel-glass-svg-filter)!important;
 }
-.icon-btn,#fx-fab,.user-capsule-hide-btn,.fx-mini-btn,.fx-toggle,.fx-seg button,.panel-tab,.preset-card,.lyric-color-row,.fx-slider,.fx-fold,.quality-option,.modal-btn,.visual-guide-actions button,.home-chip,.pl-card,.queue-item,.mini-queue-item,.pl-detail-row,.pl-detail-play,.local-beat-tab,.search-history-chip,.search-result .add-btn,.song-action-btn,.qi-act button,.mini-queue-remove{
+.icon-btn,#fx-fab,.record-shelf-fab-btn,.user-capsule-hide-btn,.fx-mini-btn,.fx-toggle,.fx-seg button,.panel-tab,.preset-card,.lyric-color-row,.fx-slider,.fx-fold,.quality-option,.modal-btn,.visual-guide-actions button,.home-chip,.pl-card,.queue-item,.mini-queue-item,.pl-detail-row,.pl-detail-play,.local-beat-tab,.search-history-chip,.search-result .add-btn,.song-action-btn,.qi-act button,.mini-queue-remove{
   background:var(--saved-button-glass-bg)!important;
   border-color:transparent!important;
   box-shadow:var(--saved-button-glass-shadow)!important;
   backdrop-filter:var(--saved-button-glass-filter)!important;
   -webkit-backdrop-filter:var(--saved-button-glass-filter)!important;
 }
-html.control-glass-svg-ok .icon-btn,html.control-glass-svg-ok #fx-fab,html.control-glass-svg-ok .user-capsule-hide-btn,html.control-glass-svg-ok .fx-mini-btn,html.control-glass-svg-ok .fx-toggle,html.control-glass-svg-ok .fx-seg button,html.control-glass-svg-ok .panel-tab,html.control-glass-svg-ok .preset-card,html.control-glass-svg-ok .lyric-color-row,html.control-glass-svg-ok .fx-slider,html.control-glass-svg-ok .fx-fold,html.control-glass-svg-ok .quality-option,html.control-glass-svg-ok .modal-btn,html.control-glass-svg-ok .visual-guide-actions button,html.control-glass-svg-ok .home-chip,html.control-glass-svg-ok .pl-card,html.control-glass-svg-ok .queue-item,html.control-glass-svg-ok .mini-queue-item,html.control-glass-svg-ok .pl-detail-row,html.control-glass-svg-ok .pl-detail-play,html.control-glass-svg-ok .local-beat-tab,html.control-glass-svg-ok .search-history-chip,html.control-glass-svg-ok .search-result .add-btn,html.control-glass-svg-ok .song-action-btn,html.control-glass-svg-ok .qi-act button,html.control-glass-svg-ok .mini-queue-remove{
+html.control-glass-svg-ok .icon-btn,html.control-glass-svg-ok #fx-fab,html.control-glass-svg-ok .record-shelf-fab-btn,html.control-glass-svg-ok .user-capsule-hide-btn,html.control-glass-svg-ok .fx-mini-btn,html.control-glass-svg-ok .fx-toggle,html.control-glass-svg-ok .fx-seg button,html.control-glass-svg-ok .panel-tab,html.control-glass-svg-ok .preset-card,html.control-glass-svg-ok .lyric-color-row,html.control-glass-svg-ok .fx-slider,html.control-glass-svg-ok .fx-fold,html.control-glass-svg-ok .quality-option,html.control-glass-svg-ok .modal-btn,html.control-glass-svg-ok .visual-guide-actions button,html.control-glass-svg-ok .home-chip,html.control-glass-svg-ok .pl-card,html.control-glass-svg-ok .queue-item,html.control-glass-svg-ok .mini-queue-item,html.control-glass-svg-ok .pl-detail-row,html.control-glass-svg-ok .pl-detail-play,html.control-glass-svg-ok .local-beat-tab,html.control-glass-svg-ok .search-history-chip,html.control-glass-svg-ok .search-result .add-btn,html.control-glass-svg-ok .song-action-btn,html.control-glass-svg-ok .qi-act button,html.control-glass-svg-ok .mini-queue-remove{
   backdrop-filter:var(--saved-button-glass-svg-filter)!important;
   -webkit-backdrop-filter:var(--saved-button-glass-svg-filter)!important;
 }
-.icon-btn:hover,#fx-fab:hover,#fx-fab.active,.fx-mini-btn:hover,.fx-mini-btn.active,.fx-toggle.on,.fx-seg button.active,.panel-tab.active,.preset-card.active,.quality-option.active,.modal-btn:hover,.visual-guide-actions button:hover,.home-chip:hover,.home-card:hover,.home-tile:hover,.pl-card:hover,.pl-card.expanded,.pl-card.podcast-card,.pl-card.podcast-card:hover,.queue-item:hover,.queue-item.now,.mini-queue-item:hover,.mini-queue-item.now,.pl-detail-row:hover,.pl-detail-play:hover,.local-beat-tab:hover,.local-beat-tab.active,.search-history-chip:hover,.search-result .add-btn:hover,.song-action-btn:hover,.qi-act button:hover,.mini-queue-remove:hover{
+.icon-btn:hover,#fx-fab:hover,#fx-fab.active,.record-shelf-fab-btn:hover,.fx-mini-btn:hover,.fx-mini-btn.active,.fx-toggle.on,.fx-seg button.active,.panel-tab.active,.preset-card.active,.quality-option.active,.modal-btn:hover,.visual-guide-actions button:hover,.home-chip:hover,.home-card:hover,.home-tile:hover,.pl-card:hover,.pl-card.expanded,.pl-card.podcast-card,.pl-card.podcast-card:hover,.queue-item:hover,.queue-item.now,.mini-queue-item:hover,.mini-queue-item.now,.pl-detail-row:hover,.pl-detail-play:hover,.local-beat-tab:hover,.local-beat-tab.active,.search-history-chip:hover,.search-result .add-btn:hover,.song-action-btn:hover,.qi-act button:hover,.mini-queue-remove:hover{
   background:var(--saved-button-glass-hover-bg)!important;
   border-color:transparent!important;
   box-shadow:var(--saved-button-glass-hover-shadow)!important;
@@ -1464,13 +1474,13 @@ html.control-glass-svg-ok #search-box,html.control-glass-svg-ok #search-results,
   backdrop-filter:var(--panel-glass-filter)!important;
   -webkit-backdrop-filter:var(--panel-glass-filter)!important;
 }
-.icon-btn:not(.ctrl-btn),#fx-fab,.user-capsule-hide-btn,.fx-mini-btn,.fx-toggle,.fx-seg button,.panel-tab,.preset-card,.lyric-color-row,.fx-slider,.fx-fold,.quality-option,.modal-btn,.visual-guide-actions button,.home-chip,.local-beat-tab,.search-history-chip,.search-result .add-btn,.song-action-btn{
+.icon-btn:not(.ctrl-btn),#fx-fab,.record-shelf-fab-btn,.user-capsule-hide-btn,.fx-mini-btn,.fx-toggle,.fx-seg button,.panel-tab,.preset-card,.lyric-color-row,.fx-slider,.fx-fold,.quality-option,.modal-btn,.visual-guide-actions button,.home-chip,.local-beat-tab,.search-history-chip,.search-result .add-btn,.song-action-btn{
   background:var(--panel-button-bg)!important;
   border-color:rgba(255,255,255,.070)!important;
   backdrop-filter:blur(16px) saturate(1.18)!important;
   -webkit-backdrop-filter:blur(16px) saturate(1.18)!important;
 }
-html.control-glass-svg-ok .icon-btn:not(.ctrl-btn),html.control-glass-svg-ok #fx-fab,html.control-glass-svg-ok .user-capsule-hide-btn,html.control-glass-svg-ok .fx-mini-btn,html.control-glass-svg-ok .fx-toggle,html.control-glass-svg-ok .fx-seg button,html.control-glass-svg-ok .panel-tab,html.control-glass-svg-ok .preset-card,html.control-glass-svg-ok .lyric-color-row,html.control-glass-svg-ok .fx-slider,html.control-glass-svg-ok .fx-fold,html.control-glass-svg-ok .quality-option,html.control-glass-svg-ok .modal-btn,html.control-glass-svg-ok .visual-guide-actions button,html.control-glass-svg-ok .home-chip,html.control-glass-svg-ok .local-beat-tab,html.control-glass-svg-ok .search-history-chip,html.control-glass-svg-ok .search-result .add-btn,html.control-glass-svg-ok .song-action-btn{
+html.control-glass-svg-ok .icon-btn:not(.ctrl-btn),html.control-glass-svg-ok #fx-fab,html.control-glass-svg-ok .record-shelf-fab-btn,html.control-glass-svg-ok .user-capsule-hide-btn,html.control-glass-svg-ok .fx-mini-btn,html.control-glass-svg-ok .fx-toggle,html.control-glass-svg-ok .fx-seg button,html.control-glass-svg-ok .panel-tab,html.control-glass-svg-ok .preset-card,html.control-glass-svg-ok .lyric-color-row,html.control-glass-svg-ok .fx-slider,html.control-glass-svg-ok .fx-fold,html.control-glass-svg-ok .quality-option,html.control-glass-svg-ok .modal-btn,html.control-glass-svg-ok .visual-guide-actions button,html.control-glass-svg-ok .home-chip,html.control-glass-svg-ok .local-beat-tab,html.control-glass-svg-ok .search-history-chip,html.control-glass-svg-ok .search-result .add-btn,html.control-glass-svg-ok .song-action-btn{
   backdrop-filter:blur(16px) saturate(1.18)!important;
   -webkit-backdrop-filter:blur(16px) saturate(1.18)!important;
 }
@@ -1516,7 +1526,7 @@ html.control-glass-svg-ok #search-box{
   backdrop-filter:url(#mineradio-search-box-glass-filter) saturate(1)!important;
   -webkit-backdrop-filter:url(#mineradio-search-box-glass-filter) saturate(1)!important;
 }
-#home-btn,#upload-btn,#visual-guide-btn,#fx-fab,.top-account-pill,#top-right .icon-btn{
+#home-btn,#upload-btn,#visual-guide-btn,#fx-fab,.record-shelf-fab-btn,.top-account-pill,#top-right .icon-btn{
   background:var(--saved-button-glass-bg)!important;
   border-color:transparent!important;
   box-shadow:var(--saved-button-glass-shadow)!important;
@@ -1527,6 +1537,7 @@ html.control-glass-svg-ok #home-btn,
 html.control-glass-svg-ok #upload-btn,
 html.control-glass-svg-ok #visual-guide-btn,
 html.control-glass-svg-ok #fx-fab,
+html.control-glass-svg-ok .record-shelf-fab-btn,
 html.control-glass-svg-ok .top-account-pill,
 html.control-glass-svg-ok #top-right .icon-btn{
   backdrop-filter:var(--saved-button-glass-svg-filter)!important;
@@ -1671,6 +1682,7 @@ html.control-glass-svg-ok #home-btn,
 html.control-glass-svg-ok #upload-btn,
 html.control-glass-svg-ok #visual-guide-btn,
 html.control-glass-svg-ok #fx-fab,
+html.control-glass-svg-ok .record-shelf-fab-btn,
 html.control-glass-svg-ok .top-account-pill,
 html.control-glass-svg-ok #top-right .icon-btn{
   backdrop-filter:var(--saved-button-glass-svg-filter)!important;
@@ -1697,14 +1709,14 @@ html.control-glass-svg-ok .search-history-chip:hover{
 #search-mode-tabs button.active,.search-history-chip:hover{
   color:rgba(var(--fc-accent-rgb),.96)!important;
 }
-#home-btn,#upload-btn,#visual-guide-btn,#fx-fab,#top-right .icon-btn{
+#home-btn,#upload-btn,#visual-guide-btn,#fx-fab,.record-shelf-fab-btn,#top-right .icon-btn{
   color:rgba(var(--fc-accent-rgb),.82)!important;
 }
-#home-btn svg,#upload-btn svg,#fx-fab svg,#top-right .icon-btn svg{
+#home-btn svg,#upload-btn svg,#fx-fab svg,.record-shelf-fab-btn svg,#top-right .icon-btn svg{
   color:currentColor!important;
   stroke:currentColor!important;
 }
-#home-btn:hover,#upload-btn:hover,#visual-guide-btn:hover,#fx-fab:hover,#fx-fab.active,#top-right .icon-btn:hover{
+#home-btn:hover,#upload-btn:hover,#visual-guide-btn:hover,#fx-fab:hover,#fx-fab.active,.record-shelf-fab-btn:hover,#top-right .icon-btn:hover{
   color:rgba(var(--fc-accent-rgb),1)!important;
 }
 #home-btn,#upload-btn{
@@ -1718,18 +1730,18 @@ html.control-glass-svg-ok .search-history-chip:hover{
   background:rgba(var(--home-icon-rgb),.075)!important;
   box-shadow:var(--saved-button-glass-hover-shadow),0 0 24px rgba(var(--home-icon-rgb),.16)!important;
 }
-#visual-guide-btn,#fx-fab{
+#visual-guide-btn,#fx-fab,.record-shelf-fab-btn{
   color:var(--visual-icon-color)!important;
   border-color:rgba(var(--visual-icon-rgb),.42)!important;
   box-shadow:var(--saved-button-glass-shadow),0 0 18px rgba(var(--visual-icon-rgb),.10)!important;
 }
-#visual-guide-btn:hover,#fx-fab:hover,#fx-fab.active{
+#visual-guide-btn:hover,#fx-fab:hover,#fx-fab.active,.record-shelf-fab-btn:hover{
   color:var(--visual-icon-color)!important;
   border-color:rgba(var(--visual-icon-rgb),.68)!important;
   background:rgba(var(--visual-icon-rgb),.075)!important;
   box-shadow:var(--saved-button-glass-hover-shadow),0 0 24px rgba(var(--visual-icon-rgb),.16)!important;
 }
-#visual-guide-btn svg,#home-btn svg,#upload-btn svg,#fx-fab svg{
+#visual-guide-btn svg,#home-btn svg,#upload-btn svg,#fx-fab svg,.record-shelf-fab-btn svg{
   stroke:currentColor!important;
 }
 #visual-guide-btn,
@@ -2007,6 +2019,14 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   <svg width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M4 7h8"/><path d="M16 7h4"/><circle cx="14" cy="7" r="2"/><path d="M4 17h4"/><path d="M12 17h8"/><circle cx="10" cy="17" r="2"/></svg>
 </button>
 <button id="fx-fab-hide-btn" type="button" onclick="toggleFxFabAutoHide(event)" title="自动隐藏视觉控制台">‹</button>
+<div id="record-shelf-fab-actions" aria-hidden="true">
+  <button class="record-shelf-fab-btn" type="button" data-record-shelf-action="top" title="返回顶部" aria-label="返回顶部">
+    <svg viewBox="0 0 24 24"><path d="M6 5h12"/><path d="M12 19V8"/><path d="M7.5 12.5 12 8l4.5 4.5"/></svg>
+  </button>
+  <button class="record-shelf-fab-btn" type="button" data-record-shelf-action="locate" title="定位当前歌曲" aria-label="定位当前歌曲">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/></svg>
+  </button>
+</div>
 
 <!-- 控制台 (右侧贴边自动显示, 无关闭按钮) -->
 <div id="fx-panel">
@@ -2224,6 +2244,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <button class="fx-mini-btn ghost" type="button" onclick="resetShelfAccentColor()">默认</button>
       </div>
       <div class="fx-slider"><label>歌单架大小</label><input id="fx-shelfsize" type="range" min="0.45" max="1.9" step="0.01"><output></output></div>
+      <div class="fx-slider"><label>歌单间隔</label><input id="fx-shelfgap" type="range" min="0.55" max="1.7" step="0.01"><output></output></div>
       <div class="fx-slider"><label>左右位置</label><input id="fx-shelfx" type="range" min="-2.4" max="2.4" step="0.01"><output></output></div>
       <div class="fx-slider"><label>上下位置</label><input id="fx-shelfy" type="range" min="-1.8" max="1.8" step="0.01"><output></output></div>
       <div class="fx-slider"><label>前后景深</label><input id="fx-shelfz" type="range" min="-1.8" max="1.8" step="0.01"><output></output></div>
@@ -3305,6 +3326,7 @@ var fxDefaults = {
   shelfDetailView: 'list',
   shelfViewportLock: true,
   shelfSize: 1,
+  shelfGap: 1,
   shelfOffsetX: 0,
   shelfOffsetY: 0,
   shelfOffsetZ: 0,
@@ -3393,6 +3415,7 @@ var PACKAGED_DEFAULT_FX_SNAPSHOT = Object.freeze({
   shelfDetailView: 'list',
   shelfViewportLock: true,
   shelfSize: 1,
+  shelfGap: 1,
   shelfOffsetX: 0,
   shelfOffsetY: 0,
   shelfOffsetZ: 0,
@@ -5574,7 +5597,7 @@ var particlePointerLocalHit = new THREE.Vector3();
 var particlePointerQuat = new THREE.Quaternion();
 var particlePointerFrame = { dirty:false, ndcX:0, ndcY:0 };
 var CLICK_THRESHOLD = 6;  // 像素, 拖动 > 6px 视为 drag
-var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
+var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#record-shelf-fab-actions,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
 
 function isPointerOverUi(e) {
   if (!e) return false;
@@ -7731,6 +7754,7 @@ function readSavedLyricLayout() {
       shelfDetailView: normalizeShelfDetailView(raw.shelfDetailView || fxDefaults.shelfDetailView),
       shelfViewportLock: normalizeShelfViewportLock(raw.shelfViewportLock),
       shelfSize: shelfControlValue('shelfSize', raw.shelfSize, fxDefaults.shelfSize),
+      shelfGap: shelfControlValue('shelfGap', raw.shelfGap, fxDefaults.shelfGap),
       shelfOffsetX: shelfControlValue('shelfOffsetX', raw.shelfOffsetX, fxDefaults.shelfOffsetX),
       shelfOffsetY: shelfControlValue('shelfOffsetY', raw.shelfOffsetY, fxDefaults.shelfOffsetY),
       shelfOffsetZ: shelfControlValue('shelfOffsetZ', raw.shelfOffsetZ, fxDefaults.shelfOffsetZ),
@@ -7823,6 +7847,7 @@ function saveLyricLayout() {
       shelfDetailView: normalizeShelfDetailView(fx.shelfDetailView || fxDefaults.shelfDetailView),
       shelfViewportLock: normalizeShelfViewportLock(fx.shelfViewportLock),
       shelfSize: shelfControlValue('shelfSize', fx.shelfSize, fxDefaults.shelfSize),
+      shelfGap: shelfControlValue('shelfGap', fx.shelfGap, fxDefaults.shelfGap),
       shelfOffsetX: shelfControlValue('shelfOffsetX', fx.shelfOffsetX, fxDefaults.shelfOffsetX),
       shelfOffsetY: shelfControlValue('shelfOffsetY', fx.shelfOffsetY, fxDefaults.shelfOffsetY),
       shelfOffsetZ: shelfControlValue('shelfOffsetZ', fx.shelfOffsetZ, fxDefaults.shelfOffsetZ),
@@ -7880,7 +7905,7 @@ function recordStageStep(stageXStep) {
 function recordToolbarLayout(orientation) {
   var helper = contentShelfStateHelper();
   if (helper && typeof helper.recordToolbarLayout === 'function') return helper.recordToolbarLayout(orientation);
-  return orientation === 'stage' ? 'horizontal' : 'vertical';
+  return 'fab-stack';
 }
 function recordCardLayout() {
   var helper = contentShelfStateHelper();
@@ -7910,6 +7935,47 @@ function shelfMotionBinding(viewportLockEnabled) {
 }
 function shelfMotionLocked() {
   return shelfMotionBinding(fx && fx.shelfViewportLock) === 'locked';
+}
+function shouldBindShelfToPresetCamera(viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldBindShelfToPresetCamera === 'function') return helper.shouldBindShelfToPresetCamera(viewportLockEnabled);
+  return !normalizeShelfViewportLock(viewportLockEnabled);
+}
+function shouldBindShelfToBackgroundMotion(viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldBindShelfToBackgroundMotion === 'function') return helper.shouldBindShelfToBackgroundMotion(viewportLockEnabled);
+  return !normalizeShelfViewportLock(viewportLockEnabled);
+}
+function shouldUsePresetShelfLayout(viewportLockEnabled) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldUsePresetShelfLayout === 'function') return helper.shouldUsePresetShelfLayout(viewportLockEnabled);
+  return !normalizeShelfViewportLock(viewportLockEnabled);
+}
+function shelfBeatMotion(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shelfBeatMotion === 'function') return helper.shelfBeatMotion(state);
+  state = state || {};
+  function positive(value, max) {
+    var n = Number(value);
+    if (!isFinite(n) || n <= 0) return 0;
+    return Math.min(max, n);
+  }
+  var b = positive(state.bass, 1.2);
+  var beat = positive(state.beatPulse, 1.4);
+  var punch = positive(state.beatPunch, 1.6);
+  return {
+    scale: 1 + Math.min(0.055, b * 0.014 + beat * 0.024 + punch * 0.012),
+    y: Math.min(0.045, b * 0.004 + beat * 0.028 + punch * 0.012),
+    z: Math.min(0.035, b * 0.003 + beat * 0.018 + punch * 0.010),
+    rotZ: Math.min(0.012, beat * 0.006 + punch * 0.004)
+  };
+}
+function currentShelfBeatMotion() {
+  return shelfBeatMotion({
+    bass: typeof bass !== 'undefined' ? bass : 0,
+    beatPulse: typeof beatPulse !== 'undefined' ? beatPulse : 0,
+    beatPunch: typeof beatCam !== 'undefined' && beatCam ? Math.max(beatCam.punch || 0, beatCam.radiusKick || 0) : 0
+  });
 }
 function playlistShelfCardAction(itemType, isCenter) {
   var helper = contentShelfStateHelper();
@@ -7949,6 +8015,7 @@ function shelfControlBounds(key) {
   if (helper && typeof helper.shelfControlBounds === 'function') return helper.shelfControlBounds(key);
   switch (key) {
     case 'shelfSize': return { min: 0.45, max: 1.9 };
+    case 'shelfGap': return { min: 0.55, max: 1.7 };
     case 'shelfOffsetX': return { min: -2.4, max: 2.4 };
     case 'shelfOffsetY': return { min: -1.8, max: 1.8 };
     case 'shelfOffsetZ': return { min: -1.8, max: 1.8 };
@@ -7981,9 +8048,9 @@ function shelfViewportScaleFactor(currentDistance, currentFov, anchorDistance, a
 function shelfParallaxValue(value, viewportLockEnabled) {
   var helper = contentShelfStateHelper();
   if (helper && typeof helper.shelfParallaxValue === 'function') return helper.shelfParallaxValue(value, viewportLockEnabled);
-  if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
   var n = Number(value);
-  return isFinite(n) ? n : 0;
+  if (!isFinite(n)) return 0;
+  return clampRange(n, -1, 1);
 }
 function shouldContentShelfHandleWheel(hitState) {
   var helper = contentShelfStateHelper();
@@ -7997,6 +8064,7 @@ function shouldCaptureShelfViewportAnchor(state) {
   state = state || {};
   if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
   if (state.splashActive || state.splashRevealing || state.warmupActive) return false;
+  if (state.presetTransitionActive) return false;
   if (state.cameraReady === false) return false;
   var now = Number(state.now);
   var warmupUntil = Number(state.warmupUntil);
@@ -8036,6 +8104,7 @@ function shouldResetShelfAnchorForPlaybackVisual(state) {
   if (helper && typeof helper.shouldResetShelfAnchorForPlaybackVisual === 'function') return helper.shouldResetShelfAnchorForPlaybackVisual(state);
   state = state || {};
   if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+  if (state.hasReusableAnchor === true) return false;
   if (state.presetChanged === true) return true;
   return !!(state.startupPreviewActive || state.homeWallpaperPreviewActive || state.homeVisualPresetActive);
 }
@@ -8046,6 +8115,24 @@ function shouldResetShelfAnchorForContentClose(state) {
   if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
   if (state.reason === 'shelf-mode-reset') return true;
   return state.hasReusableAnchor !== true;
+}
+function shouldResetShelfAnchorForContentOpen(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldResetShelfAnchorForContentOpen === 'function') return helper.shouldResetShelfAnchorForContentOpen(state);
+  state = state || {};
+  if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+  if (state.reason === 'shelf-mode-reset') return true;
+  return state.hasReusableAnchor !== true;
+}
+function shouldPreserveShelfViewportAnchorOnReset(state) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.shouldPreserveShelfViewportAnchorOnReset === 'function') return helper.shouldPreserveShelfViewportAnchorOnReset(state);
+  state = state || {};
+  if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
+  if (state.hasReusableAnchor !== true) return false;
+  var reason = String(state.reason || '');
+  if (/^(disabled|splash-end|startup-starfield-skip|viewport-resize|shelf-viewport-lock-toggle)$/.test(reason)) return false;
+  return true;
 }
 function normalizeShelfCameraMode(value) {
   return String(value || '') === 'static' ? 'static' : 'dynamic';
@@ -8077,6 +8164,7 @@ function shelfSettings() {
     : shelfDefaultAngleForCameraMode(fx && fx.shelfCameraMode);
   return {
     size: shelfControlNumber('shelfSize', fxDefaults.shelfSize),
+    gap: shelfControlNumber('shelfGap', fxDefaults.shelfGap),
     x: shelfControlNumber('shelfOffsetX', fxDefaults.shelfOffsetX),
     y: shelfControlNumber('shelfOffsetY', fxDefaults.shelfOffsetY),
     z: shelfControlNumber('shelfOffsetZ', fxDefaults.shelfOffsetZ),
@@ -8091,6 +8179,7 @@ function shelfAlwaysVisible() {
 }
 function shouldUseShelfDynamicCamera(type) {
   if (!/^shelf-/.test(String(type || ''))) return true;
+  if (!shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock)) return false;
   return !(fx && normalizeShelfCameraMode(fx.shelfCameraMode) === 'static');
 }
 function shelfAccentHex() {
@@ -13128,6 +13217,8 @@ var shelfViewportAnchor = null;
 var shelfViewportAnchorKey = '';
 var shelfViewportNdc = new THREE.Vector3();
 var shelfViewportTarget = new THREE.Vector3();
+var shelfViewportWorld = new THREE.Vector3();
+var shelfViewportTargetLocal = new THREE.Vector3();
 var shelfViewportAnchorView = new THREE.Vector3();
 var shelfViewportCurrentView = new THREE.Vector3();
 var shelfViewportScaleVec = new THREE.Vector3();
@@ -13139,7 +13230,40 @@ function isPortraitShelfViewport() {
 function shelfViewportLockActive() {
   return normalizeShelfViewportLock(fx && fx.shelfViewportLock);
 }
+function activeRecordShelfContentList() {
+  if (!shelfManager || !shelfManager.hasOpenContent || !shelfManager.hasOpenContent()) return null;
+  var cl = shelfManager.getContentList && shelfManager.getContentList();
+  return cl && cl.isRecordView && cl.isRecordView() ? cl : null;
+}
+function syncRecordShelfFabActions(show) {
+  var actions = document.getElementById('record-shelf-fab-actions');
+  show = !!(show && activeRecordShelfContentList());
+  document.body.classList.toggle('record-shelf-actions-visible', show);
+  if (actions) actions.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+function runRecordShelfFabAction(action, event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  var cl = activeRecordShelfContentList();
+  if (!cl || !cl.runChromeAction) return false;
+  return !!cl.runChromeAction(action);
+}
+document.addEventListener('click', function(e) {
+  var target = e.target && e.target.closest ? e.target.closest('[data-record-shelf-action]') : null;
+  if (!target) return;
+  runRecordShelfFabAction(target.getAttribute('data-record-shelf-action'), e);
+}, true);
 function resetShelfViewportAnchor(reason, warmupMs) {
+  if (shouldPreserveShelfViewportAnchorOnReset({
+    viewportLockEnabled: shelfViewportLockActive(),
+    hasReusableAnchor: !!shelfViewportAnchor,
+    reason: reason
+  })) {
+    shelfStageControlsLiftSnapPending = true;
+    return;
+  }
   shelfViewportAnchor = null;
   shelfViewportAnchorKey = '';
   var duration = warmupMs == null ? 260 : Number(warmupMs);
@@ -13150,12 +13274,17 @@ function resetShelfViewportAnchor(reason, warmupMs) {
 }
 function shelfViewportAnchorSignature(kind) {
   var mode = shelfManager && shelfManager.getMode ? shelfManager.getMode() : ((fx && fx.shelf) || fxDefaults.shelf);
+  var presetLayoutBound = shouldUsePresetShelfLayout(fx && fx.shelfViewportLock);
+  var presetCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+  var modePart = presetLayoutBound ? mode : 'independent-mode';
+  var cameraPart = presetCameraBound ? ((fx && fx.shelfCameraMode) || fxDefaults.shelfCameraMode) : 'independent-camera';
+  var presetPart = presetLayoutBound ? ((fx && fx.preset) || 0) : 'independent';
   return [
     'shelf',
-    mode,
+    modePart,
     innerWidth + 'x' + innerHeight,
-    (fx && fx.shelfCameraMode) || fxDefaults.shelfCameraMode,
-    (fx && fx.preset) || 0
+    cameraPart,
+    presetPart
   ].join(':');
 }
 function captureShelfViewportAnchor(key) {
@@ -13182,6 +13311,7 @@ function shelfViewportCaptureState() {
     splashActive: !!(body && body.contains('splash-active')),
     splashRevealing: !!(body && body.contains('splash-revealing')),
     warmupActive: !!(shelfViewportWarmupUntil && now < shelfViewportWarmupUntil),
+    presetTransitionActive: !!(typeof presetTransition !== 'undefined' && presetTransition && presetTransition.active),
     warmupUntil: shelfViewportWarmupUntil || 0,
     cameraReady: cameraReady,
     now: now
@@ -13202,14 +13332,16 @@ function applyShelfViewportLockToMesh(mesh, kind) {
   var anchor = ensureShelfViewportAnchor(kind);
   if (!anchor) return;
   camera.updateMatrixWorld(true);
+  mesh.updateMatrixWorld(true);
   var baseScale = shelfViewportScaleVec.copy(mesh.scale);
-  shelfViewportNdc.copy(mesh.position).applyMatrix4(anchor.projectionViewMatrix);
+  shelfViewportWorld.setFromMatrixPosition(mesh.matrixWorld);
+  shelfViewportNdc.copy(shelfViewportWorld).applyMatrix4(anchor.projectionViewMatrix);
   if (!isShelfViewportProjectionSafe(shelfViewportNdc.x, shelfViewportNdc.y, shelfViewportNdc.z)) {
     resetShelfViewportAnchor('unsafe-projection', 0);
     return;
   }
   shelfViewportTarget.set(shelfViewportNdc.x, shelfViewportNdc.y, shelfViewportNdc.z).unproject(camera);
-  shelfViewportAnchorView.copy(mesh.position).applyMatrix4(anchor.matrixWorldInverse);
+  shelfViewportAnchorView.copy(shelfViewportWorld).applyMatrix4(anchor.matrixWorldInverse);
   shelfViewportCurrentView.copy(shelfViewportTarget).applyMatrix4(camera.matrixWorldInverse);
   var scaleFix = shelfViewportScaleFactor(
     Math.abs(shelfViewportCurrentView.z),
@@ -13218,7 +13350,14 @@ function applyShelfViewportLockToMesh(mesh, kind) {
     anchor.fov || BASE_FOV
   );
   scaleFix = clampRange(scaleFix, 0.42, 2.80);
-  mesh.position.copy(shelfViewportTarget);
+  if (mesh.parent) {
+    mesh.parent.updateMatrixWorld(true);
+    shelfViewportTargetLocal.copy(shelfViewportTarget);
+    mesh.parent.worldToLocal(shelfViewportTargetLocal);
+    mesh.position.copy(shelfViewportTargetLocal);
+  } else {
+    mesh.position.copy(shelfViewportTarget);
+  }
   mesh.scale.copy(baseScale).multiplyScalar(scaleFix);
 }
 function updateShelfStageControlsLift(dt) {
@@ -13237,25 +13376,26 @@ function updateShelfStageControlsLift(dt) {
 function shelfLayoutProfile() {
   var portrait = isPortraitShelfViewport();
   var narrow = !portrait && innerWidth < 980;
-  var skullShelf = shouldUseSkullSafeShelfCamera();
+  var skullShelf = shouldUsePresetShelfLayout(fx && fx.shelfViewportLock) && shouldUseSkullSafeShelfCamera();
   var detailScale = portrait ? clampRange(innerWidth / 820, 0.70, 0.86) : (narrow ? 0.92 : 1.04);
   var shelfCtl = shelfSettings();
+  var shelfGap = shelfCtl.gap || 1;
   return {
     portrait: portrait,
     narrow: narrow,
     sideX: (skullShelf ? (portrait ? 0.22 : (narrow ? 0.46 : 0.76)) : (portrait ? 1.56 : (narrow ? 2.48 : 3.18))) + shelfCtl.x,
     sideY: (skullShelf ? (portrait ? -0.22 : (narrow ? -0.30 : -0.34)) : 0) + shelfCtl.y,
-    sideXStep: skullShelf ? (portrait ? 0.018 : 0.034) : (portrait ? 0.018 : 0.040),
-    sideYStep: skullShelf ? (portrait ? 0.46 : 0.62) : (portrait ? 0.52 : 0.68),
+    sideXStep: (skullShelf ? (portrait ? 0.018 : 0.034) : (portrait ? 0.018 : 0.040)) * shelfGap,
+    sideYStep: (skullShelf ? (portrait ? 0.46 : 0.62) : (portrait ? 0.52 : 0.68)) * shelfGap,
     sideZ: (skullShelf ? (portrait ? 0.86 : 0.92) : (portrait ? 0.78 : 0.86)) + shelfCtl.z,
-    sideZStep: skullShelf ? (portrait ? 0.108 : 0.158) : (portrait ? 0.118 : 0.170),
+    sideZStep: (skullShelf ? (portrait ? 0.108 : 0.158) : (portrait ? 0.118 : 0.170)) * shelfGap,
     sideEntryX: skullShelf ? (portrait ? 0.30 : 0.50) : (portrait ? 0.38 : 0.82),
     sideDetailShift: skullShelf ? (portrait ? 0.00 : 0.00) : (portrait ? 0.38 : 0.82),
     sideScale: (skullShelf ? (portrait ? 0.84 : (narrow ? 1.04 : 1.22)) : (portrait ? 0.70 : (narrow ? 0.86 : 1))) * shelfCtl.size,
     sideRotY: (skullShelf ? (portrait ? -0.085 : -0.190) : (portrait ? 0.12 : 0.28)) + shelfCtl.angle,
     sideRotX: skullShelf ? (portrait ? 0.018 : 0.030) : (portrait ? 0.022 : 0.042),
     stageX: shelfCtl.x,
-    stageXStep: portrait ? 0.92 : (narrow ? 1.22 : 1.55),
+    stageXStep: (portrait ? 0.92 : (narrow ? 1.22 : 1.55)) * shelfGap,
     stageY: (portrait ? -2.46 : -2.20) + shelfCtl.y + shelfStageControlsLiftValue,
     stageZ: (portrait ? 0.84 : 1.0) + shelfCtl.z,
     stageScale: (portrait ? 0.72 : (narrow ? 0.86 : 1)) * shelfCtl.size,
@@ -13859,9 +13999,10 @@ function makeShelfManager() {
       var entry = (1 - reveal) * (0.82 + absD * 0.075);
       var paneRaw = Math.max(0, Math.min(1, (nowT - paneSwitchAt - absD * 0.030) / 0.72));
       var paneEase = 1 - paneRaw * paneRaw * (3 - 2 * paneRaw);
-      var wallpaperShelfPose = shouldUseWallpaperSafeShelfCamera();
-      var skullShelfPose = shouldUseSkullSafeShelfCamera();
-      var safeShelfPose = !motionLocked && (wallpaperShelfPose || skullShelfPose);
+      var presetShelfCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+      var wallpaperShelfPose = presetShelfCameraBound && shouldUseWallpaperSafeShelfCamera();
+      var skullShelfPose = presetShelfCameraBound && shouldUseSkullSafeShelfCamera();
+      var safeShelfPose = wallpaperShelfPose || skullShelfPose;
       var px = layout.sideX + absD * layout.sideXStep - (detailOpenSide ? layout.sideDetailShift : 0) + entry * layout.sideEntryX;
       var py = (layout.sideY || 0) - delta * layout.sideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18);
       var pz = layout.sideZ - absD * layout.sideZStep - (1 - reveal) * 0.20;
@@ -14003,20 +14144,6 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     connectorParticles.renderOrder = 49;
     connectorParticles.position.set(0, -2.2, 0);
     if (group.parent) group.parent.add(connectorParticles); else scene.add(connectorParticles);
-    // 底部地面反射
-    var mGeo = new THREE.PlaneGeometry(10, 1.8);
-    var mCanvas = document.createElement('canvas'); mCanvas.width = 256; mCanvas.height = 64;
-    var mctx = mCanvas.getContext('2d');
-    var mg = mctx.createLinearGradient(0, 0, 0, 64);
-    mg.addColorStop(0, 'rgba(255,255,255,0.07)'); mg.addColorStop(1, 'rgba(255,255,255,0)');
-    mctx.fillStyle = mg; mctx.fillRect(0, 0, 256, 64);
-    var mTex = new THREE.CanvasTexture(mCanvas);
-    mTex.generateMipmaps = false;
-    var mMat = new THREE.MeshBasicMaterial({ map: mTex, transparent:true, depthWrite:false, opacity:0.55 });
-    floorMirror = new THREE.Mesh(mGeo, mMat);
-    floorMirror.position.set(0, -2.85, 0.4);
-    floorMirror.rotation.x = -Math.PI / 2;
-    if (group.parent) group.parent.add(floorMirror); else scene.add(floorMirror);
   }
 
   function sig(items) {
@@ -14146,7 +14273,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     setMode: function(m) {
       if (m === mode && group) return;
       mode = m;
-      resetShelfViewportAnchor();
+      resetShelfViewportAnchor('shelf-mode');
       if (m === 'off') {
         if (group) { scene.remove(group); cards.forEach(function(c){ c.texture.dispose(); c.mesh.material.dispose(); c.mesh.geometry.dispose(); }); }
         if (connectorParticles) { scene.remove(connectorParticles); connectorParticles.geometry.dispose(); connectorParticles.material.dispose(); connectorParticles = null; }
@@ -14188,60 +14315,54 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       if (shelfVisibility < 0.01 && targetVis === 0) shelfVisibility = 0;
       group.visible = appRevealed && (mode !== 'side' || shelfVisibility > 0) && (allItems.length > 0 || (contentList && contentList.isOpen()));
       if (connectorParticles) connectorParticles.visible = group.visible && mode === 'stage';
-      if (floorMirror) floorMirror.visible = group.visible && mode === 'stage';
-      if (connectorParticles || floorMirror) {
+      if (floorMirror) floorMirror.visible = false;
+      if (connectorParticles) {
         var extraLayout = shelfLayoutProfile();
-        if (connectorParticles) {
-          connectorParticles.position.set(extraLayout.stageX || 0, extraLayout.stageY, extraLayout.stageZ - 1.0);
-          connectorParticles.rotation.set(0, 0, 0);
-          connectorParticles.scale.setScalar(1);
-        }
-        if (floorMirror) {
-          floorMirror.position.set(extraLayout.stageX || 0, extraLayout.stageY - 0.65, extraLayout.stageZ - 0.60);
-          floorMirror.rotation.set(-Math.PI / 2, 0, 0);
-          floorMirror.scale.setScalar(1);
-        }
-        if (connectorParticles) applyShelfViewportLockToMesh(connectorParticles, 'shelf-extra');
-        if (floorMirror) applyShelfViewportLockToMesh(floorMirror, 'shelf-extra');
+        connectorParticles.position.set(extraLayout.stageX || 0, extraLayout.stageY, extraLayout.stageZ - 1.0);
+        connectorParticles.rotation.set(0, 0, 0);
+        connectorParticles.scale.setScalar(1);
+        applyShelfViewportLockToMesh(connectorParticles, 'shelf-extra');
       }
       if (mode === 'side') {
         var motionLockedSide = shelfMotionLocked();
+        var beatMotionSide = currentShelfBeatMotion();
         var passiveAlwaysGroup = shelfAlwaysVisible() && !shelfPinnedOpen && !(contentList && contentList.isOpen());
         var liftedCardActive = passiveAlwaysGroup && cards.some(function(c){ return c.selected || (c.floatMix || 0) > 0.025; });
         group.renderOrder = passiveAlwaysGroup && !liftedCardActive ? 30 : 50;
-        group.position.set(0, 0, 0);
-        group.scale.setScalar(1);
+        group.position.set(0, beatMotionSide.y, beatMotionSide.z);
+        group.scale.setScalar(beatMotionSide.scale);
         var bindToCover = !motionLockedSide && shelfAlwaysVisible() && particles && particles.rotation && !(contentList && contentList.isOpen());
         if (motionLockedSide) {
-          group.rotation.set(0, 0, 0);
+          group.rotation.set(0, 0, beatMotionSide.rotZ);
         } else if (bindToCover) {
           group.rotation.x += ((particles.rotation.x - py * 0.010) - group.rotation.x) * 0.075;
           group.rotation.y += ((particles.rotation.y + px * 0.018) - group.rotation.y) * 0.075;
-          group.rotation.z += (particles.rotation.z - group.rotation.z) * 0.075;
+          group.rotation.z += ((particles.rotation.z + beatMotionSide.rotZ) - group.rotation.z) * 0.075;
         } else {
           group.rotation.y += ((px * 0.018) - group.rotation.y) * 0.045;
           group.rotation.x += ((-py * 0.010) - group.rotation.x) * 0.045;
-          group.rotation.z += (0 - group.rotation.z) * 0.045;
+          group.rotation.z += (beatMotionSide.rotZ - group.rotation.z) * 0.045;
         }
       } else {
         var motionLockedStage = shelfMotionLocked();
+        var beatMotionStage = currentShelfBeatMotion();
         group.renderOrder = 50;
         if (motionLockedStage) {
-          group.position.set(0, 0, 0);
-          group.rotation.set(0, 0, 0);
-          group.scale.setScalar(1);
+          group.position.set(0, beatMotionStage.y, beatMotionStage.z);
+          group.rotation.set(0, 0, beatMotionStage.rotZ);
+          group.scale.setScalar(beatMotionStage.scale);
         } else {
           var t = uniforms.uTime.value;
           var coverRxStage = particles && particles.rotation ? particles.rotation.x : 0;
           var coverRyStage = particles && particles.rotation ? particles.rotation.y : 0;
           var coverRzStage = particles && particles.rotation ? particles.rotation.z : 0;
-          group.position.y = Math.sin(t * 0.3) * 0.04 + coverRxStage * 0.020;
+          group.position.y = Math.sin(t * 0.3) * 0.04 + coverRxStage * 0.020 + beatMotionStage.y;
           group.position.x = px * 0.10 + coverRyStage * 0.030;
-          group.position.z = coverRzStage * 0.030;
+          group.position.z = coverRzStage * 0.030 + beatMotionStage.z;
           group.rotation.y = px * 0.025 + coverRyStage * 0.12;
           group.rotation.x = -py * 0.012 + coverRxStage * 0.10;
-          group.rotation.z = coverRzStage * 0.10;
-          group.scale.setScalar(1);
+          group.rotation.z = coverRzStage * 0.10 + beatMotionStage.rotZ;
+          group.scale.setScalar(beatMotionStage.scale);
         }
       }
       for (var i = 0; i < cards.length; i++) {
@@ -14808,12 +14929,15 @@ function makeContentListManager() {
     nowT = nowT == null ? (uniforms.uTime.value || 0) : nowT;
     if (isRecordChromeMode()) {
       disposePanel();
+      disposeRecordToolbar();
+      syncRecordShelfFabActions(true);
       drawRecordToolbarIfNeeded(force, nowT);
       panelDirty = false;
       panelDrawAt = nowT;
       return;
     }
     disposeRecordToolbar();
+    syncRecordShelfFabActions(false);
     if (!force && !panelDirty && (!isLoadingContent() || nowT - panelDrawAt < LOADING_ANIM_INTERVAL)) return;
     drawPanel();
     panelDirty = false;
@@ -14822,11 +14946,7 @@ function makeContentListManager() {
 
   function drawRecordToolbarIfNeeded(force, nowT) {
     nowT = nowT == null ? (uniforms.uTime.value || 0) : nowT;
-    ensureRecordToolbar();
-    if (!recordToolbar) return;
-    if (!force && !panelDirty && nowT - panelDrawAt < 0.5) return;
-    drawRecordToolbarActions(recordToolbar.canvas.getContext('2d'), currentRecordToolbarSpec());
-    recordToolbar.texture.needsUpdate = true;
+    syncRecordShelfFabActions(true);
   }
 
   function applyRecordShelfGroupPose() {
@@ -14835,10 +14955,11 @@ function makeContentListManager() {
     var locked = shelfMotionLocked();
     var parX = shelfParallaxValue(pointerParallax.x, locked);
     var parY = shelfParallaxValue(pointerParallax.y, locked);
+    var beatMotion = currentShelfBeatMotion();
     if (locked) {
-      group.position.set(0, 0, 0);
-      group.rotation.set(0, 0, 0);
-      group.scale.setScalar(1);
+      group.position.set(0, beatMotion.y, beatMotion.z);
+      group.rotation.set(0, 0, beatMotion.rotZ);
+      group.scale.setScalar(beatMotion.scale);
       return;
     }
     var coverRx = particles && particles.rotation ? particles.rotation.x : 0;
@@ -14846,17 +14967,17 @@ function makeContentListManager() {
     var coverRz = particles && particles.rotation ? particles.rotation.z : 0;
     if (mode === 'stage') {
       var t = uniforms.uTime.value || 0;
-      group.position.set(parX * 0.10 + coverRy * 0.030, Math.sin(t * 0.3) * 0.04 + coverRx * 0.020, coverRz * 0.030);
+      group.position.set(parX * 0.10 + coverRy * 0.030, Math.sin(t * 0.3) * 0.04 + coverRx * 0.020 + beatMotion.y, coverRz * 0.030 + beatMotion.z);
       group.rotation.y = parX * 0.025 + coverRy * 0.12;
       group.rotation.x = -parY * 0.012 + coverRx * 0.10;
-      group.rotation.z = coverRz * 0.10;
+      group.rotation.z = coverRz * 0.10 + beatMotion.rotZ;
     } else {
-      group.position.set(0, coverRx * 0.018, coverRz * 0.020);
+      group.position.set(0, coverRx * 0.018 + beatMotion.y, coverRz * 0.020 + beatMotion.z);
       group.rotation.y = coverRy * 0.20 + parX * 0.018;
       group.rotation.x = coverRx * 0.16 - parY * 0.010;
-      group.rotation.z = coverRz * 0.14;
+      group.rotation.z = coverRz * 0.14 + beatMotion.rotZ;
     }
-    group.scale.setScalar(1);
+    group.scale.setScalar(beatMotion.scale);
   }
 
   function placeRecordToolbar() {
@@ -15176,9 +15297,10 @@ function makeContentListManager() {
     var settle = group && group.userData ? (group.userData.rowSettle || 0) : 0;
     var shelfLook = shelfSettings();
     var shelfLayout = shelfLayoutProfile();
-    var wallpaperShelfPose = shouldUseWallpaperSafeShelfCamera();
-    var skullShelfPose = shouldUseSkullSafeShelfCamera();
-    var safeShelfPose = !motionLocked && (wallpaperShelfPose || skullShelfPose);
+    var presetShelfCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+    var wallpaperShelfPose = presetShelfCameraBound && shouldUseWallpaperSafeShelfCamera();
+    var skullShelfPose = presetShelfCameraBound && shouldUseSkullSafeShelfCamera();
+    var safeShelfPose = wallpaperShelfPose || skullShelfPose;
     var orientation = currentDetailOrientation();
     var isStageRecord = orientation === 'stage';
     var px;
@@ -15245,14 +15367,16 @@ function makeContentListManager() {
     var nowT = uniforms.uTime.value;
     var revealRaw = Math.max(0, Math.min(1, (nowT - rowAnimAt - absD * 0.040) / 0.72));
     var reveal = revealRaw * revealRaw * (3 - 2 * revealRaw);
-    var parX = pointerParallax.x || 0;
-    var parY = pointerParallax.y || 0;
+    var rowMotionLocked = shelfMotionLocked();
+    var parX = shelfParallaxValue(pointerParallax.x, rowMotionLocked);
+    var parY = shelfParallaxValue(pointerParallax.y, rowMotionLocked);
     var parWeight = Math.max(0, 1 - absD * 0.12);
     var pulse = row.fxPulse || 0;
     var settle = group && group.userData ? (group.userData.rowSettle || 0) : 0;
     var layout = detailLayout();
     var shelfLook = shelfSettings();
-    var skullDetail = shouldUseSkullSafeShelfCamera();
+    var detailPresetCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+    var skullDetail = detailPresetCameraBound && shouldUseSkullSafeShelfCamera();
     var rowBaseX = skullDetail ? 0.22 : -0.04;
     var rowSpreadX = skullDetail ? 0.030 : 0.014;
     var rowIntroX = skullDetail ? 0.58 : 0.38;
@@ -15417,7 +15541,11 @@ function makeContentListManager() {
       playlistTitle = title;
       currentPlaylistId = playlistId || '';
       sourceCard = fromCard;
-      resetShelfViewportAnchor('content-open', 520);
+      if (shouldResetShelfAnchorForContentOpen({
+        viewportLockEnabled: shelfViewportLockActive(),
+        hasReusableAnchor: !!shelfViewportAnchor,
+        reason: 'content-open'
+      })) resetShelfViewportAnchor('content-open', 520);
       var podcastCollectionKey = String(playlistId || '').indexOf('podcast:') === 0 ? String(playlistId).slice(8) : '';
       var qqPlaylistId = String(playlistId || '').indexOf('qq:') === 0 ? String(playlistId).slice(3) : '';
       contentKind = podcastCollectionKey ? 'podcast' : 'playlist';
@@ -15440,22 +15568,26 @@ function makeContentListManager() {
         applyRecordShelfGroupPose();
       } else {
         var openLayout = detailLayout();
-        var openSkullDetail = shouldUseSkullSafeShelfCamera();
-        var openDynamicDetail = !openSkullDetail && shouldUseShelfDynamicCamera('shelf-detail') && camera;
-        var openCoverRx = particles && particles.rotation ? particles.rotation.x : 0;
-        var openCoverRy = particles && particles.rotation ? particles.rotation.y : 0;
-        var openCoverRz = particles && particles.rotation ? particles.rotation.z : 0;
-        group.position.set(openLayout.x + (openSkullDetail ? 0.10 : 0.16), openLayout.y - (openSkullDetail ? 0.02 : 0.024), openLayout.z - (openSkullDetail ? 0.05 : 0.070));
+        var openBackgroundMotionBound = shouldBindShelfToBackgroundMotion(fx && fx.shelfViewportLock);
+        var openBeatMotion = currentShelfBeatMotion();
+        var openDetailPresetCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+        var openSkullDetail = openDetailPresetCameraBound && shouldUseSkullSafeShelfCamera();
+        var openDynamicDetail = openDetailPresetCameraBound && !openSkullDetail && shouldUseShelfDynamicCamera('shelf-detail') && camera;
+        var openCoverRx = openBackgroundMotionBound && particles && particles.rotation ? particles.rotation.x : 0;
+        var openCoverRy = openBackgroundMotionBound && particles && particles.rotation ? particles.rotation.y : 0;
+        var openCoverRz = openBackgroundMotionBound && particles && particles.rotation ? particles.rotation.z : 0;
+        group.position.set(openLayout.x + (openSkullDetail ? 0.10 : 0.16), openLayout.y - (openSkullDetail ? 0.02 : 0.024) + openBeatMotion.y, openLayout.z - (openSkullDetail ? 0.05 : 0.070) + openBeatMotion.z);
         if ((openSkullDetail || openDynamicDetail) && camera) {
           group.quaternion.copy(camera.quaternion);
           group.rotateX(openLayout.rx);
           group.rotateY(openLayout.ry + (openSkullDetail ? 0.014 : 0.018));
+          group.rotateZ(openBeatMotion.rotZ);
         } else {
           group.rotation.y = openCoverRy * 0.82 + openLayout.ry + 0.018;
           group.rotation.x = openCoverRx * 0.72 + openLayout.rx;
-          group.rotation.z = openCoverRz * 0.70;
+          group.rotation.z = openCoverRz * 0.70 + openBeatMotion.rotZ;
         }
-        group.scale.setScalar(openLayout.scale * 0.965);
+        group.scale.setScalar(openLayout.scale * 0.965 * openBeatMotion.scale);
       }
       if (window.gsap) {
         window.gsap.killTweensOf(group.userData);
@@ -15517,7 +15649,11 @@ function makeContentListManager() {
         rowsDirty = true;
         startRowsLoadedIntro();
         syncRenderedRows(true);
-        resetShelfViewportAnchor('content-ready', 220);
+        if (shouldResetShelfAnchorForContentOpen({
+          viewportLockEnabled: shelfViewportLockActive(),
+          hasReusableAnchor: !!shelfViewportAnchor,
+          reason: 'content-ready'
+        })) resetShelfViewportAnchor('content-ready', 220);
       } catch (renderReadyErr) {
         console.warn('[ShelfContentReadyRender]', playlistId, renderReadyErr);
         showToast('歌单已载入，3D列表刷新失败');
@@ -15525,6 +15661,7 @@ function makeContentListManager() {
     },
     close: function(reason) {
       open = false;
+      syncRecordShelfFabActions(false);
       if (shouldResetShelfAnchorForContentClose({
         viewportLockEnabled: shelfViewportLockActive(),
         hasReusableAnchor: !!shelfViewportAnchor,
@@ -15584,40 +15721,46 @@ function makeContentListManager() {
     update: function(dt) {
       if (!group || !open) return;
       var intro = group.userData.detailIntro || 0;
-      var parX = pointerParallax.x || 0;
-      var parY = pointerParallax.y || 0;
+      var detailMotionLocked = shelfMotionLocked();
+      var parX = shelfParallaxValue(pointerParallax.x, detailMotionLocked);
+      var parY = shelfParallaxValue(pointerParallax.y, detailMotionLocked);
       if (isRecordChromeMode()) {
         applyRecordShelfGroupPose();
       } else {
         var layout = detailLayout();
-        var skullDetail = shouldUseSkullSafeShelfCamera();
-        var dynamicDetail = !skullDetail && shouldUseShelfDynamicCamera('shelf-detail') && camera;
-        var coverBoundDetail = !skullDetail && !dynamicDetail && particles && particles.rotation;
+        var beatMotion = currentShelfBeatMotion();
+        var backgroundMotionBound = shouldBindShelfToBackgroundMotion(fx && fx.shelfViewportLock);
+        var detailPresetCameraBound = shouldBindShelfToPresetCamera(fx && fx.shelfViewportLock);
+        var skullDetail = detailPresetCameraBound && shouldUseSkullSafeShelfCamera();
+        var dynamicDetail = detailPresetCameraBound && !skullDetail && shouldUseShelfDynamicCamera('shelf-detail') && camera;
+        var coverBoundDetail = backgroundMotionBound && !skullDetail && !dynamicDetail && particles && particles.rotation;
         var coverBindX = coverBoundDetail ? particles.rotation.y * 0.18 : 0;
         var coverBindY = coverBoundDetail ? particles.rotation.x * -0.16 : 0;
         var coverBindZ = coverBoundDetail ? Math.abs(particles.rotation.y) * 0.030 : 0;
         group.position.set(
           layout.x + coverBindX + intro * (skullDetail ? 0.10 : 0.16) + parX * (skullDetail ? 0.024 : 0.030),
-          layout.y + coverBindY - intro * (skullDetail ? 0.02 : 0.024) + parY * (skullDetail ? 0.026 : 0.026),
-          layout.z + coverBindZ - intro * (skullDetail ? 0.05 : 0.070) + parY * (skullDetail ? 0.014 : 0.016) - parX * (skullDetail ? 0.010 : 0.010)
+          layout.y + coverBindY - intro * (skullDetail ? 0.02 : 0.024) + parY * (skullDetail ? 0.026 : 0.026) + beatMotion.y,
+          layout.z + coverBindZ - intro * (skullDetail ? 0.05 : 0.070) + parY * (skullDetail ? 0.014 : 0.016) - parX * (skullDetail ? 0.010 : 0.010) + beatMotion.z
         );
         if (skullDetail && camera) {
           group.quaternion.copy(camera.quaternion);
           group.rotateX(layout.rx - parY * 0.004);
           group.rotateY(layout.ry + intro * 0.004 + parX * 0.004);
+          group.rotateZ(beatMotion.rotZ);
         } else if (dynamicDetail) {
           group.quaternion.copy(camera.quaternion);
           group.rotateX(layout.rx - parY * 0.006);
           group.rotateY(layout.ry + intro * 0.012 + parX * 0.008);
+          group.rotateZ(beatMotion.rotZ);
         } else {
-          var coverRx = particles && particles.rotation ? particles.rotation.x : 0;
-          var coverRy = particles && particles.rotation ? particles.rotation.y : 0;
-          var coverRz = particles && particles.rotation ? particles.rotation.z : 0;
+          var coverRx = backgroundMotionBound && particles && particles.rotation ? particles.rotation.x : 0;
+          var coverRy = backgroundMotionBound && particles && particles.rotation ? particles.rotation.y : 0;
+          var coverRz = backgroundMotionBound && particles && particles.rotation ? particles.rotation.z : 0;
           group.rotation.x += ((coverRx * 0.72 + layout.rx - parY * 0.010) - group.rotation.x) * 0.16;
           group.rotation.y += ((coverRy * 0.82 + layout.ry + intro * 0.018 + parX * 0.014) - group.rotation.y) * 0.16;
-          group.rotation.z += ((coverRz * 0.70) - group.rotation.z) * 0.14;
+          group.rotation.z += ((coverRz * 0.70 + beatMotion.rotZ) - group.rotation.z) * 0.14;
         }
-        group.scale.setScalar(layout.scale * (1 - intro * (skullDetail ? 0.020 : 0.035)));
+        group.scale.setScalar(layout.scale * (1 - intro * (skullDetail ? 0.020 : 0.035)) * beatMotion.scale);
       }
       centerSmooth += (centerTarget - centerSmooth) * 0.18;
       if (Math.abs(centerSmooth - centerTarget) < 0.001) centerSmooth = centerTarget;
@@ -17187,7 +17330,12 @@ function prewarmHomeWallpaperPreview() {
 }
 function deactivateHomeWallpaperPreview(playback) {
   document.body.classList.remove('home-wallpaper-preview');
-  if (typeof resetShelfViewportAnchor === 'function') resetShelfViewportAnchor(playback ? 'wallpaper-preview-playback' : 'wallpaper-preview-close', playback ? 360 : 220);
+  if (typeof resetShelfViewportAnchor === 'function' && shouldResetShelfAnchorForPlaybackVisual({
+    viewportLockEnabled: shelfViewportLockActive(),
+    hasReusableAnchor: !!shelfViewportAnchor,
+    presetChanged: false,
+    homeWallpaperPreviewActive: true
+  })) resetShelfViewportAnchor(playback ? 'wallpaper-preview-playback' : 'wallpaper-preview-close', playback ? 360 : 220);
   if (!homeVisualPresetActive) return;
   homeVisualPresetActive = false;
   var nextPreset = typeof homeVisualPrevPreset === 'number' ? homeVisualPrevPreset : (fx && typeof fx.preset === 'number' ? fx.preset : 0);
@@ -17208,6 +17356,7 @@ function switchPlaybackVisualToEmily() {
   startupVisualPreviewActive = false;
   if (typeof resetShelfViewportAnchor === 'function' && shouldResetShelfAnchorForPlaybackVisual({
     viewportLockEnabled: shelfViewportLockActive(),
+    hasReusableAnchor: !!shelfViewportAnchor,
     presetChanged: presetChanged,
     startupPreviewActive: startupPreviewWasActive,
     homeWallpaperPreviewActive: wallpaperPreviewWasActive,
@@ -21514,6 +21663,7 @@ function normalizeFxArchiveSnapshot(raw) {
     shelfDetailView: normalizeShelfDetailView(raw.shelfDetailView || fxDefaults.shelfDetailView),
     shelfViewportLock: normalizeShelfViewportLock(raw.shelfViewportLock),
     shelfSize: shelfControlValue('shelfSize', raw.shelfSize, fxDefaults.shelfSize),
+    shelfGap: shelfControlValue('shelfGap', raw.shelfGap, fxDefaults.shelfGap),
     shelfOffsetX: shelfControlValue('shelfOffsetX', raw.shelfOffsetX, fxDefaults.shelfOffsetX),
     shelfOffsetY: shelfControlValue('shelfOffsetY', raw.shelfOffsetY, fxDefaults.shelfOffsetY),
     shelfOffsetZ: shelfControlValue('shelfOffsetZ', raw.shelfOffsetZ, fxDefaults.shelfOffsetZ),
@@ -22752,6 +22902,7 @@ function updateFxInputs() {
   setRange('fx-desktoplyricsy', fx.desktopLyricsY);
   setRange('fx-wallpaperopacity', fx.wallpaperOpacity);
   setRange('fx-shelfsize', fx.shelfSize);
+  setRange('fx-shelfgap', fx.shelfGap);
   setRange('fx-shelfx', fx.shelfOffsetX);
   setRange('fx-shelfy', fx.shelfOffsetY);
   setRange('fx-shelfz', fx.shelfOffsetZ);
@@ -23095,6 +23246,7 @@ function relabelFxPanelControls() {
   setFxSliderLabel('fx-desktoplyricsy', '桌面歌词高度');
   setFxSliderLabel('fx-wallpaperopacity', '壁纸透明度');
   setFxSliderLabel('fx-shelfsize', '歌单架大小');
+  setFxSliderLabel('fx-shelfgap', '歌单间隔');
   setFxSliderLabel('fx-shelfx', '左右位置');
   setFxSliderLabel('fx-shelfy', '上下位置');
   setFxSliderLabel('fx-shelfz', '前后景深');
@@ -23455,7 +23607,7 @@ function bindFxPanel() {
   var ids = [
     ['fx-intensity','intensity'],['fx-depth','depth'],['fx-coverres','coverResolution'],['fx-cineshake','cinemaShake'],['fx-lyricglow','lyricGlowStrength'],['fx-bgopacity','backgroundOpacity'],['fx-glassaberration','controlGlassChromaticOffset'],
     ['fx-desktoplyricssize','desktopLyricsSize'],['fx-desktoplyricsopacity','desktopLyricsOpacity'],['fx-desktoplyricsy','desktopLyricsY'],['fx-wallpaperopacity','wallpaperOpacity'],
-    ['fx-shelfsize','shelfSize'],['fx-shelfx','shelfOffsetX'],['fx-shelfy','shelfOffsetY'],['fx-shelfz','shelfOffsetZ'],['fx-shelfangle','shelfAngleY'],['fx-shelfopacity','shelfOpacity'],['fx-shelfbgalpha','shelfBgOpacity'],
+    ['fx-shelfsize','shelfSize'],['fx-shelfgap','shelfGap'],['fx-shelfx','shelfOffsetX'],['fx-shelfy','shelfOffsetY'],['fx-shelfz','shelfOffsetZ'],['fx-shelfangle','shelfAngleY'],['fx-shelfopacity','shelfOpacity'],['fx-shelfbgalpha','shelfBgOpacity'],
     ['fx-lyricspacing','lyricLetterSpacing'],['fx-lyriclineheight','lyricLineHeight'],['fx-lyricweight','lyricWeight'],
     ['fx-lyricscale','lyricScale'],['fx-lyricx','lyricOffsetX'],['fx-lyricy','lyricOffsetY'],['fx-lyricz','lyricOffsetZ'],['fx-lyrictiltx','lyricTiltX'],['fx-lyrictilty','lyricTiltY'],
     ['fx-point','point'],['fx-speed','speed'],['fx-twist','twist'],
@@ -23488,6 +23640,7 @@ function bindFxPanel() {
       if (pair[1] === 'desktopLyricsY') fx.desktopLyricsY = clampRange(fx.desktopLyricsY, 0.08, 0.92);
       if (pair[1] === 'wallpaperOpacity') fx.wallpaperOpacity = clampRange(fx.wallpaperOpacity, 0.35, 1);
       if (pair[1] === 'shelfSize') fx.shelfSize = shelfControlNumber('shelfSize', fxDefaults.shelfSize);
+      if (pair[1] === 'shelfGap') fx.shelfGap = shelfControlNumber('shelfGap', fxDefaults.shelfGap);
       if (pair[1] === 'shelfOffsetX') fx.shelfOffsetX = shelfControlNumber('shelfOffsetX', fxDefaults.shelfOffsetX);
       if (pair[1] === 'shelfOffsetY') fx.shelfOffsetY = shelfControlNumber('shelfOffsetY', fxDefaults.shelfOffsetY);
       if (pair[1] === 'shelfOffsetZ') fx.shelfOffsetZ = shelfControlNumber('shelfOffsetZ', fxDefaults.shelfOffsetZ);
@@ -23502,7 +23655,7 @@ function bindFxPanel() {
         ? coverParticleCountLabel(fx.coverResolution)
         : (pair[1] === 'lyricWeight' || pair[1] === 'controlGlassChromaticOffset' || pair[1] === 'lyricTiltX' || pair[1] === 'lyricTiltY' || pair[1] === 'shelfAngleY' ? String(Math.round(fx[pair[1]])) : Number(el.value).toFixed(pair[1] === 'lyricLetterSpacing' ? 3 : 2));
       syncFxUniforms();
-      if (/^shelf(Size|OffsetX|OffsetY|OffsetZ|AngleY|Opacity|BgOpacity)$/.test(pair[1]) && shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
+      if (/^shelf(Size|Gap|OffsetX|OffsetY|OffsetZ|AngleY|Opacity|BgOpacity)$/.test(pair[1]) && shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
       if (pair[1] === 'lyricLetterSpacing' || pair[1] === 'lyricLineHeight' || pair[1] === 'lyricWeight') refreshCurrentLyricStyle();
       if (pair[1] === 'lyricLetterSpacing' || pair[1] === 'lyricLineHeight' || pair[1] === 'lyricWeight' || pair[1] === 'lyricScale' || pair[1] === 'lyricGlowStrength') pushDesktopLyricsState(true);
       if (/^(desktopLyricsSize|desktopLyricsOpacity|desktopLyricsY)$/.test(pair[1])) pushDesktopLyricsState(true);
@@ -23692,7 +23845,7 @@ function toggleFx(key) {
     if (shelfManager && shelfManager.rebuild) shelfManager.rebuild(true);
     if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   }
-  if (key === 'shelfViewportLock') resetShelfViewportAnchor();
+  if (key === 'shelfViewportLock') resetShelfViewportAnchor('shelf-viewport-lock-toggle');
   if (key === 'liveBackgroundKeep') {
     fx.performanceBackground = fx.liveBackgroundKeep ? 'keep' : 'auto';
     updatePerformanceControls();
@@ -23818,7 +23971,7 @@ function refreshShelfVisuals(reason) {
 }
 function setShelfCameraMode(mode) {
   fx.shelfCameraMode = normalizeShelfCameraMode(mode);
-  resetShelfViewportAnchor();
+  resetShelfViewportAnchor('shelf-camera-mode');
   applyShelfCameraDefaultAngle(true);
   setRange('fx-shelfangle', fx.shelfAngleY);
   updateShelfControlUi();
@@ -23840,7 +23993,11 @@ function setShelfPresence(mode) {
 }
 function setShelfDetailView(view) {
   fx.shelfDetailView = normalizeShelfDetailView(view);
-  resetShelfViewportAnchor();
+  if (shouldResetShelfAnchorForContentOpen({
+    viewportLockEnabled: shelfViewportLockActive(),
+    hasReusableAnchor: !!shelfViewportAnchor,
+    reason: 'detail-view'
+  })) resetShelfViewportAnchor('detail-view', 260);
   updateShelfControlUi();
   if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   saveLyricLayout();

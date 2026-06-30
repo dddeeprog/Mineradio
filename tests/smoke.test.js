@@ -29,3 +29,64 @@ test('development context document exists', () => {
   assert.match(content, /develop\/mineradio-maintenance/);
   assert.match(content, /C:\\Users\\TomatoK\\Documents\\Playground\\Mineradio/);
 });
+
+test('independent shelf viewport lock is not tied to a single preset', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(
+    html,
+    /var modePart = presetLayoutBound \? mode : 'independent-mode';/
+  );
+  assert.match(
+    html,
+    /var cameraPart = presetCameraBound \? \(\(fx && fx\.shelfCameraMode\) \|\| fxDefaults\.shelfCameraMode\) : 'independent-camera';/
+  );
+  assert.match(
+    html,
+    /var presetPart = presetLayoutBound \? \(\(fx && fx\.preset\) \|\| 0\) : 'independent';/
+  );
+  assert.match(
+    html,
+    /var skullShelf = shouldUsePresetShelfLayout\(fx && fx\.shelfViewportLock\) && shouldUseSkullSafeShelfCamera\(\);/
+  );
+  assert.match(
+    html,
+    /var presetShelfCameraBound = shouldBindShelfToPresetCamera\(fx && fx\.shelfViewportLock\);/
+  );
+  assert.match(
+    html,
+    /var backgroundMotionBound = shouldBindShelfToBackgroundMotion\(fx && fx\.shelfViewportLock\);/
+  );
+});
+
+test('stage shelf hides the floor mirror shadow for playlist and record views', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(
+    html,
+    /if \(floorMirror\) floorMirror\.visible = false;/
+  );
+  assert.doesNotMatch(html, /floorMirror = new THREE\.Mesh/);
+  assert.doesNotMatch(html, /floorMirror\.visible = group\.visible && mode === 'stage'/);
+});
+
+test('shelf gap slider is wired into DIY controls', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /<label>歌单间隔<\/label><input id="fx-shelfgap" type="range" min="0\.55" max="1\.7" step="0\.01">/);
+  assert.match(html, /\['fx-shelfgap','shelfGap'\]/);
+  assert.match(html, /setRange\('fx-shelfgap', fx\.shelfGap\);/);
+});
+
+test('record shelf actions use floating round buttons above the DIY fab without back action', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /id="record-shelf-fab-actions"/);
+  assert.doesNotMatch(html, /data-record-shelf-action="back"/);
+  assert.match(html, /data-record-shelf-action="locate"/);
+  assert.match(html, /data-record-shelf-action="top"/);
+  assert.match(html, /#record-shelf-fab-actions\{position:fixed;z-index:18;right:24px;bottom:90px/);
+  assert.match(html, /#record-shelf-fab-actions \.record-shelf-fab-btn\{width:54px;height:54px;border-radius:50%/);
+  assert.match(html, /UI_HIT_SELECTOR = '[^']*#record-shelf-fab-actions/);
+  assert.match(html, /function syncRecordShelfFabActions\(show\)/);
+});
