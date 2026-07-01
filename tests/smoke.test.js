@@ -11,7 +11,7 @@ test('maintenance baseline scripts are wired', () => {
 
   assert.equal(
     scripts.check,
-    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/comment-barrage-state.js && node --check public/visual-cover-state.js'
+    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/comment-barrage-state.js && node --check public/visual-cover-state.js'
   );
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
@@ -27,6 +27,7 @@ test('playback session restore script is wired', () => {
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-hero-state\.js"><\/script>/);
+  assert.match(html, /<script src="home-weather-ui\.js"><\/script>/);
   assert.match(html, /<script src="comment-barrage-state\.js"><\/script>/);
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
@@ -47,6 +48,7 @@ test('main stylesheet is loaded as an external asset', () => {
 
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const homeWeatherUi = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-ui.js'), 'utf8');
 
   assert.match(html, /onclick="openHomeWeatherCityEditor\(event\)">切换城市<\/button>/);
   assert.match(html, /id="home-weather-city-pop"/);
@@ -55,11 +57,13 @@ test('home city switch uses its own glass editor while top chip opens weather de
   assert.match(html, /function openHomeWeatherCityEditor\(e\)/);
   assert.match(html, /function toggleWeatherDetailPopover\(e\)/);
   assert.match(html, /id="weather-detail-pop"/);
-  assert.match(html, /chip\.addEventListener\('click', toggleWeatherDetailPopover\);/);
   assert.match(html, /id="home-weather-city-switch"/);
-  assert.match(html, /function bindWeatherCityEditorControls\(\)/);
-  assert.match(html, /homeBtn\.addEventListener\('click', openHomeWeatherCityEditor\);/);
-  assert.match(html, /if \(e\.target === pop\) closeHomeWeatherCityEditor\(\);/);
+  assert.match(homeWeatherUi, /window\.MineradioHomeWeatherUi/);
+  assert.match(homeWeatherUi, /chip\.addEventListener\('click', toggleWeatherDetailPopover\);/);
+  assert.match(homeWeatherUi, /function bindWeatherCityEditorControls\(\)/);
+  assert.match(homeWeatherUi, /homeBtn\.addEventListener\('click', openHomeWeatherCityEditor\);/);
+  assert.match(homeWeatherUi, /if \(e\.target === pop\) closeHomeWeatherCityEditor\(\);/);
+  assert.doesNotMatch(html, /function bindWeatherCityEditorControls\(\)/);
   assert.doesNotMatch(html, /weather-city-pop[\s\S]*<input id="weather-city-input"/);
   assert.doesNotMatch(html, /\.home-weather-city-pop\{position:absolute;left:0;top:44px/);
   assert.doesNotMatch(html, /window\.prompt\(.*天气城市/s);
@@ -67,6 +71,7 @@ test('home city switch uses its own glass editor while top chip opens weather de
 
 test('home weather cache and forecast UI are wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const homeWeatherUi = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-ui.js'), 'utf8');
 
   assert.match(html, /HOME_WEATHER_CACHE_KEY = 'mineradio-weather-radio-cache-v1'/);
   assert.match(html, /HOME_WEATHER_FRESH_MS = 30 \* 60 \* 1000/);
@@ -87,9 +92,13 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(html, /id="home-weather-alert"/);
   assert.match(html, /class="home-weather-scene/);
   assert.match(html, /id="home-weather-advice"/);
-  assert.match(html, /function renderHomeWeatherCurve\(/);
-  assert.match(html, /function renderHomeWeatherMetrics\(/);
-  assert.match(html, /function bindHomeWeatherInteractions\(/);
+  assert.match(html, /window\.MineradioHomeWeatherUi\.init/);
+  assert.match(homeWeatherUi, /function renderHomeWeatherCurve\(/);
+  assert.match(homeWeatherUi, /function renderHomeWeatherMetrics\(/);
+  assert.match(homeWeatherUi, /function bindHomeWeatherInteractions\(/);
+  assert.doesNotMatch(html, /function renderHomeWeatherCurve\(/);
+  assert.doesNotMatch(html, /function renderHomeWeatherMetrics\(/);
+  assert.doesNotMatch(html, /function bindHomeWeatherInteractions\(/);
   assert.match(html, /buildWeatherForecastFields/);
   assert.match(html, /buildHourlyTemperatureCurve/);
   assert.match(html, /buildWeatherMetrics/);
