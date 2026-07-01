@@ -38,6 +38,7 @@ const {
 } = require('../server/music/qq');
 const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('../server/routes/discover');
+const { createPodcastRoutes } = require('../server/routes/podcast');
 const { createProxyRoutes } = require('../server/routes/proxy');
 const { createQQRoutes } = require('../server/routes/qq');
 const { createUpdateRoutes } = require('../server/routes/update');
@@ -395,6 +396,68 @@ test('qq route module dispatches QQ music endpoints', async () => {
   assert.equal(writes[2].payload.saved, true);
   assert.equal(await routes.handleRoute('/api/qq/song/comments', {}, {}, new URL('http://localhost/api/qq/song/comments?id=7&mid=m&limit=all&offset=4')), true);
   assert.deepEqual(calls[calls.length - 1], ['comments', '7', 'm', 0, 4]);
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('podcast route module dispatches podcast endpoints', async () => {
+  const writes = [];
+  const calls = [];
+  const routes = createPodcastRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    getUserCookie() {
+      return 'MUSIC_U=1';
+    },
+    cloudsearch(params) {
+      calls.push(['cloudsearch', params.keywords, params.limit, params.type]);
+      return Promise.resolve({ body: { result: { djRadios: [{ id: 1, name: '播客' }], djRadiosCount: 1 } } });
+    },
+    dj_hot() {
+      return Promise.resolve({ body: { djRadios: [] } });
+    },
+    dj_detail() {
+      return Promise.resolve({ body: { data: { id: 1 } } });
+    },
+    dj_program() {
+      return Promise.resolve({ body: { programs: [] } });
+    },
+    mapPodcastRadio(raw) {
+      return { id: raw.id, name: raw.name || '播客' };
+    },
+    mapPodcastProgram(raw) {
+      return { id: raw.id, name: raw.name || '节目' };
+    },
+    getLoginInfo() {
+      return Promise.resolve({ loggedIn: false });
+    },
+    fetchMyPodcastItems() {
+      return Promise.resolve({ items: [] });
+    },
+    podcastCollectionMeta(key, items) {
+      return { key, count: items.length };
+    },
+    assertAllowedProxyTarget(value) {
+      if (!/^https:\/\//.test(String(value || ''))) throw new Error('INVALID');
+    },
+    analyzePodcastDjStream() {
+      return Promise.resolve({ beats: [] });
+    },
+    analyzePodcastDjIntro() {
+      return Promise.resolve({ beats: [] });
+    },
+    userAgent: 'UA',
+  });
+
+  assert.equal(await routes.handleRoute('/api/podcast/search', {}, {}, new URL('http://localhost/api/podcast/search?keywords=故事&limit=99')), true);
+  assert.deepEqual(calls[0], ['cloudsearch', '故事', 30, 1009]);
+  assert.deepEqual(writes[0].payload, { podcasts: [{ id: 1, name: '播客' }], total: 1 });
+  assert.equal(await routes.handleRoute('/api/podcast/my', {}, {}, new URL('http://localhost/api/podcast/my')), true);
+  assert.equal(writes[1].payload.loggedIn, false);
+  assert.equal(writes[1].payload.collections.length, 3);
+  assert.equal(await routes.handleRoute('/api/podcast/dj-beatmap', {}, {}, new URL('http://localhost/api/podcast/dj-beatmap?url=http://127.0.0.1/a')), true);
+  assert.deepEqual(writes[2].payload, { error: 'Invalid audio url' });
+  assert.equal(writes[2].status, 400);
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
 });
 
