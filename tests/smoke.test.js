@@ -11,7 +11,7 @@ test('maintenance baseline scripts are wired', () => {
 
   assert.equal(
     scripts.check,
-    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/update-preview-ui.js && node --check public/hotkeys-ui.js && node --check public/comment-barrage-state.js && node --check public/visual-cover-state.js'
+    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/update-preview-ui.js && node --check public/hotkeys-ui.js && node --check public/comment-barrage-state.js && node --check public/comment-barrage-3d.js && node --check public/shelf-aux-ui.js && node --check public/visual-cover-state.js'
   );
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
@@ -31,6 +31,8 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="update-preview-ui\.js"><\/script>/);
   assert.match(html, /<script src="hotkeys-ui\.js"><\/script>/);
   assert.match(html, /<script src="comment-barrage-state\.js"><\/script>/);
+  assert.match(html, /<script src="comment-barrage-3d\.js"><\/script>/);
+  assert.match(html, /<script src="shelf-aux-ui\.js"><\/script>/);
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
@@ -138,18 +140,25 @@ test('update preview and hotkey controllers are externalized', () => {
 
 test('comment barrage is rendered as Three.js floating text instead of DOM marquee', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const renderer = fs.readFileSync(path.join(repoRoot, 'public', 'comment-barrage-3d.js'), 'utf8');
 
-  assert.match(html, /var commentBarrage3D = \{/);
-  assert.match(html, /function buildCommentBarrageTextMesh\(/);
-  assert.match(html, /function commentBarrageVisualBasis\(/);
-  assert.match(html, /function commentBarrageLyricQuaternion\(/);
-  assert.match(html, /function updateCommentBarrage3D\(dt\)/);
+  assert.match(renderer, /window\.MineradioCommentBarrage3D/);
+  assert.match(renderer, /var commentBarrage3D = \{/);
+  assert.match(renderer, /function buildCommentBarrageTextMesh\(/);
+  assert.match(renderer, /function commentBarrageVisualBasis\(/);
+  assert.match(renderer, /function commentBarrageLyricQuaternion\(/);
+  assert.match(renderer, /function updateCommentBarrage3D\(dt\)/);
+  assert.match(html, /window\.MineradioCommentBarrage3D\.init/);
   assert.match(html, /shouldShowCommentBarrageSafe\(song\)/);
   assert.match(html, /updateCommentBarrage3D\(dt\);/);
-  assert.match(html, /stageLyrics\.group\.quaternion/);
+  assert.match(renderer, /stageLyrics\.group\.quaternion/);
   assert.match(html, /commentBarrageProfileWithFx\(/);
-  assert.match(html, /function applyCommentBarrageFxLive\(/);
-  assert.match(html, /function fitCommentBarrageMeshToViewport\(/);
+  assert.match(renderer, /function applyCommentBarrageFxLive\(/);
+  assert.match(renderer, /function fitCommentBarrageMeshToViewport\(/);
+  assert.doesNotMatch(html, /var commentBarrage3D = \{/);
+  assert.doesNotMatch(html, /function buildCommentBarrageTextMesh\(/);
+  assert.doesNotMatch(html, /function commentBarrageVisualBasis\(/);
+  assert.doesNotMatch(html, /function commentBarrageLyricQuaternion\(/);
   assert.doesNotMatch(html, /comment-barrage-user/);
   assert.doesNotMatch(html, /@keyframes comment-barrage-fly/);
   assert.doesNotMatch(html, /resetCommentBarrageForCurrentSong\('startup'\)/);
@@ -193,11 +202,13 @@ test('comment barrage DIY controls are wired into the visual panel', () => {
 
 test('comment barrage lifecycle uses fade opacity instead of hard cutoff', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const renderer = fs.readFileSync(path.join(repoRoot, 'public', 'comment-barrage-3d.js'), 'utf8');
 
   assert.match(html, /function commentBarrageOpacityAtSafe\(/);
-  assert.match(html, /commentBarrageOpacityAtSafe\([^)]*duration\)/);
-  assert.match(html, /data\.expired = true;/);
+  assert.match(renderer, /commentBarrageOpacityAtSafe\([^)]*duration\)/);
+  assert.match(renderer, /data\.expired = true;/);
   assert.doesNotMatch(html, /if \(age > duration\) \{\s*disposeCommentBarrageMesh\(mesh\);/s);
+  assert.doesNotMatch(renderer, /if \(age > duration\) \{\s*disposeCommentBarrageMesh\(mesh\);/s);
 });
 
 test('lyric style controls hot-swap the current mesh instead of replaying entry animation', () => {
@@ -387,13 +398,16 @@ test('shelf gap slider is wired into DIY controls', () => {
 
 test('record shelf no longer exposes top or locate shortcuts', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
-  const toolbarBlock = html.match(/var RECORD_TOOLBAR_LAYOUTS = \{[\s\S]*?\n  \};/);
+  const shelfAux = fs.readFileSync(path.join(repoRoot, 'public', 'shelf-aux-ui.js'), 'utf8');
+  const toolbarBlock = shelfAux.match(/var RECORD_TOOLBAR_LAYOUTS = \{[\s\S]*?\n  \};/);
 
   assert.doesNotMatch(html, /id="record-shelf-fab-actions"/);
   assert.doesNotMatch(html, /data-record-shelf-action="back"/);
   assert.doesNotMatch(html, /data-record-shelf-action="locate"/);
   assert.doesNotMatch(html, /data-record-shelf-action="top"/);
   assert.ok(toolbarBlock);
+  assert.match(shelfAux, /window\.MineradioShelfAuxUi/);
+  assert.match(html, /MineradioShelfAuxUi\.getRecordToolbarLayouts/);
   assert.match(toolbarBlock[0], /key: 'back'/);
   assert.doesNotMatch(toolbarBlock[0], /key: 'top'/);
   assert.doesNotMatch(toolbarBlock[0], /key: 'locate'/);
