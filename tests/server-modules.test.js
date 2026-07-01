@@ -39,6 +39,7 @@ const {
 const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('../server/routes/discover');
 const { createProxyRoutes } = require('../server/routes/proxy');
+const { createQQRoutes } = require('../server/routes/qq');
 const { createUpdateRoutes } = require('../server/routes/update');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
 
@@ -320,6 +321,80 @@ test('discover route module dispatches the home discovery endpoint', async () =>
     status: 200,
     payload: { loggedIn: true, dailySongs: [1], playlists: [2], podcasts: [3] },
   });
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('qq route module dispatches QQ music endpoints', async () => {
+  const writes = [];
+  const saved = [];
+  const calls = [];
+  const routes = createQQRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    readRequestBody(req) {
+      return Promise.resolve(req.body || {});
+    },
+    normalizeQQCookieInput(raw) {
+      return String(raw || '').trim();
+    },
+    parseCookieString(raw) {
+      return Object.fromEntries(String(raw || '').split(';').map(part => part.trim().split('=')));
+    },
+    qqCookieUin(obj) {
+      return obj.uin || '';
+    },
+    qqCookieMusicKey(obj) {
+      return obj.qm_keyst || '';
+    },
+    saveQQCookie(cookie) {
+      saved.push(cookie);
+    },
+    getQQLoginInfo() {
+      return Promise.resolve({ provider: 'qq', loggedIn: true, nickname: 'QQ' });
+    },
+    handleQQSearch(keywords, limit) {
+      calls.push(['search', keywords, limit]);
+      return Promise.resolve([{ id: 'qq-song' }]);
+    },
+    handleQQSongUrl(mid, mediaMid, quality) {
+      calls.push(['url', mid, mediaMid, quality]);
+      return Promise.resolve({ provider: 'qq', url: 'https://audio.example/song.m4a' });
+    },
+    handleQQLyric(mid, id) {
+      calls.push(['lyric', mid, id]);
+      return Promise.resolve({ provider: 'qq', lyric: 'la' });
+    },
+    handleQQUserPlaylists() {
+      return Promise.resolve({ provider: 'qq', playlists: [] });
+    },
+    handleQQPlaylistTracks(id) {
+      calls.push(['tracks', id]);
+      return Promise.resolve({ provider: 'qq', tracks: [] });
+    },
+    handleQQArtistDetail(mid, limit) {
+      calls.push(['artist', mid, limit]);
+      return Promise.resolve({ provider: 'qq', artist: { mid }, songs: [] });
+    },
+    parseSongCommentLimit(raw, fallback) {
+      return { limit: raw === 'all' ? 0 : fallback, unlimited: raw === 'all' };
+    },
+    handleQQSongComments(id, mid, limit, offset) {
+      calls.push(['comments', id, mid, limit, offset]);
+      return Promise.resolve({ provider: 'qq', comments: [] });
+    },
+  });
+
+  assert.equal(await routes.handleRoute('/api/qq/login/status', {}, {}, new URL('http://localhost/api/qq/login/status')), true);
+  assert.deepEqual(writes[0].payload, { provider: 'qq', loggedIn: true, nickname: 'QQ' });
+  assert.equal(await routes.handleRoute('/api/qq/search', {}, {}, new URL('http://localhost/api/qq/search?keywords=晴天&limit=99')), true);
+  assert.deepEqual(writes[1].payload, { provider: 'qq', songs: [{ id: 'qq-song' }] });
+  assert.deepEqual(calls[0], ['search', '晴天', 12]);
+  assert.equal(await routes.handleRoute('/api/qq/login/cookie', { body: { cookie: 'uin=123; qm_keyst=key' } }, {}, new URL('http://localhost/api/qq/login/cookie')), true);
+  assert.deepEqual(saved, ['uin=123; qm_keyst=key']);
+  assert.equal(writes[2].payload.saved, true);
+  assert.equal(await routes.handleRoute('/api/qq/song/comments', {}, {}, new URL('http://localhost/api/qq/song/comments?id=7&mid=m&limit=all&offset=4')), true);
+  assert.deepEqual(calls[calls.length - 1], ['comments', '7', 'm', 0, 4]);
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
 });
 
