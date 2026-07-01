@@ -38,6 +38,7 @@ const {
 } = require('../server/music/qq');
 const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('../server/routes/discover');
+const { createNeteaseRoutes } = require('../server/routes/netease');
 const { createPodcastRoutes } = require('../server/routes/podcast');
 const { createProxyRoutes } = require('../server/routes/proxy');
 const { createQQRoutes } = require('../server/routes/qq');
@@ -459,6 +460,84 @@ test('podcast route module dispatches podcast endpoints', async () => {
   assert.deepEqual(writes[2].payload, { error: 'Invalid audio url' });
   assert.equal(writes[2].status, 400);
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('netease route module dispatches core music endpoints', async () => {
+  const writes = [];
+  const saved = [];
+  const calls = [];
+  const routes = createNeteaseRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    readRequestBody(req) {
+      return Promise.resolve(req.body || {});
+    },
+    normalizeCookieHeader(raw) {
+      return String(raw || '').trim();
+    },
+    parseCookieString(raw) {
+      return Object.fromEntries(String(raw || '').split(';').map(part => part.trim().split('=')));
+    },
+    saveCookie(cookie) {
+      saved.push(cookie);
+    },
+    getUserCookie() {
+      return saved[saved.length - 1] || 'MUSIC_U=old';
+    },
+    getLoginInfo() {
+      return Promise.resolve({ loggedIn: true, userId: 7, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' });
+    },
+    handleSearch(keywords, limit) {
+      calls.push(['search', keywords, limit]);
+      return Promise.resolve([{ id: 1, name: '晴天' }]);
+    },
+    handleSongUrl(id, loginInfo, quality) {
+      calls.push(['songUrl', id, loginInfo.loggedIn, quality]);
+      return Promise.resolve({ id, url: 'https://audio.example/song.mp3' });
+    },
+    readCookieFromResponse() { return ''; },
+    normalizeLoginInfo(profile) { return { loggedIn: true, nickname: profile && profile.nickname || '' }; },
+    login_qr_key() { return Promise.resolve({ body: { data: { unikey: 'key' } } }); },
+    login_qr_create() { return Promise.resolve({ body: { data: { qrurl: 'qr' } } }); },
+    login_qr_check() { return Promise.resolve({ body: { code: 801 } }); },
+    logout() { return Promise.resolve({}); },
+    user_playlist() { return Promise.resolve({ body: { playlist: [] } }); },
+    requireLogin() { return Promise.resolve({ loggedIn: true, userId: 7 }); },
+    song_like_check() { return Promise.resolve({ body: { data: {} } }); },
+    likelist() { return Promise.resolve({ body: { ids: [] } }); },
+    like_song() { return Promise.resolve({ body: { code: 200 } }); },
+    playlist_create() { return Promise.resolve({ body: { playlist: { id: 9 } } }); },
+    playlist_tracks() { return Promise.resolve({ body: { code: 200 } }); },
+    playlist_track_add() { return Promise.resolve({ body: { code: 200 } }); },
+    lyric_new() { return Promise.resolve({ body: { lrc: { lyric: 'la' } } }); },
+    lyric() { return Promise.resolve({ body: { lrc: { lyric: 'fallback' } } }); },
+    comment_music() { return Promise.resolve({ body: { total: 0, comments: [] } }); },
+    parseSongCommentLimit() { return { limit: 20, unlimited: false }; },
+    mapNeteaseComment(raw) { return { id: raw.commentId, content: raw.content || '' }; },
+    pushUniqueSongComment(target, _seen, comment) { if (comment.content) target.push(comment); },
+    artist_detail() { return Promise.resolve({ body: { artist: { id: 1, name: '歌手' } } }); },
+    artist_songs() { return Promise.resolve({ body: { songs: [] } }); },
+    artist_top_song() { return Promise.resolve({ body: { songs: [] } }); },
+    mapSongRecord(raw) { return { id: raw.id, name: raw.name || '歌' }; },
+    playlist_track_all() { return Promise.resolve({ body: { songs: [] } }); },
+    playlist_detail() { return Promise.resolve({ body: { playlist: { id: 1, tracks: [] } } }); },
+    normalizeApiCode(payload) { return payload && payload.code || 200; },
+    normalizeApiMessage(payload) { return payload && payload.message || ''; },
+  });
+
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search?keywords=晴天&limit=2')), true);
+  assert.deepEqual(writes[0].payload, { songs: [{ id: 1, name: '晴天' }] });
+  assert.deepEqual(calls[0], ['search', '晴天', 2]);
+  assert.equal(await routes.handleRoute('/api/song/url', {}, {}, new URL('http://localhost/api/song/url?id=1&quality=lossless')), true);
+  assert.equal(writes[1].payload.loggedIn, true);
+  assert.deepEqual(calls[1], ['songUrl', '1', true, 'lossless']);
+  assert.equal(await routes.handleRoute('/api/login/cookie', { method: 'POST', body: { cookie: 'MUSIC_U=new' } }, {}, new URL('http://localhost/api/login/cookie')), true);
+  assert.deepEqual(saved, ['MUSIC_U=new']);
+  assert.equal(writes[2].payload.saved, true);
+  assert.equal(await routes.handleRoute('/api/lyric', {}, {}, new URL('http://localhost/api/lyric?id=1')), true);
+  assert.equal(writes[3].payload.lyric, 'la');
+  assert.equal(await routes.handleRoute('/api/qq/search', {}, {}, new URL('http://localhost/api/qq/search')), false);
 });
 
 test('music mapping helpers preserve renderer-facing response shape', () => {
