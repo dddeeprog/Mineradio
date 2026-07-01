@@ -38,6 +38,8 @@ test('home city switch uses its own glass editor while top chip opens weather de
 
   assert.match(html, /onclick="openHomeWeatherCityEditor\(event\)">切换城市<\/button>/);
   assert.match(html, /id="home-weather-city-pop"/);
+  assert.match(html, /class="home-weather-city-pop home-weather-city-modal"/);
+  assert.match(html, /class="home-weather-city-dialog"/);
   assert.match(html, /function openHomeWeatherCityEditor\(e\)/);
   assert.match(html, /function toggleWeatherDetailPopover\(e\)/);
   assert.match(html, /id="weather-detail-pop"/);
@@ -45,7 +47,9 @@ test('home city switch uses its own glass editor while top chip opens weather de
   assert.match(html, /id="home-weather-city-switch"/);
   assert.match(html, /function bindWeatherCityEditorControls\(\)/);
   assert.match(html, /homeBtn\.addEventListener\('click', openHomeWeatherCityEditor\);/);
+  assert.match(html, /if \(e\.target === pop\) closeHomeWeatherCityEditor\(\);/);
   assert.doesNotMatch(html, /weather-city-pop[\s\S]*<input id="weather-city-input"/);
+  assert.doesNotMatch(html, /\.home-weather-city-pop\{position:absolute;left:0;top:44px/);
   assert.doesNotMatch(html, /window\.prompt\(.*天气城市/s);
 });
 
@@ -60,9 +64,31 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(html, /function shouldRefreshHomeWeatherRadio\(/);
   assert.match(html, /document\.addEventListener\('visibilitychange'/);
   assert.match(html, /id="home-weather-forecast"/);
+  assert.match(html, /id="home-weather-curve"/);
+  assert.match(html, /id="home-weather-curve-gradient"/);
+  assert.match(html, /id="home-weather-curve-line-glow"/);
+  assert.match(html, /id="home-weather-selected-guide"/);
+  assert.match(html, /id="home-weather-selected-dot"/);
+  assert.match(html, /id="home-weather-hour-ticks"/);
+  assert.match(html, /id="home-weather-daily"/);
+  assert.match(html, /id="home-weather-metrics"/);
+  assert.match(html, /id="home-weather-alert"/);
+  assert.match(html, /class="home-weather-scene/);
   assert.match(html, /id="home-weather-advice"/);
+  assert.match(html, /function renderHomeWeatherCurve\(/);
+  assert.match(html, /function renderHomeWeatherMetrics\(/);
+  assert.match(html, /function bindHomeWeatherInteractions\(/);
   assert.match(html, /buildWeatherForecastFields/);
+  assert.match(html, /buildHourlyTemperatureCurve/);
+  assert.match(html, /buildWeatherMetrics/);
+  assert.match(html, /resolveInteractiveWeatherSelection/);
   assert.match(html, /buildWeatherAdvice/);
+  assert.doesNotMatch(html, /@keyframes home-weather-rain/);
+  assert.doesNotMatch(html, /\.weather-scene-rain::after/);
+  assert.doesNotMatch(html, /\.home-weather-scene::after/);
+  assert.doesNotMatch(html, /id="home-random-lyric"/);
+  assert.doesNotMatch(html, /home-lyric-card/);
+  assert.doesNotMatch(html, /Random Lyric/);
   assert.doesNotMatch(html, /if \(!emptyHomeActive\) return;\s*\n\s*loadHomeWeatherRadio\(false\);/);
 });
 

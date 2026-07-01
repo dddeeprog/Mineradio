@@ -157,9 +157,10 @@ function buildOpenMeteoForecastUrl(location) {
   const u = new URL(OPEN_METEO_FORECAST_URL);
   u.searchParams.set('latitude', String(location.latitude));
   u.searchParams.set('longitude', String(location.longitude));
-  u.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m');
+  u.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,surface_pressure');
   u.searchParams.set('hourly', 'precipitation_probability,weather_code,temperature_2m');
-  u.searchParams.set('forecast_days', '1');
+  u.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max');
+  u.searchParams.set('forecast_days', '5');
   u.searchParams.set('timezone', location.timezone || 'auto');
   return u.toString();
 }
@@ -201,6 +202,17 @@ function weatherHourLabel(time) {
   return '--:--';
 }
 
+function weatherDayLabel(date, index) {
+  if (index === 0) return '今天';
+  if (index === 1) return '明天';
+  const text = String(date || '');
+  const d = new Date(`${text}T00:00:00`);
+  if (!Number.isNaN(d.getTime())) {
+    return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+  }
+  return text.slice(5) || '未来';
+}
+
 function finiteOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -231,8 +243,40 @@ function normalizeOpenMeteoHourlyForecast(hourly, currentTime, limit = 12) {
   return rows;
 }
 
+function normalizeOpenMeteoDailyForecast(daily, limit = 5) {
+  const times = Array.isArray(daily && daily.time) ? daily.time : [];
+  const codes = Array.isArray(daily && daily.weather_code) ? daily.weather_code : [];
+  const maxTemps = Array.isArray(daily && daily.temperature_2m_max) ? daily.temperature_2m_max : [];
+  const minTemps = Array.isArray(daily && daily.temperature_2m_min) ? daily.temperature_2m_min : [];
+  const sunrises = Array.isArray(daily && daily.sunrise) ? daily.sunrise : [];
+  const sunsets = Array.isArray(daily && daily.sunset) ? daily.sunset : [];
+  const uvs = Array.isArray(daily && daily.uv_index_max) ? daily.uv_index_max : [];
+  const pops = Array.isArray(daily && daily.precipitation_probability_max) ? daily.precipitation_probability_max : [];
+  const rows = [];
+  for (let i = 0; i < times.length && rows.length < limit; i++) {
+    const date = String(times[i] || '');
+    if (!date) continue;
+    const weatherCode = finiteOrNull(codes[i]);
+    rows.push({
+      date,
+      dayLabel: weatherDayLabel(date, rows.length),
+      weatherCode,
+      label: weatherCode == null ? '天气' : openMeteoWeatherLabel(weatherCode),
+      temperatureMax: finiteOrNull(maxTemps[i]),
+      temperatureMin: finiteOrNull(minTemps[i]),
+      sunrise: sunrises[i] ? String(sunrises[i]) : '',
+      sunset: sunsets[i] ? String(sunsets[i]) : '',
+      uvIndexMax: finiteOrNull(uvs[i]),
+      precipitationProbabilityMax: finiteOrNull(pops[i]),
+    });
+  }
+  return rows;
+}
+
 function normalizeOpenMeteoWeather(body, location, date) {
   const cur = body && body.current || {};
+  const dailyForecast = normalizeOpenMeteoDailyForecast(body && body.daily, 5);
+  const today = dailyForecast[0] || {};
   const weather = {
     provider: 'open-meteo',
     location: {
@@ -253,9 +297,15 @@ function normalizeOpenMeteoWeather(body, location, date) {
     cloudCover: Number(cur.cloud_cover),
     windSpeed: Number(cur.wind_speed_10m),
     windGusts: Number(cur.wind_gusts_10m),
+    windDirection: finiteOrNull(cur.wind_direction_10m),
+    pressure: finiteOrNull(cur.surface_pressure),
     isDay: Number(cur.is_day),
     time: cur.time || '',
     hourlyForecast: normalizeOpenMeteoHourlyForecast(body && body.hourly, cur.time, 12),
+    dailyForecast,
+    sunrise: today.sunrise || '',
+    sunset: today.sunset || '',
+    uvIndexMax: today.uvIndexMax == null ? null : today.uvIndexMax,
     updatedAt: Date.now(),
   };
   weather.mood = buildWeatherMood(weather, date);
@@ -294,9 +344,15 @@ function fallbackWeatherForRadio(params, err) {
     cloudCover: null,
     windSpeed: null,
     windGusts: null,
+    windDirection: null,
+    pressure: null,
     isDay: null,
     time: '',
     hourlyForecast: [],
+    dailyForecast: [],
+    sunrise: '',
+    sunset: '',
+    uvIndexMax: null,
     updatedAt: Date.now(),
     error: err && err.message || '',
     mood: {

@@ -123,6 +123,239 @@
     ];
   }
 
+  function isRainCode(code) {
+    code = Number(code);
+    return [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].indexOf(code) >= 0;
+  }
+
+  function isSnowCode(code) {
+    code = Number(code);
+    return [71, 73, 75, 77, 85, 86].indexOf(code) >= 0;
+  }
+
+  function isFogCode(code) {
+    code = Number(code);
+    return code === 45 || code === 48;
+  }
+
+  function isCloudCode(code) {
+    code = Number(code);
+    return code === 1 || code === 2 || code === 3;
+  }
+
+  function weatherTimeLabel(value) {
+    var text = String(value || '');
+    var match = text.match(/T(\d{2}:\d{2})/);
+    if (match) return match[1];
+    return text || '--:--';
+  }
+
+  function windDirectionText(value) {
+    var n = finiteNumber(value);
+    if (!isFinite(n)) return '';
+    var dirs = ['北风', '东北风', '东风', '东南风', '南风', '西南风', '西风', '西北风'];
+    var idx = Math.round((((n % 360) + 360) % 360) / 45) % 8;
+    return dirs[idx];
+  }
+
+  function buildWeatherScene(weather) {
+    var code = finiteNumber(weather && weather.weatherCode);
+    var label = String(weather && weather.label || '');
+    var rainy = isRainCode(code) || /雨|雷/.test(label) || finiteNumber(weather && weather.precipitation) > 0;
+    var snowy = isSnowCode(code) || /雪/.test(label);
+    var foggy = isFogCode(code) || /雾/.test(label);
+    var cloudy = isCloudCode(code) || /云|阴/.test(label);
+    var daylight = weather && weather.isDay === 0 ? 'night' : 'day';
+    var base = rainy ? 'rain' : (snowy ? 'snow' : (foggy ? 'fog' : (cloudy ? 'cloud' : 'clear')));
+    return {
+      key: base + '-' + daylight,
+      base: base,
+      daylight: daylight,
+      className: 'home-weather-scene weather-scene-' + base + ' weather-scene-' + daylight,
+    };
+  }
+
+  function buildWeatherAlert(weather) {
+    if (!weather) return { title: '天气提醒', text: '天气正在刷新，先按常规出行准备。', tone: 'neutral' };
+    var label = String(weather.label || '');
+    var rain = finiteNumber(weather.precipitation);
+    var humidity = finiteNumber(weather.humidity);
+    var wind = Math.max(finiteNumber(weather.windSpeed), finiteNumber(weather.windGusts));
+    var uv = finiteNumber(weather.uvIndexMax);
+    var code = finiteNumber(weather.weatherCode);
+    if (isRainCode(code) || /雨|雷/.test(label) || rain > 0) {
+      return { title: '天气提醒', text: humidity >= 80 ? '湿度较高，请注意通风换气，保持室内干燥。' : '有降雨概率，出门记得带伞。', tone: 'rain' };
+    }
+    if (wind >= 28) return { title: '天气提醒', text: '风力偏强，轻薄外套和帽子要收好。', tone: 'wind' };
+    if (uv >= 6) return { title: '天气提醒', text: '紫外线偏强，外出注意防晒。', tone: 'uv' };
+    if (humidity >= 80) return { title: '天气提醒', text: '湿度偏高，适合开窗或除湿。', tone: 'humid' };
+    return { title: '天气提醒', text: '天气状态平稳，适合按原计划出门。', tone: 'calm' };
+  }
+
+  function metricItem(key, title, value, detail, icon) {
+    return {
+      key: key,
+      title: title,
+      value: value || '--',
+      detail: detail || '',
+      icon: icon || '',
+    };
+  }
+
+  function buildWeatherMetrics(weather, selectedDay) {
+    weather = weather || {};
+    var day = selectedDay && selectedDay.date ? selectedDay : null;
+    if (day) {
+      return [
+        metricItem('apparent', '高低温', roundedText(day.temperatureMin, '°', '--') + ' / ' + roundedText(day.temperatureMax, '°', '--'), day.label || '未来天气', 'thermo'),
+        metricItem('humidity', '降水', roundedText(day.precipitationProbabilityMax, '%', '--'), '当日最高降水概率', 'drop'),
+        metricItem('wind', '天气', day.label || '天气', day.dayLabel || day.date || '', 'wind'),
+        metricItem('uv', '紫外线', roundedText(day.uvIndexMax, ' 级', '--'), '当日最高 UV 指数', 'uv'),
+        metricItem('pressure', '日期', day.date ? day.date.slice(5) : '--', day.dayLabel || '未来', 'gauge'),
+        metricItem('sun', '日出日落', weatherTimeLabel(day.sunrise) + ' / ' + weatherTimeLabel(day.sunset), '白昼节奏', 'sun'),
+      ];
+    }
+    var windDir = windDirectionText(weather.windDirection);
+    var windSpeed = roundedText(weather.windSpeed, ' km/h', '--');
+    return [
+      metricItem('apparent', '体感', roundedText(weather.apparentTemperature, '°', '--'), '当前体感温度', 'thermo'),
+      metricItem('humidity', '湿度', roundedText(weather.humidity, '%', '--'), '空气含水量', 'drop'),
+      metricItem('wind', '风', (windDir ? windDir + ' ' : '') + windSpeed, isFinite(finiteNumber(weather.windGusts)) ? ('阵风 ' + roundedText(weather.windGusts, ' km/h', '--')) : '实时风速', 'wind'),
+      metricItem('uv', '紫外线', roundedText(weather.uvIndexMax, ' 级', '--'), '今日最高 UV', 'uv'),
+      metricItem('pressure', '气压', roundedText(weather.pressure, ' hPa', '--'), '近地面气压', 'gauge'),
+      metricItem('sun', '日出日落', weatherTimeLabel(weather.sunrise) + ' / ' + weatherTimeLabel(weather.sunset), '今天的光照节奏', 'sun'),
+    ];
+  }
+
+  function buildWeatherDailyFields(weather, options) {
+    options = options || {};
+    var limit = Number(options.limit);
+    if (!isFinite(limit) || limit <= 0) limit = 5;
+    var rows = Array.isArray(weather && weather.dailyForecast) ? weather.dailyForecast : [];
+    return rows.slice(0, limit).map(function(row, index) {
+      var date = String(row && row.date || '');
+      return {
+        date: date,
+        index: index,
+        dayLabel: row && row.dayLabel || (index === 0 ? '今天' : (index === 1 ? '明天' : (date.slice(5) || '未来'))),
+        label: row && row.label || '天气',
+        weatherCode: row && row.weatherCode,
+        highText: roundedText(row && row.temperatureMax, '°', '--'),
+        lowText: roundedText(row && row.temperatureMin, '°', '--'),
+        rangeText: roundedText(row && row.temperatureMin, '°', '--') + ' / ' + roundedText(row && row.temperatureMax, '°', '--'),
+        rainText: roundedText(row && row.precipitationProbabilityMax, '%', '--'),
+        uvText: roundedText(row && row.uvIndexMax, ' 级', '--'),
+        sunriseText: weatherTimeLabel(row && row.sunrise),
+        sunsetText: weatherTimeLabel(row && row.sunset),
+        temperatureMax: row && row.temperatureMax,
+        temperatureMin: row && row.temperatureMin,
+        precipitationProbabilityMax: row && row.precipitationProbabilityMax,
+        uvIndexMax: row && row.uvIndexMax,
+        sunrise: row && row.sunrise,
+        sunset: row && row.sunset,
+      };
+    });
+  }
+
+  function buildHourlyTemperatureCurve(weather, options) {
+    options = options || {};
+    var limit = Number(options.limit);
+    if (!isFinite(limit) || limit <= 0) limit = 6;
+    var rows = (Array.isArray(weather && weather.hourlyForecast) ? weather.hourlyForecast : []).slice(0, limit);
+    var temps = rows.map(function(row) { return finiteNumber(row && row.temperature); }).filter(function(n) { return isFinite(n); });
+    if (!rows.length || !temps.length) return { points: [], minTemperature: null, maxTemperature: null, path: '', smoothPath: '', areaPath: '', selectedPoint: null };
+    var min = Math.min.apply(Math, temps);
+    var max = Math.max.apply(Math, temps);
+    var span = Math.max(1, max - min);
+    var points = rows.map(function(row, index) {
+      var temp = finiteNumber(row && row.temperature);
+      if (!isFinite(temp)) temp = min;
+      var x = rows.length === 1 ? 50 : 8 + index * 84 / Math.max(1, rows.length - 1);
+      var y = max === min ? 46 : 74 - ((temp - min) / span) * 50;
+      return {
+        index: index,
+        x: Math.max(0, Math.min(100, Math.round(x * 100) / 100)),
+        y: Math.max(0, Math.min(100, Math.round(y * 100) / 100)),
+        time: row && row.time || '',
+        hourLabel: row && row.hourLabel || weatherTimeLabel(row && row.time),
+        temperatureText: roundedText(temp, '°', '--'),
+        rainText: roundedText(row && row.precipitationProbability, '%', '--'),
+        label: row && row.label || '天气',
+        raw: row || null,
+      };
+    });
+    function pointPath(list) {
+      return list.map(function(point, index) { return (index ? 'L' : 'M') + point.x + ' ' + point.y; }).join(' ');
+    }
+    function smoothPointPath(list) {
+      if (!list.length) return '';
+      if (list.length === 1) return 'M' + list[0].x + ' ' + list[0].y;
+      var d = 'M' + list[0].x + ' ' + list[0].y;
+      for (var i = 1; i < list.length; i++) {
+        var prev = list[i - 1];
+        var point = list[i];
+        var dx = (point.x - prev.x) * 0.46;
+        d += ' C' + (Math.round((prev.x + dx) * 100) / 100) + ' ' + prev.y +
+          ' ' + (Math.round((point.x - dx) * 100) / 100) + ' ' + point.y +
+          ' ' + point.x + ' ' + point.y;
+      }
+      return d;
+    }
+    var smoothPath = smoothPointPath(points);
+    var selectedIndex = Number(options.selectedIndex);
+    var selectedPoint = isFinite(selectedIndex) && selectedIndex >= 0 ? points[Math.round(selectedIndex)] || null : null;
+    return {
+      points: points,
+      minTemperature: min,
+      maxTemperature: max,
+      path: pointPath(points),
+      smoothPath: smoothPath,
+      areaPath: smoothPath ? (smoothPath + ' L' + points[points.length - 1].x + ' 92 L' + points[0].x + ' 92 Z') : '',
+      selectedPoint: selectedPoint,
+    };
+  }
+
+  function normalizeInteractiveWeatherSelection(state) {
+    state = state || {};
+    function nullableNumber(value) {
+      var n = Number(value);
+      return isFinite(n) && n >= 0 ? Math.round(n) : null;
+    }
+    return {
+      hoverHourIndex: nullableNumber(state.hoverHourIndex),
+      lockedHourIndex: nullableNumber(state.lockedHourIndex),
+      selectedDayIndex: nullableNumber(state.selectedDayIndex),
+      expandedMetricKey: state.expandedMetricKey ? String(state.expandedMetricKey) : null,
+    };
+  }
+
+  function resolveInteractiveWeatherSelection(state, action) {
+    var next = normalizeInteractiveWeatherSelection(state);
+    action = action || {};
+    var index = Number(action.index);
+    if (action.type === 'hoverHour') {
+      next.hoverHourIndex = isFinite(index) && index >= 0 ? Math.round(index) : null;
+    } else if (action.type === 'leaveHourly') {
+      next.hoverHourIndex = null;
+    } else if (action.type === 'clickHour') {
+      var hourIndex = isFinite(index) && index >= 0 ? Math.round(index) : null;
+      next.lockedHourIndex = next.lockedHourIndex === hourIndex ? null : hourIndex;
+      next.hoverHourIndex = null;
+      next.selectedDayIndex = null;
+    } else if (action.type === 'clickDay') {
+      var dayIndex = isFinite(index) && index >= 0 ? Math.round(index) : null;
+      next.selectedDayIndex = next.selectedDayIndex === dayIndex ? null : dayIndex;
+      next.lockedHourIndex = null;
+      next.hoverHourIndex = null;
+    } else if (action.type === 'clickMetric') {
+      var key = action.key ? String(action.key) : null;
+      next.expandedMetricKey = next.expandedMetricKey === key ? null : key;
+    } else if (action.type === 'reset') {
+      next = { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null };
+    }
+    return next;
+  }
+
   function normalizeLyricSnippet(text) {
     var value = String(text || '')
       .replace(/\[[^\]]+\]/g, '')
@@ -180,6 +413,12 @@
     buildWeatherAdvice: buildWeatherAdvice,
     buildWeatherCacheState: buildWeatherCacheState,
     buildWeatherForecastFields: buildWeatherForecastFields,
+    buildWeatherScene: buildWeatherScene,
+    buildWeatherAlert: buildWeatherAlert,
+    buildWeatherMetrics: buildWeatherMetrics,
+    buildWeatherDailyFields: buildWeatherDailyFields,
+    buildHourlyTemperatureCurve: buildHourlyTemperatureCurve,
+    resolveInteractiveWeatherSelection: resolveInteractiveWeatherSelection,
     collectLyricSnippets: collectLyricSnippets,
     selectRotatingLyric: selectRotatingLyric,
   };

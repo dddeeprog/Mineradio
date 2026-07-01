@@ -80,7 +80,11 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   const forecastUrl = buildOpenMeteoForecastUrl({ latitude: 31.2, longitude: 121.5, timezone: 'Asia/Shanghai' });
   assert.match(forecastUrl, /latitude=31\.2/);
   assert.match(forecastUrl, /current=temperature_2m/);
+  assert.match(forecastUrl, /surface_pressure/);
+  assert.match(forecastUrl, /wind_direction_10m/);
   assert.match(forecastUrl, /hourly=precipitation_probability/);
+  assert.match(forecastUrl, /daily=weather_code/);
+  assert.match(forecastUrl, /forecast_days=5/);
 
   const weather = normalizeOpenMeteoWeather({
     timezone: 'Asia/Shanghai',
@@ -92,6 +96,8 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
       precipitation: 1.2,
       cloud_cover: 90,
       wind_speed_10m: 12,
+      wind_direction_10m: 42,
+      surface_pressure: 1007.4,
       is_day: 1,
       time: '2026-06-28T09:00',
     },
@@ -101,13 +107,40 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
       temperature_2m: [17.8, 18.2, 20.3, 21.1],
       precipitation_probability: [10, 65, 5, 0],
     },
+    daily: {
+      time: ['2026-06-28', '2026-06-29'],
+      weather_code: [61, 0],
+      temperature_2m_max: [24.5, 29.2],
+      temperature_2m_min: [16.4, 20.1],
+      sunrise: ['2026-06-28T05:24', '2026-06-29T05:25'],
+      sunset: ['2026-06-28T19:29', '2026-06-29T19:29'],
+      uv_index_max: [2.4, 6.2],
+      precipitation_probability_max: [81, 10],
+    },
   }, { name: '上海', country: 'China', latitude: 31.2, longitude: 121.5, timezone: 'Asia/Shanghai' }, new Date('2026-06-28T09:00:00+08:00'));
 
   assert.equal(weather.label, '雨');
+  assert.equal(weather.pressure, 1007.4);
+  assert.equal(weather.windDirection, 42);
   assert.deepEqual(weather.hourlyForecast.slice(0, 2), [
     { time: '2026-06-28T09:00', hourLabel: '09:00', temperature: 18.2, precipitationProbability: 65, weatherCode: 61, label: '雨' },
     { time: '2026-06-28T10:00', hourLabel: '10:00', temperature: 20.3, precipitationProbability: 5, weatherCode: 0, label: '晴' },
   ]);
+  assert.deepEqual(weather.dailyForecast[0], {
+    date: '2026-06-28',
+    dayLabel: '今天',
+    weatherCode: 61,
+    label: '雨',
+    temperatureMax: 24.5,
+    temperatureMin: 16.4,
+    sunrise: '2026-06-28T05:24',
+    sunset: '2026-06-28T19:29',
+    uvIndexMax: 2.4,
+    precipitationProbabilityMax: 81,
+  });
+  assert.equal(weather.sunrise, '2026-06-28T05:24');
+  assert.equal(weather.sunset, '2026-06-28T19:29');
+  assert.equal(weather.uvIndexMax, 2.4);
   assert.equal(weather.hourlyForecast[2].label, '天气');
   assert.equal(weather.mood.key, 'rain');
   assert.equal(buildWeatherMood({ weatherCode: 0, temperature: 22, isDay: 0 }, new Date('2026-06-28T22:00:00')).key, 'clear-night');

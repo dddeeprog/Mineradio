@@ -257,6 +257,13 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-hero-inner{position:relative;z-index:2;height:100%;display:grid;grid-template-columns:minmax(0,1.16fr) minmax(150px,.64fr);grid-template-rows:auto auto auto auto minmax(150px,1fr);column-gap:18px}
 .home-hero-inner.home-construction-inner{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:18px;padding:4px 2px;min-height:100%}
 .home-weather-hero-inner{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto auto auto minmax(118px,1fr);align-content:start;row-gap:0}
+.home-weather-scene{position:absolute;inset:-1px;z-index:1;pointer-events:none;overflow:hidden;--wx:0px;--wy:0px}
+.home-weather-hero-inner > :not(.home-weather-scene){position:relative;z-index:2}
+.home-weather-scene::before{content:'';position:absolute;inset:-12%;background:radial-gradient(circle at calc(18% + var(--wx)) calc(10% + var(--wy)),rgba(255,255,255,.11),transparent 34%),radial-gradient(circle at calc(86% - var(--wx)) calc(8% - var(--wy)),color-mix(in srgb,var(--home-accent) 12%,transparent),transparent 36%);opacity:.42;transition:opacity .24s}
+.weather-scene-rain::before,.weather-scene-cloud::before,.weather-scene-fog::before{background:radial-gradient(ellipse at calc(22% + var(--wx)) calc(12% + var(--wy)),rgba(255,255,255,.10),transparent 34%),radial-gradient(ellipse at calc(80% - var(--wx)) calc(18% - var(--wy)),color-mix(in srgb,var(--home-accent) 10%,rgba(180,206,224,.08)),transparent 38%);filter:blur(8px);opacity:.38}
+.weather-scene-clear::before{background:radial-gradient(circle at calc(80% - var(--wx)) calc(12% + var(--wy)),rgba(255,221,148,.11),transparent 32%),radial-gradient(circle at calc(20% + var(--wx)) calc(10% - var(--wy)),color-mix(in srgb,var(--home-accent) 9%,transparent),transparent 38%);opacity:.34}
+.weather-scene-night{background:linear-gradient(180deg,rgba(12,16,24,.18),rgba(4,7,12,.12))}
+.weather-scene-night::before{opacity:.30}
 .home-kicker{grid-column:1;font-size:10px;font-weight:780;letter-spacing:.18em;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.36));text-transform:uppercase;margin-bottom:14px}
 .home-title{grid-column:1;font-size:clamp(34px,4.6vw,58px);line-height:.98;font-weight:760;letter-spacing:0;color:rgba(255,255,255,.98);max-width:380px;text-shadow:0 10px 36px rgba(0,0,0,.26)}
 .home-title.home-construction-title{max-width:620px;font-size:clamp(32px,4.5vw,64px);line-height:1.08}
@@ -268,18 +275,47 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-sub{grid-column:1;margin-top:14px;font-size:13px;line-height:1.62;color:rgba(255,255,255,.62);max-width:348px}
 .home-weather-meta{grid-column:1;display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .home-weather-pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.050);display:inline-flex;align-items:center;color:rgba(255,255,255,.70);font-size:11px;font-weight:680}
-.home-lyric-card{grid-column:1;margin-top:24px;padding:18px 18px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.075);background:linear-gradient(145deg,rgba(255,255,255,.072),rgba(255,255,255,.026));box-shadow:inset 0 1px 0 rgba(255,255,255,.065),0 18px 44px rgba(0,0,0,.18);min-height:108px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
-.home-lyric-label{font-size:10px;font-weight:780;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 60%,rgba(255,255,255,.42));margin-bottom:10px}
-.home-lyric-line{font-size:clamp(20px,2.5vw,34px);line-height:1.22;font-weight:760;color:rgba(255,255,255,.94);letter-spacing:0;text-shadow:0 16px 46px rgba(0,0,0,.30);transition:opacity .26s ease,transform .26s ease}
-.home-lyric-line.switching{opacity:0;transform:translateY(6px)}
-.home-weather-note{margin-top:12px;font-size:12px;line-height:1.55;color:rgba(255,255,255,.50);max-width:420px}
-.home-weather-forecast{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin-top:16px}
-.home-weather-hour{min-width:0;border-radius:12px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);padding:8px 6px;text-align:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-.home-weather-hour-time{font-size:10px;font-weight:760;color:rgba(255,255,255,.48)}
-.home-weather-hour-temp{margin-top:4px;font-size:15px;font-weight:820;color:rgba(255,255,255,.92)}
-.home-weather-hour-rain{margin-top:2px;font-size:10px;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.50));white-space:nowrap}
-.home-weather-hour-label{margin-top:3px;font-size:10px;color:rgba(255,255,255,.54);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.home-weather-advice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.home-weather-alert{margin-top:12px;min-height:34px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.062);display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.76);font-size:11.5px;font-weight:680;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.home-weather-alert::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--home-accent);box-shadow:0 0 14px color-mix(in srgb,var(--home-accent) 60%,transparent);flex-shrink:0}
+.home-weather-dashboard{grid-column:1;margin-top:16px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.home-weather-curve-card,.home-weather-metrics,.home-weather-daily,.home-weather-advice{border-radius:18px;border:1px solid rgba(255,255,255,.075);background:linear-gradient(145deg,rgba(255,255,255,.072),rgba(255,255,255,.026));box-shadow:inset 0 1px 0 rgba(255,255,255,.065),0 18px 44px rgba(0,0,0,.16)}
+.home-weather-curve-card{position:relative;padding:12px 12px 10px;overflow:hidden}
+.home-weather-curve-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:5px}
+.home-weather-curve-title{font-size:11px;font-weight:820;letter-spacing:.10em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.44))}
+.home-weather-curve-preview{font-size:12px;color:rgba(255,255,255,.78);text-align:right;line-height:1.35;min-height:30px}
+.home-weather-now-btn{height:24px;padding:0 9px;border:1px solid rgba(255,255,255,.10);border-radius:999px;background:rgba(255,255,255,.055);color:rgba(255,255,255,.70);font-family:inherit;font-size:10.5px;font-weight:760;cursor:pointer}
+.home-weather-now-btn:hover{color:#fff;border-color:color-mix(in srgb,var(--home-accent) 36%,rgba(255,255,255,.12))}
+.home-weather-curve-wrap{position:relative;height:118px}
+.home-weather-curve-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.home-weather-curve-grid{stroke:rgba(255,255,255,.075);stroke-width:1;stroke-dasharray:2 8}
+.home-weather-curve-line{fill:none;stroke:var(--home-accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--home-accent) 28%,transparent))}
+.home-weather-curve-line-glow{fill:none;stroke:color-mix(in srgb,var(--home-accent) 42%,rgba(255,255,255,.18));stroke-width:8;stroke-linecap:round;stroke-linejoin:round;opacity:.18;filter:blur(1px)}
+.home-weather-curve-area{fill:url(#home-weather-curve-gradient);opacity:.86}
+.home-weather-selected-guide{stroke:rgba(255,255,255,.20);stroke-width:1;stroke-dasharray:3 5;opacity:0;transition:opacity .16s}
+.home-weather-selected-dot{fill:#fff;stroke:var(--home-accent);stroke-width:2;opacity:0;filter:drop-shadow(0 0 12px color-mix(in srgb,var(--home-accent) 55%,transparent));transition:opacity .16s}
+.home-weather-forecast{position:absolute;left:0;right:0;bottom:0;display:block}
+.home-weather-hour-ticks{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
+.home-weather-hour{min-width:0;height:36px;border:1px solid rgba(255,255,255,.065);border-radius:12px;background:rgba(255,255,255,.038);color:rgba(255,255,255,.64);font-family:inherit;text-align:center;cursor:pointer;padding:4px 3px;transition:background .16s,border-color .16s,color .16s,transform .16s}
+.home-weather-hour:hover,.home-weather-hour.active{background:color-mix(in srgb,var(--home-accent) 10%,rgba(255,255,255,.055));border-color:color-mix(in srgb,var(--home-accent) 34%,rgba(255,255,255,.11));color:#fff;transform:translateY(-1px)}
+.home-weather-hour-dot{display:none}
+.home-weather-hour-time{display:block;font-size:9.5px;font-weight:760;color:rgba(255,255,255,.52);line-height:1.1}
+.home-weather-hour-temp{display:block;margin-top:3px;font-size:12px;font-weight:840;color:rgba(255,255,255,.92);line-height:1.1}
+.home-weather-hour-rain,.home-weather-hour-label{display:none}
+.home-weather-daily{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;padding:8px}
+.home-weather-day{min-width:0;border:0;border-radius:13px;background:transparent;color:rgba(255,255,255,.70);font-family:inherit;padding:8px 4px;cursor:pointer;text-align:center}
+.home-weather-day.active,.home-weather-day:hover{background:rgba(255,255,255,.075);color:#fff}
+.home-weather-day-date{font-size:10px;color:rgba(255,255,255,.42)}
+.home-weather-day-name{font-size:12px;font-weight:820;margin-top:3px}
+.home-weather-day-rain{font-size:10px;color:color-mix(in srgb,var(--home-accent) 64%,rgba(255,255,255,.55));margin-top:4px}
+.home-weather-day-range{font-size:11px;font-weight:760;margin-top:5px;color:rgba(255,255,255,.82)}
+.home-weather-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:8px;background:transparent;border:0;box-shadow:none}
+.home-weather-metric{min-width:0;min-height:74px;border:1px solid rgba(255,255,255,.075);border-radius:16px;background:linear-gradient(145deg,rgba(255,255,255,.070),rgba(255,255,255,.024));padding:10px;text-align:left;color:rgba(255,255,255,.75);font-family:inherit;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.055)}
+.home-weather-metric:hover,.home-weather-metric.active{border-color:color-mix(in srgb,var(--home-accent) 34%,rgba(255,255,255,.10));background:color-mix(in srgb,var(--home-accent) 8%,rgba(255,255,255,.045));color:#fff}
+.home-weather-metric-title{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.48)}
+.home-weather-metric-value{margin-top:8px;font-size:18px;line-height:1.05;font-weight:840;color:rgba(255,255,255,.96);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-weather-metric-detail{margin-top:6px;font-size:10.5px;line-height:1.25;color:rgba(255,255,255,.50);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.home-weather-metric.active .home-weather-metric-detail{-webkit-line-clamp:3;color:rgba(255,255,255,.72)}
+.home-weather-advice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:8px;background:transparent;border:0;box-shadow:none}
 .home-weather-advice-card{min-width:0;border-radius:13px;border:1px solid rgba(255,255,255,.075);background:linear-gradient(145deg,rgba(255,255,255,.060),rgba(255,255,255,.024));padding:9px 10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.055)}
 .home-weather-advice-title{font-size:10px;font-weight:820;letter-spacing:.10em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.44));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .home-weather-advice-text{margin-top:5px;font-size:11px;line-height:1.35;color:rgba(255,255,255,.64);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -289,9 +325,11 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-quick-row .home-chip{height:36px;background:var(--saved-button-glass-bg);border-color:transparent;box-shadow:var(--saved-button-glass-shadow);backdrop-filter:var(--saved-button-glass-filter);-webkit-backdrop-filter:var(--saved-button-glass-filter)}
 .home-quick-row .home-chip:hover{background:var(--saved-button-glass-hover-bg);box-shadow:var(--saved-button-glass-hover-shadow);border-color:transparent}
 .home-console-chip{height:36px;border-color:color-mix(in srgb,var(--home-accent) 34%,rgba(255,255,255,.12));background:color-mix(in srgb,var(--home-accent) 12%,rgba(255,255,255,.055));color:#fff}
-.home-weather-city-editor-wrap{position:relative;display:inline-flex}
-.home-weather-city-pop{position:absolute;left:0;top:44px;width:248px;padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:var(--saved-panel-glass-bg);box-shadow:var(--saved-panel-glass-shadow);backdrop-filter:var(--saved-panel-glass-filter);-webkit-backdrop-filter:var(--saved-panel-glass-filter);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-6px) scale(.98);transition:opacity .18s,visibility .18s,transform .18s}
-.home-weather-city-editor-wrap.open .home-weather-city-pop{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0) scale(1)}
+.home-weather-city-editor-wrap{display:inline-flex}
+.home-weather-city-modal{position:fixed;inset:0;z-index:430;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.26);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s,visibility .18s}
+.home-weather-city-dialog{width:min(320px,calc(100vw - 40px));padding:16px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:var(--saved-panel-glass-bg);box-shadow:var(--saved-panel-glass-shadow);backdrop-filter:var(--saved-panel-glass-filter);-webkit-backdrop-filter:var(--saved-panel-glass-filter);transform:translateY(8px) scale(.98);transition:transform .18s}
+.home-weather-city-editor-wrap.open .home-weather-city-pop{opacity:1;visibility:visible;pointer-events:auto}
+.home-weather-city-editor-wrap.open .home-weather-city-dialog{transform:translateY(0) scale(1)}
 .home-weather-city-pop input{width:100%;height:36px;border-radius:12px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);color:rgba(255,255,255,.92);font-family:inherit;font-size:13px;padding:0 11px;outline:none}
 .home-weather-city-pop input:focus{border-color:color-mix(in srgb,var(--home-accent) 42%,rgba(255,255,255,.14));background:rgba(255,255,255,.075)}
 .home-visual{grid-column:2;grid-row:2 / span 2;position:relative;align-self:center;justify-self:end;width:100%;max-width:300px;height:74px;margin-top:0;pointer-events:none;filter:drop-shadow(0 18px 34px rgba(0,0,0,.28))}
@@ -362,6 +400,7 @@ body.empty-home-active .home-visual{animation:home-visual-drift 8.8s ease-in-out
 @keyframes home-shimmer{100%{transform:translateX(100%)}}
 @media (max-width:1120px){#empty-home{width:calc(100vw - 48px)}.empty-home-shell{grid-template-columns:minmax(300px,.88fr) minmax(440px,1.12fr);gap:12px}.home-hero{padding:24px}.home-hero-inner{grid-template-columns:minmax(0,1.16fr) minmax(128px,.52fr);column-gap:14px}.home-title{font-size:clamp(30px,4vw,48px);max-width:340px}.home-sub{font-size:12.5px;line-height:1.5;max-width:314px}.home-visual{height:198px;max-width:236px}.home-mosaic{height:142px;min-height:126px;margin-top:14px}.home-grid{gap:10px}.home-card{min-height:126px;padding:14px;border-radius:20px}.home-card-label{margin-bottom:6px}.home-card-title{font-size:16.5px;max-width:66%}.home-card-sub{margin-top:6px;font-size:10.8px;line-height:1.34;max-width:64%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.home-card-art{right:11px;bottom:11px;width:80px;height:80px;border-radius:18px}.home-card-art:not(.has-cover)::before{inset:14px;box-shadow:inset 0 0 0 11px rgba(5,5,8,.44),0 10px 24px rgba(0,0,0,.24)}.home-card::after{right:88px;bottom:14px;width:30px;height:56px}.home-rail{gap:8px}.home-tile{min-height:128px}.home-tile-cover{height:66px}}
 @media (max-height:760px){#empty-home{top:132px;bottom:44px}.empty-home-shell{min-height:0}.home-hero{min-height:0;padding:22px}.home-hero-inner{grid-template-columns:minmax(0,1.22fr) minmax(136px,.54fr);column-gap:14px}.home-title{font-size:clamp(31px,3.75vw,48px);max-width:360px}.home-sub{font-size:12.5px;line-height:1.55;max-width:330px}.home-quick-row{margin-top:16px}.home-visual{height:206px;max-width:246px}.home-mosaic{height:132px;min-height:120px;margin-top:14px}.home-card{min-height:134px;padding:14px}.home-card-title{font-size:17px}.home-card-art{width:92px;height:92px;border-radius:21px}.home-tile{min-height:132px}.home-tile-cover{height:72px}}
+@media (max-height:760px){.home-weather-dashboard{gap:8px}.home-weather-curve-wrap{height:96px}.home-weather-daily{padding:6px}.home-weather-day{padding:6px 3px}.home-weather-metrics{gap:6px;padding:6px}.home-weather-metric{min-height:58px;padding:8px}.home-weather-metric-value{font-size:14px}.home-weather-metric-detail{-webkit-line-clamp:1}.home-weather-advice{display:none}}
 @media (max-height:700px){#empty-home{top:126px;bottom:34px}.home-hero{padding:20px}.home-title{font-size:clamp(28px,3.55vw,42px)}.home-sub{font-size:12px;line-height:1.42}.home-weather-meta{margin-top:12px}.home-quick-row{margin-top:12px}.home-visual{height:174px;max-width:216px}.home-mosaic{height:112px;min-height:104px}.home-card{min-height:112px;padding:12px}.home-card-title{font-size:15.5px}.home-card-sub{font-size:10.5px;line-height:1.28;-webkit-line-clamp:2}.home-card-art{width:70px;height:70px;border-radius:16px}.home-card::after{right:78px;height:48px}.home-tile{min-height:112px;padding:9px}.home-tile-cover{height:54px;margin-bottom:8px}.home-section-head{min-height:30px}}
 @media (max-width:840px){.empty-home-shell{grid-template-columns:minmax(250px,.86fr) minmax(360px,1.14fr)}.home-hero-inner{grid-template-columns:minmax(0,1fr)}.home-visual{display:none}.home-mosaic{height:124px;min-height:108px}.home-card{min-height:108px}.home-card-title{font-size:15px;max-width:68%}.home-card-sub{font-size:10.3px;max-width:62%}.home-card-art{width:66px;height:66px;border-radius:15px}.home-card::after{right:72px;width:24px;height:44px}.home-tile-title{font-size:11.5px}}
 @media (max-width:760px){#empty-home{top:150px;bottom:56px;width:calc(100vw - 40px)}.empty-home-shell{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;overflow:auto;padding-bottom:4px}.home-hero{grid-row:auto;min-height:344px}.home-mosaic{height:172px;min-height:150px}.home-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.home-tile-row{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -1991,30 +2030,61 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   <div class="empty-home-shell">
     <div class="home-hero">
       <div class="home-hero-inner home-weather-hero-inner">
-        <div class="home-kicker" id="home-weather-kicker">Weather · Lyric Drift</div>
+        <div id="home-weather-scene" class="home-weather-scene weather-scene-clear weather-scene-day" aria-hidden="true"></div>
+        <div class="home-kicker" id="home-weather-kicker">Weather Console</div>
         <div class="home-title home-weather-title"><span id="home-weather-temp">--</span><span class="home-weather-degree">°</span></div>
         <div class="home-weather-place">
           <span class="home-weather-city" id="home-weather-city">上海</span>
           <span class="home-weather-label" id="home-weather-label">正在整理天气</span>
         </div>
         <div class="home-weather-meta" id="home-weather-meta"></div>
-        <div class="home-lyric-card">
-          <div class="home-lyric-label">Random Lyric</div>
-          <div class="home-lyric-line" id="home-random-lyric">天气加载的时候，先听一口空气。</div>
-          <div class="home-weather-note" id="home-weather-note">让今天的天气替你挑一段旋律。</div>
-          <div class="home-weather-forecast" id="home-weather-forecast"></div>
+        <div class="home-weather-alert" id="home-weather-alert">天气正在整理，先按常规出行准备。</div>
+        <div class="home-weather-dashboard">
+          <div class="home-weather-curve-card">
+            <div class="home-weather-curve-head">
+              <div>
+                <div class="home-weather-curve-title">Hourly Curve</div>
+                <button id="home-weather-now-btn" class="home-weather-now-btn" type="button">现在</button>
+              </div>
+              <div class="home-weather-curve-preview" id="home-weather-hour-preview">等待小时预报</div>
+            </div>
+            <div class="home-weather-curve-wrap" id="home-weather-curve">
+              <svg class="home-weather-curve-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="home-weather-curve-gradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--home-accent)" stop-opacity="0.30"></stop>
+                    <stop offset="70%" stop-color="var(--home-accent)" stop-opacity="0.08"></stop>
+                    <stop offset="100%" stop-color="var(--home-accent)" stop-opacity="0"></stop>
+                  </linearGradient>
+                </defs>
+                <line class="home-weather-curve-grid" x1="0" y1="82" x2="100" y2="82"></line>
+                <path id="home-weather-curve-area" class="home-weather-curve-area" d=""></path>
+                <path id="home-weather-curve-line-glow" class="home-weather-curve-line-glow" d=""></path>
+                <path id="home-weather-curve-line" class="home-weather-curve-line" d=""></path>
+                <line id="home-weather-selected-guide" class="home-weather-selected-guide" x1="0" y1="18" x2="0" y2="86"></line>
+                <circle id="home-weather-selected-dot" class="home-weather-selected-dot" cx="0" cy="0" r="2.5"></circle>
+              </svg>
+              <div class="home-weather-forecast" id="home-weather-forecast">
+                <div class="home-weather-hour-ticks" id="home-weather-hour-ticks"></div>
+              </div>
+            </div>
+          </div>
+          <div class="home-weather-daily" id="home-weather-daily"></div>
+          <div class="home-weather-metrics" id="home-weather-metrics"></div>
           <div class="home-weather-advice" id="home-weather-advice"></div>
         </div>
         <div class="home-quick-row">
           <button class="home-chip home-console-chip" type="button" data-home-radio-start>天气电台</button>
           <span id="home-weather-city-editor-wrap" class="home-weather-city-editor-wrap">
             <button id="home-weather-city-switch" class="home-chip" type="button" onclick="openHomeWeatherCityEditor(event)">切换城市</button>
-            <div id="home-weather-city-pop" class="home-weather-city-pop" onclick="event.stopPropagation()">
-              <input id="home-weather-city-input" type="text" value="上海" placeholder="输入城市名">
-              <div class="weather-city-actions">
-                <button id="home-weather-city-submit-btn" type="button">确定</button>
-                <button id="home-weather-city-locate-btn" type="button">定位</button>
-                <button id="home-weather-city-cancel-btn" type="button">取消</button>
+            <div id="home-weather-city-pop" class="home-weather-city-pop home-weather-city-modal">
+              <div class="home-weather-city-dialog" onclick="event.stopPropagation()">
+                <input id="home-weather-city-input" type="text" value="上海" placeholder="输入城市名">
+                <div class="weather-city-actions">
+                  <button id="home-weather-city-submit-btn" type="button">确定</button>
+                  <button id="home-weather-city-locate-btn" type="button">定位</button>
+                  <button id="home-weather-city-cancel-btn" type="button">取消</button>
+                </div>
               </div>
             </div>
           </span>
@@ -2894,8 +2964,8 @@ var homeWeatherLoadTimer = null;
 var homeWeatherLoadTimerDueAt = 0;
 var homeWeatherLoadPromise = null;
 var weatherRadioStartBusy = false;
-var homeLyricRotateTimer = null;
-var homeCurrentLyricSnippet = '';
+var homeWeatherSelection = { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null };
+var homeWeatherInteractionsBound = false;
 var COMMENT_BARRAGE_STORE_KEY = 'mineradio-comment-barrage-enabled-v1';
 var COMMENT_BARRAGE_FETCH_LIMIT = 0;
 var commentBarrageEnabled = normalizeCommentBarrageEnabledSafe(localStorage.getItem(COMMENT_BARRAGE_STORE_KEY));
@@ -17414,42 +17484,52 @@ function shouldRefreshHomeWeatherRadio(force, opts) {
   var cacheState = buildHomeWeatherCacheStateSafe({ updatedAt: homeWeatherRadioState.updatedAt });
   return !cacheState.fresh;
 }
-function collectHomeLyricSnippets() {
+function buildHomeWeatherSceneSafe() {
   var api = homeWeatherHeroStateApi();
-  if (api && typeof api.collectLyricSnippets === 'function') {
-    return api.collectLyricSnippets({
-      currentLines: lyricsLines,
-      customLyricMap: customLyricMap,
-      maxLength: 34,
-    });
-  }
+  if (api && typeof api.buildWeatherScene === 'function') return api.buildWeatherScene(homeWeatherRadioState.weather);
+  return { key: 'clear-day', base: 'clear', daylight: 'day', className: 'home-weather-scene weather-scene-clear weather-scene-day' };
+}
+function buildHomeWeatherAlertSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherAlert === 'function') return api.buildWeatherAlert(homeWeatherRadioState.weather);
+  return { title: '天气提醒', text: '天气正在整理，先按常规出行准备。', tone: 'neutral' };
+}
+function buildHomeWeatherDailyFieldsSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherDailyFields === 'function') return api.buildWeatherDailyFields(homeWeatherRadioState.weather, { limit: 5 });
   return [];
 }
-function chooseHomeLyricSnippet(fallbackText) {
-  var snippets = collectHomeLyricSnippets();
-  if (!snippets.length && fallbackText) snippets = [fallbackText];
+function buildHomeWeatherCurveSafe() {
   var api = homeWeatherHeroStateApi();
-  if (api && typeof api.selectRotatingLyric === 'function') {
-    return api.selectRotatingLyric(snippets, homeCurrentLyricSnippet);
-  }
-  return snippets[0] || '';
+  var selectedIndex = homeWeatherSelection && homeWeatherSelection.lockedHourIndex != null ? homeWeatherSelection.lockedHourIndex : homeWeatherSelection && homeWeatherSelection.hoverHourIndex;
+  if (api && typeof api.buildHourlyTemperatureCurve === 'function') return api.buildHourlyTemperatureCurve(homeWeatherRadioState.weather, { limit: 6, selectedIndex: selectedIndex });
+  return { points: [], minTemperature: null, maxTemperature: null, path: '', smoothPath: '', areaPath: '', selectedPoint: null };
 }
-function setHomeRandomLyric(text, animate) {
-  var el = document.getElementById('home-random-lyric');
-  if (!el) return;
-  text = String(text || '').trim() || '天气加载的时候，先听一口空气。';
-  if (text === homeCurrentLyricSnippet && el.textContent) return;
-  homeCurrentLyricSnippet = text;
-  if (!animate) {
-    el.textContent = text;
-    el.classList.remove('switching');
-    return;
+function buildHomeWeatherMetricsSafe(selectedDay) {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherMetrics === 'function') return api.buildWeatherMetrics(homeWeatherRadioState.weather, selectedDay);
+  return [];
+}
+function resolveHomeWeatherSelection(action) {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.resolveInteractiveWeatherSelection === 'function') {
+    homeWeatherSelection = api.resolveInteractiveWeatherSelection(homeWeatherSelection, action || {});
+  } else if (action && action.type === 'reset') {
+    homeWeatherSelection = { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null };
   }
-  el.classList.add('switching');
-  setTimeout(function(){
-    el.textContent = text;
-    el.classList.remove('switching');
-  }, 180);
+  return homeWeatherSelection;
+}
+function selectedHomeWeatherDay(dailyRows) {
+  dailyRows = dailyRows || buildHomeWeatherDailyFieldsSafe();
+  var idx = Number(homeWeatherSelection && homeWeatherSelection.selectedDayIndex);
+  return isFinite(idx) && idx >= 0 ? dailyRows[Math.round(idx)] : null;
+}
+function selectedHomeWeatherHourPoint(curve) {
+  curve = curve || buildHomeWeatherCurveSafe();
+  if (curve.selectedPoint) return curve.selectedPoint;
+  var idx = homeWeatherSelection.lockedHourIndex != null ? homeWeatherSelection.lockedHourIndex : homeWeatherSelection.hoverHourIndex;
+  idx = Number(idx);
+  return isFinite(idx) && idx >= 0 ? (curve.points || [])[Math.round(idx)] : null;
 }
 function updateWeatherCityChip(fields) {
   fields = fields || buildHomeWeatherHeroFieldsSafe();
@@ -17485,34 +17565,107 @@ function renderWeatherDetailPopover(fields) {
     }).join('');
   }
 }
-function renderHomeWeatherHero(rotateLyric) {
+function renderHomeWeatherScene() {
+  var scene = buildHomeWeatherSceneSafe();
+  var el = document.getElementById('home-weather-scene');
+  if (el) el.className = scene.className || 'home-weather-scene weather-scene-clear weather-scene-day';
+}
+function renderHomeWeatherAlert() {
+  var alert = buildHomeWeatherAlertSafe();
+  var el = document.getElementById('home-weather-alert');
+  if (el) el.textContent = (alert.title ? (alert.title + ' · ') : '') + (alert.text || '天气正在整理，先按常规出行准备。');
+}
+function renderHomeWeatherCurve(fields) {
+  var curve = buildHomeWeatherCurveSafe();
+  var line = document.getElementById('home-weather-curve-line');
+  var glow = document.getElementById('home-weather-curve-line-glow');
+  var area = document.getElementById('home-weather-curve-area');
+  var forecast = document.getElementById('home-weather-forecast');
+  var ticks = document.getElementById('home-weather-hour-ticks');
+  var guide = document.getElementById('home-weather-selected-guide');
+  var dot = document.getElementById('home-weather-selected-dot');
+  var preview = document.getElementById('home-weather-hour-preview');
+  var selected = selectedHomeWeatherHourPoint(curve);
+  if (line) line.setAttribute('d', curve.smoothPath || curve.path || '');
+  if (glow) glow.setAttribute('d', curve.smoothPath || curve.path || '');
+  if (area) area.setAttribute('d', curve.areaPath || '');
+  if (guide) {
+    guide.setAttribute('x1', selected ? selected.x : 0);
+    guide.setAttribute('x2', selected ? selected.x : 0);
+    guide.style.opacity = selected ? '1' : '0';
+  }
+  if (dot) {
+    dot.setAttribute('cx', selected ? selected.x : 0);
+    dot.setAttribute('cy', selected ? selected.y : 0);
+    dot.style.opacity = selected ? '1' : '0';
+  }
+  if (ticks) {
+    ticks.innerHTML = (curve.points || []).map(function(point) {
+      var active = selected && selected.index === point.index;
+      return '<button class="home-weather-hour' + (active ? ' active' : '') + '" type="button" data-weather-hour="' + point.index + '">' +
+        '<span class="home-weather-hour-dot"></span>' +
+        '<span class="home-weather-hour-time">' + escHtml(point.hourLabel || '--:--') + '</span>' +
+        '<span class="home-weather-hour-temp">' + escHtml(point.temperatureText || '--°') + '</span>' +
+      '</button>';
+    }).join('');
+  } else if (forecast) {
+    forecast.innerHTML = '';
+  }
+  if (preview) {
+    if (selected) preview.textContent = selected.hourLabel + ' · ' + selected.temperatureText + ' · ' + selected.label + ' · 降水 ' + selected.rainText;
+    else preview.textContent = (fields && fields.label || '当前天气') + ' · ' + (fields && fields.temperatureText || '--°') + ' · 预览小时曲线';
+  }
+}
+function renderHomeWeatherDaily(dailyRows) {
+  var daily = document.getElementById('home-weather-daily');
+  if (!daily) return;
+  dailyRows = dailyRows || buildHomeWeatherDailyFieldsSafe();
+  daily.innerHTML = dailyRows.length ? dailyRows.map(function(day, index) {
+    var active = homeWeatherSelection.selectedDayIndex === index;
+    return '<button class="home-weather-day' + (active ? ' active' : '') + '" type="button" data-weather-day="' + index + '">' +
+      '<div class="home-weather-day-date">' + escHtml(day.date ? day.date.slice(5) : '--/--') + '</div>' +
+      '<div class="home-weather-day-name">' + escHtml(day.dayLabel || '未来') + '</div>' +
+      '<div class="home-weather-day-rain">' + escHtml(day.label || '天气') + ' · ' + escHtml(day.rainText || '--') + '</div>' +
+      '<div class="home-weather-day-range">' + escHtml(day.rangeText || '-- / --') + '</div>' +
+    '</button>';
+  }).join('') : '<button class="home-weather-day active" type="button"><div class="home-weather-day-name">现在</div><div class="home-weather-day-rain">等待刷新</div><div class="home-weather-day-range">-- / --</div></button>';
+}
+function renderHomeWeatherMetrics(selectedDay) {
+  var metrics = document.getElementById('home-weather-metrics');
+  if (!metrics) return;
+  var rows = buildHomeWeatherMetricsSafe(selectedDay);
+  metrics.innerHTML = rows.map(function(item) {
+    var active = homeWeatherSelection.expandedMetricKey === item.key;
+    return '<button class="home-weather-metric' + (active ? ' active' : '') + '" type="button" data-weather-metric="' + escHtml(item.key || '') + '">' +
+      '<div class="home-weather-metric-title">' + escHtml(item.title || '指标') + '</div>' +
+      '<div class="home-weather-metric-value">' + escHtml(item.value || '--') + '</div>' +
+      '<div class="home-weather-metric-detail">' + escHtml(item.detail || '') + '</div>' +
+    '</button>';
+  }).join('');
+}
+function renderHomeWeatherHero() {
   var fields = buildHomeWeatherHeroFieldsSafe();
   var temp = document.getElementById('home-weather-temp');
   var city = document.getElementById('home-weather-city');
   var label = document.getElementById('home-weather-label');
   var meta = document.getElementById('home-weather-meta');
-  var note = document.getElementById('home-weather-note');
   var kicker = document.getElementById('home-weather-kicker');
-  var forecast = document.getElementById('home-weather-forecast');
   var advice = document.getElementById('home-weather-advice');
   if (temp) temp.textContent = String(fields.temperatureText || '--°').replace(/°$/, '');
   if (city) city.textContent = fields.city || '上海';
   if (label) label.textContent = fields.label || '天气';
-  if (kicker) kicker.textContent = fields.moodTitle || 'Weather · Lyric Drift';
-  if (note) note.textContent = fields.moodTagline || '让今天的天气替你挑一段旋律';
+  if (kicker) kicker.textContent = fields.moodTitle || 'Weather Console';
   if (meta) {
     var pills = [fields.apparentText, fields.humidityText, fields.windText, fields.precipitationText, fields.cloudText]
       .filter(Boolean);
     meta.innerHTML = pills.map(function(text){ return '<span class="home-weather-pill">' + escHtml(text) + '</span>'; }).join('');
   }
-  if (forecast) {
-    var forecastRows = buildHomeWeatherForecastFieldsSafe();
-    forecast.innerHTML = forecastRows.length
-      ? forecastRows.map(function(row){
-        return '<div class="home-weather-hour"><div class="home-weather-hour-time">' + escHtml(row.hourLabel) + '</div><div class="home-weather-hour-temp">' + escHtml(row.temperatureText) + '</div><div class="home-weather-hour-rain">' + escHtml(row.rainText) + '</div><div class="home-weather-hour-label">' + escHtml(row.label) + '</div></div>';
-      }).join('')
-      : '<div class="home-weather-hour"><div class="home-weather-hour-time">--:--</div><div class="home-weather-hour-temp">--°</div><div class="home-weather-hour-rain">--</div><div class="home-weather-hour-label">待刷新</div></div>';
-  }
+  renderHomeWeatherScene();
+  renderHomeWeatherAlert();
+  renderHomeWeatherCurve(fields);
+  var dailyRows = buildHomeWeatherDailyFieldsSafe();
+  renderHomeWeatherDaily(dailyRows);
+  renderHomeWeatherMetrics(selectedHomeWeatherDay(dailyRows));
   if (advice) {
     var adviceRows = buildHomeWeatherAdviceSafe().slice(0, 3);
     advice.innerHTML = adviceRows.map(function(item){
@@ -17521,19 +17674,85 @@ function renderHomeWeatherHero(rotateLyric) {
   }
   updateWeatherCityChip(fields);
   renderWeatherDetailPopover(fields);
-  if (rotateLyric || !homeCurrentLyricSnippet) setHomeRandomLyric(chooseHomeLyricSnippet(fields.moodTagline), !!homeCurrentLyricSnippet);
 }
-function syncHomeLyricRotationTimer() {
-  if (homeLyricRotateTimer && !emptyHomeActive) {
-    clearInterval(homeLyricRotateTimer);
-    homeLyricRotateTimer = null;
-    return;
+function syncHomeWeatherInteractionState() {
+  return;
+}
+function bindHomeWeatherInteractions() {
+  if (homeWeatherInteractionsBound) return;
+  var hero = document.querySelector('.home-hero');
+  var forecast = document.getElementById('home-weather-forecast');
+  var daily = document.getElementById('home-weather-daily');
+  var metrics = document.getElementById('home-weather-metrics');
+  var nowBtn = document.getElementById('home-weather-now-btn');
+  if (hero) {
+    hero.addEventListener('mousemove', function(e) {
+      var scene = document.getElementById('home-weather-scene');
+      if (!scene) return;
+      var rect = hero.getBoundingClientRect();
+      var x = ((e.clientX - rect.left) / Math.max(1, rect.width) - 0.5) * 18;
+      var y = ((e.clientY - rect.top) / Math.max(1, rect.height) - 0.5) * 14;
+      scene.style.setProperty('--wx', x.toFixed(1) + 'px');
+      scene.style.setProperty('--wy', y.toFixed(1) + 'px');
+    });
+    hero.addEventListener('mouseleave', function() {
+      var scene = document.getElementById('home-weather-scene');
+      if (scene) {
+        scene.style.setProperty('--wx', '0px');
+        scene.style.setProperty('--wy', '0px');
+      }
+    });
   }
-  if (emptyHomeActive && !homeLyricRotateTimer) {
-    homeLyricRotateTimer = setInterval(function(){
-      if (emptyHomeActive) renderHomeWeatherHero(true);
-    }, 10000);
+  if (forecast) {
+    forecast.addEventListener('mouseover', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('[data-weather-hour]');
+      if (!btn || homeWeatherSelection.lockedHourIndex != null) return;
+      resolveHomeWeatherSelection({ type: 'hoverHour', index: btn.getAttribute('data-weather-hour') });
+      renderHomeWeatherHero(false);
+    });
+    forecast.addEventListener('mouseleave', function() {
+      if (homeWeatherSelection.lockedHourIndex != null) return;
+      resolveHomeWeatherSelection({ type: 'leaveHourly' });
+      renderHomeWeatherHero(false);
+    });
+    forecast.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('[data-weather-hour]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      resolveHomeWeatherSelection({ type: 'clickHour', index: btn.getAttribute('data-weather-hour') });
+      renderHomeWeatherHero(false);
+    });
   }
+  if (daily) {
+    daily.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('[data-weather-day]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      resolveHomeWeatherSelection({ type: 'clickDay', index: btn.getAttribute('data-weather-day') });
+      renderHomeWeatherHero(false);
+    });
+  }
+  if (metrics) {
+    metrics.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('[data-weather-metric]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      resolveHomeWeatherSelection({ type: 'clickMetric', key: btn.getAttribute('data-weather-metric') });
+      renderHomeWeatherHero(false);
+    });
+  }
+  if (nowBtn) {
+    nowBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      resolveHomeWeatherSelection({ type: 'reset' });
+      renderHomeWeatherHero(false);
+    });
+  }
+  homeWeatherInteractionsBound = true;
 }
 function closeWeatherDetailPopover() {
   var wrap = document.getElementById('weather-city-wrap');
@@ -17578,6 +17797,7 @@ function bindWeatherCityEditorControls() {
   var submitBtn = document.getElementById('home-weather-city-submit-btn');
   var locateBtn = document.getElementById('home-weather-city-locate-btn');
   var cancelBtn = document.getElementById('home-weather-city-cancel-btn');
+  var pop = document.getElementById('home-weather-city-pop');
   if (homeBtn && !homeBtn._weatherCityBound) {
     homeBtn._weatherCityBound = true;
     homeBtn.addEventListener('click', openHomeWeatherCityEditor);
@@ -17598,6 +17818,10 @@ function bindWeatherCityEditorControls() {
     cancelBtn._weatherCityBound = true;
     cancelBtn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closeWeatherCityEditor(); });
   }
+  if (pop && !pop._weatherCityBound) {
+    pop._weatherCityBound = true;
+    pop.addEventListener('click', function(e){ if (e.target === pop) closeHomeWeatherCityEditor(); });
+  }
 }
 function closeWeatherCityEditor() {
   closeWeatherDetailPopover();
@@ -17613,6 +17837,7 @@ function applyWeatherCity(city) {
   homeWeatherRadioState.weather = null;
   homeWeatherRadioState.radio = null;
   homeWeatherRadioState.updatedAt = 0;
+  resolveHomeWeatherSelection({ type: 'reset' });
   try { localStorage.removeItem(HOME_WEATHER_CACHE_KEY); } catch (e) {}
   updateWeatherCityChip();
   renderHomeWeatherHero(false);
@@ -17637,16 +17862,21 @@ document.addEventListener('click', function(e) {
 });
 document.addEventListener('keydown', function(e) {
   var input = document.getElementById('home-weather-city-input');
+  var homeWrap = document.getElementById('home-weather-city-editor-wrap');
+  var cityOpen = homeWrap && homeWrap.classList.contains('open');
+  if (e.key === 'Escape' && cityOpen) {
+    e.preventDefault();
+    closeWeatherCityEditor();
+    return;
+  }
   if (!input || document.activeElement !== input) return;
   if (e.key === 'Enter') {
     e.preventDefault();
     submitHomeWeatherCityInput();
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    closeWeatherCityEditor();
   }
 });
 bindWeatherCityEditorControls();
+bindHomeWeatherInteractions();
 function fallbackHomeTiles() {
   return [
     { kind: 'login', title: '登录同步歌单', sub: '网易云 / QQ 音乐' },
@@ -17749,29 +17979,10 @@ function renderHomeDiscover() {
   var loggedOutHome = !homeDiscoverState.loggedIn && !hasAnyPlatformLogin();
   var weather = homeWeatherRadioState.weather;
   var radio = homeWeatherRadioState.radio;
-  var weatherLocation = weather && weather.location && weather.location.name || homeWeatherRadioState.city || '上海';
   renderHomeWeatherHero(false);
-  var weatherTitle = document.getElementById('home-weather-title');
-  var weatherKicker = document.getElementById('home-weather-kicker');
-  var weatherMeta = document.getElementById('home-weather-meta');
-  if (weatherTitle) weatherTitle.textContent = '我的音乐库';
-  if (weatherKicker) weatherKicker.textContent = 'Mineradio · Your Library';
   if (sub) {
     if (loggedOutHome) sub.textContent = '登录后会把你的歌单、常听歌手和最近播放放在这里；也可以直接搜索或导入本地音乐。';
     else sub.textContent = '从你的歌单、最近播放和常听歌手开始，天气电台放在需要氛围的时候再开。';
-  }
-  if (weatherMeta) {
-    var meta = [];
-    if (weather) {
-      meta.push(weatherLocation);
-      meta.push(weather.label + ' · ' + Math.round(weather.temperature || 0) + '°');
-      meta.push('体感 ' + Math.round(weather.apparentTemperature || weather.temperature || 0) + '°');
-      if (isFinite(weather.humidity)) meta.push('湿度 ' + Math.round(weather.humidity) + '%');
-    } else {
-      meta.push(weatherLocation);
-      meta.push(homeWeatherRadioState.error ? '天气暂不可用' : '正在整理天气');
-    }
-    weatherMeta.innerHTML = meta.map(function(text){ return '<span class="home-weather-pill">' + escHtml(text) + '</span>'; }).join('');
   }
   var daily = homeDiscoverState.songs[0] || null;
   var cardSongB = homeDiscoverState.songs[1] || null;
@@ -17888,6 +18099,7 @@ async function loadHomeWeatherRadio(force, opts) {
       homeWeatherRadioState.radio = data && data.radio || null;
       homeWeatherRadioState.loaded = true;
       homeWeatherRadioState.updatedAt = Date.now();
+      resolveHomeWeatherSelection({ type: 'reset' });
       if (homeWeatherRadioState.weather && homeWeatherRadioState.weather.location && homeWeatherRadioState.weather.location.name) {
         homeWeatherRadioState.city = homeWeatherRadioState.weather.location.name;
         localStorage.setItem(HOME_WEATHER_CITY_KEY, homeWeatherRadioState.city);
@@ -18200,7 +18412,7 @@ function updateEmptyHomeVisibility(opts) {
   var show = shouldShowEmptyHome();
   emptyHomeActive = show;
   document.body.classList.toggle('empty-home-active', show);
-  syncHomeLyricRotationTimer();
+  syncHomeWeatherInteractionState();
   if (!show) setHomeControlsLocked(false);
   if (show) activateHomeWallpaperPreview();
   else deactivateHomeWallpaperPreview(false);
