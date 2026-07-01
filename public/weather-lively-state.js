@@ -95,12 +95,37 @@
     var icon = weatherIconKey(weather.weatherCode, weather.isDay, weather.label);
     var kind = icon.split('-')[0] || 'clear';
     var daylight = icon.indexOf('-night') > -1 ? 'night' : 'day';
+    var reduced = !!opts.reducedMotion;
+    var layers = visualLayersForKind(kind, daylight, reduced);
     return {
       key: icon,
       kind: kind,
       daylight: daylight,
-      reducedMotion: !!opts.reducedMotion,
+      visualClass: 'weather-lively-visual-' + kind + '-' + daylight,
+      layers: layers,
+      ambient: {
+        kind: kind,
+        defaultEnabled: false,
+        followWeather: true,
+        duckWhenMusicPlays: true,
+      },
+      motion: reduced ? 'reduced' : 'live',
+      reducedMotion: reduced,
     };
+  }
+
+  function layer(type, intensity, animated) {
+    return { type: type, intensity: intensity, animated: animated !== false };
+  }
+
+  function visualLayersForKind(kind, daylight, reduced) {
+    var animated = !reduced;
+    if (kind === 'rain') return [layer('mist', 0.32, animated), layer('rain', 0.74, animated)];
+    if (kind === 'snow') return [layer('glow', daylight === 'night' ? 0.20 : 0.28, animated), layer('snow', 0.58, animated)];
+    if (kind === 'fog') return [layer('mist', 0.74, animated), layer('haze', 0.46, animated)];
+    if (kind === 'storm') return [layer('rain', 0.68, animated), layer('flash', 0.42, animated)];
+    if (kind === 'cloud') return [layer('mist', 0.40, animated), layer('cloud', 0.52, animated)];
+    return [layer('glow', daylight === 'night' ? 0.22 : 0.46, animated), layer('particles', 0.22, animated)];
   }
 
   function allHourlyRows(weather) {

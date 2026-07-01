@@ -13,6 +13,7 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
+  assert.match(scripts.check, /node --check public\/weather-lively-visuals\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
   assert.equal(scripts['verify:artifacts'], 'node build/verify-release-artifacts.js');
@@ -38,6 +39,7 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
+  assert.match(html, /<script src="weather-lively-visuals\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-ui\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-hero-state\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-ui\.js"><\/script>/);
@@ -67,16 +69,25 @@ test('main stylesheet is loaded as an external asset', () => {
 test('Lively weather dashboard UI boundary is externalized', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const livelyUi = fs.readFileSync(path.join(repoRoot, 'public', 'weather-lively-ui.js'), 'utf8');
+  const livelyVisuals = fs.readFileSync(path.join(repoRoot, 'public', 'weather-lively-visuals.js'), 'utf8');
   const livelyCss = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'weather-lively.css'), 'utf8');
 
   assert.match(html, /window\.MineradioWeatherLivelyUi/);
+  assert.match(html, /window\.MineradioWeatherLivelyVisuals/);
   assert.match(livelyUi, /MineradioWeatherLivelyUi/);
   assert.match(livelyUi, /decorateDashboard/);
   assert.match(livelyUi, /syncGraphModel/);
+  assert.match(livelyUi, /syncWeatherVisual/);
   assert.match(livelyUi, /metricKey/);
+  assert.match(livelyVisuals, /initWeatherVisuals/);
+  assert.match(livelyVisuals, /applyWeatherVisualProfile/);
+  assert.match(livelyVisuals, /setWeatherVisualReducedMotion/);
+  assert.match(livelyVisuals, /disposeWeatherVisuals/);
   assert.match(livelyCss, /\.weather-lively-dashboard/);
   assert.match(livelyCss, /\.weather-lively-graph/);
   assert.match(livelyCss, /\.weather-lively-metric/);
+  assert.match(livelyCss, /\.weather-lively-visual-rain-day/);
+  assert.match(livelyCss, /\.weather-lively-layer-rain/);
 });
 
 test('home city switch uses its own glass editor while top chip opens weather details', () => {

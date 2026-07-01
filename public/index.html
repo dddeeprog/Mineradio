@@ -18,6 +18,7 @@
 <script src="playback-session-state.js"></script>
 <script src="weather-lively-graph.js"></script>
 <script src="weather-lively-state.js"></script>
+<script src="weather-lively-visuals.js"></script>
 <script src="weather-lively-ui.js"></script>
 <script src="home-weather-hero-state.js"></script>
 <script src="home-weather-ui.js"></script>
@@ -15567,8 +15568,15 @@ function buildHomeWeatherIconKeySafe(code, isDay, label) {
 }
 function createHomeWeatherUiController() {
   if (!window.MineradioHomeWeatherUi || typeof window.MineradioHomeWeatherUi.init !== 'function') return null;
+  var livelyVisuals = window.MineradioWeatherLivelyVisuals && typeof window.MineradioWeatherLivelyVisuals.initWeatherVisuals === 'function'
+    ? window.MineradioWeatherLivelyVisuals.initWeatherVisuals({
+      document: document,
+      root: document.getElementById('home-weather-scene'),
+      isMusicPlaying: function() { return !!(playing || (audio && audio.src && !audio.paused && !audio.ended)); },
+    })
+    : null;
   var livelyUi = window.MineradioWeatherLivelyUi && typeof window.MineradioWeatherLivelyUi.init === 'function'
-    ? window.MineradioWeatherLivelyUi.init({ document: document })
+    ? window.MineradioWeatherLivelyUi.init({ document: document, visuals: livelyVisuals })
     : null;
   return window.MineradioHomeWeatherUi.init({
     getWeatherState: function() { return homeWeatherRadioState; },

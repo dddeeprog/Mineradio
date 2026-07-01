@@ -109,3 +109,31 @@ test('maps weather icons and visual profiles for major weather states', () => {
   assert.equal(weatherVisualProfile({ weatherCode: 95, isDay: 1 }, { reducedMotion: true }).reducedMotion, true);
 });
 
+test('builds Lively visual layers and ambient sound hints for weather states', () => {
+  const clear = weatherVisualProfile({ weatherCode: 0, isDay: 1, label: '晴' });
+  assert.equal(clear.visualClass, 'weather-lively-visual-clear-day');
+  assert.deepEqual(clear.layers.map((layer) => layer.type), ['glow', 'particles']);
+  assert.equal(clear.ambient.kind, 'clear');
+  assert.equal(clear.ambient.defaultEnabled, false);
+
+  const rain = weatherVisualProfile({ weatherCode: 61, isDay: 1, label: '雨' });
+  assert.equal(rain.visualClass, 'weather-lively-visual-rain-day');
+  assert.ok(rain.layers.some((layer) => layer.type === 'rain'));
+  assert.equal(rain.ambient.kind, 'rain');
+
+  const snow = weatherVisualProfile({ weatherCode: 71, isDay: 1, label: '雪' });
+  assert.equal(snow.visualClass, 'weather-lively-visual-snow-day');
+  assert.ok(snow.layers.some((layer) => layer.type === 'snow'));
+
+  const fog = weatherVisualProfile({ weatherCode: 45, isDay: 0, label: '雾' });
+  assert.equal(fog.visualClass, 'weather-lively-visual-fog-night');
+  assert.ok(fog.layers.some((layer) => layer.type === 'mist'));
+
+  const storm = weatherVisualProfile({ weatherCode: 95, isDay: 1, label: '雷雨' });
+  assert.equal(storm.visualClass, 'weather-lively-visual-storm-day');
+  assert.ok(storm.layers.some((layer) => layer.type === 'flash'));
+
+  const reduced = weatherVisualProfile({ weatherCode: 61, isDay: 1, label: '雨' }, { reducedMotion: true });
+  assert.equal(reduced.motion, 'reduced');
+  assert.equal(reduced.layers.every((layer) => layer.animated === false), true);
+});

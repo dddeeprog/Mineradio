@@ -188,6 +188,8 @@
       var scene = buildScene();
       var el = document.getElementById('home-weather-scene');
       if (el) el.className = scene.className || 'home-weather-scene weather-scene-clear weather-scene-day';
+      var lively = weatherLivelyUi();
+      if (lively && typeof lively.syncWeatherVisual === 'function') lively.syncWeatherVisual(scene);
     }
 
     function renderHomeWeatherAlert() {
