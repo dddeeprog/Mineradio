@@ -36,6 +36,7 @@ const {
   mapQQTrack,
   qqAlbumCover,
 } = require('../server/music/qq');
+const { createAppStatusRoutes } = require('../server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('../server/routes/discover');
 const { createNeteaseRoutes } = require('../server/routes/netease');
@@ -154,6 +155,23 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   assert.equal(buildWeatherMood({ weatherCode: 0, temperature: 22, isDay: 0 }, new Date('2026-06-28T22:00:00')).key, 'clear-night');
   assert.deepEqual(weatherRadioSeedQueries({ key: 'rain-night' }).slice(0, 2), ['陈奕迅 阴天快乐', '周杰伦 雨下一整晚']);
   assert.equal(fallbackWeatherForRadio({ city: '杭州' }, new Error('offline')).location.name, '杭州');
+});
+
+test('app status route module dispatches version and login status endpoints', async () => {
+  const replies = [];
+  const routes = createAppStatusRoutes({
+    sendJSON: (_res, body, status = 200) => replies.push({ body, status }),
+    appVersionPayload: () => ({ version: '1.1.0' }),
+    getLoginInfo: async () => ({ loggedIn: true }),
+  });
+
+  assert.equal(await routes.handleRoute('/api/app/version', {}, {}), true);
+  assert.deepEqual(replies.pop(), { body: { version: '1.1.0' }, status: 200 });
+
+  assert.equal(await routes.handleRoute('/api/login/status', {}, {}), true);
+  assert.deepEqual(replies.pop(), { body: { loggedIn: true }, status: 200 });
+
+  assert.equal(await routes.handleRoute('/api/search', {}, {}), false);
 });
 
 test('weather radio route module dispatches weather endpoints', async () => {

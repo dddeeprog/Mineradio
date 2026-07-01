@@ -65,6 +65,7 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createAppStatusRoutes } = require('./server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
 const { createNeteaseRoutes } = require('./server/routes/netease');
@@ -2698,6 +2699,11 @@ function appVersionPayload() {
   };
 }
 
+const appStatusRoutes = createAppStatusRoutes({
+  sendJSON,
+  appVersionPayload,
+  getLoginInfo,
+});
 const weatherRadioRoutes = createWeatherRadioRoutes({
   sendJSON,
   buildWeatherRadio,
@@ -2808,22 +2814,6 @@ const neteaseRoutes = createNeteaseRoutes({
   normalizeApiMessage,
 });
 
-const READ_ONLY_API_ROUTES = new Map([
-  ['/api/app/version', async (_req, res) => {
-    sendJSON(res, appVersionPayload());
-  }],
-  ['/api/login/status', async (_req, res) => {
-    sendJSON(res, await getLoginInfo());
-  }],
-]);
-
-async function dispatchReadOnlyApiRoute(pn, req, res, url) {
-  const handler = READ_ONLY_API_ROUTES.get(pn);
-  if (!handler) return false;
-  await handler(req, res, url);
-  return true;
-}
-
 // ====================================================================
 //  HTTP Server
 // ====================================================================
@@ -2858,7 +2848,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (await dispatchReadOnlyApiRoute(pn, req, res, url)) {
+  if (await appStatusRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
