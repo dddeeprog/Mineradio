@@ -36,6 +36,7 @@ const {
   mapQQTrack,
   qqAlbumCover,
 } = require('../server/music/qq');
+const { createProxyRoutes } = require('../server/routes/proxy');
 const { createUpdateRoutes } = require('../server/routes/update');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
 
@@ -223,6 +224,47 @@ test('update route module dispatches update endpoints', async () => {
   assert.equal(await routes.handleRoute('/api/update/patch/status', {}, {}, new URL('http://localhost/api/update/patch/status')), true);
   assert.deepEqual(writes[4], { status: 200, payload: { ok: true, id: 'patch-1', mode: 'patch' } });
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('proxy route module rejects unsafe media proxy requests', async () => {
+  const writes = [];
+  const res = {
+    writeHead(status, headers) {
+      writes.push({ type: 'head', status, headers });
+    },
+    end(body) {
+      writes.push({ type: 'end', body });
+    },
+  };
+  const routes = createProxyRoutes({
+    port: 3000,
+    userAgent: 'UA',
+    corsHeadersForOrigin(origin, port) {
+      return { 'Access-Control-Allow-Origin': origin || 'http://127.0.0.1:' + port };
+    },
+    assertAllowedProxyTarget(value) {
+      if (!/^https:\/\//.test(String(value || ''))) throw new Error('INVALID');
+    },
+    audioProxyHeadersFor() {
+      return {};
+    },
+    audioContentTypeForUrl() {
+      return 'audio/mpeg';
+    },
+    fetchImpl() {
+      throw new Error('fetch should not be called for invalid requests');
+    },
+  });
+
+  assert.equal(await routes.handleRoute('/api/cover', { headers: { origin: 'app://local' } }, res, new URL('http://localhost/api/cover?url=http://127.0.0.1/x')), true);
+  assert.equal(writes[0].status, 400);
+  assert.equal(writes[1].body, 'Invalid cover url');
+  writes.length = 0;
+
+  assert.equal(await routes.handleRoute('/api/audio', { headers: { origin: 'app://local' } }, res, new URL('http://localhost/api/audio')), true);
+  assert.equal(writes[0].status, 400);
+  assert.equal(writes[1].body, 'Missing url');
+  assert.equal(await routes.handleRoute('/api/search', {}, res, new URL('http://localhost/api/search')), false);
 });
 
 test('music mapping helpers preserve renderer-facing response shape', () => {

@@ -65,6 +65,7 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createProxyRoutes } = require('./server/routes/proxy');
 const { createUpdateRoutes } = require('./server/routes/update');
 const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
 
@@ -2707,6 +2708,15 @@ const updateRoutes = createUpdateRoutes({
   publicUpdateJob,
   updateDownloadJobs,
 });
+const proxyRoutes = createProxyRoutes({
+  port: PORT,
+  userAgent: UA,
+  corsHeadersForOrigin,
+  assertAllowedProxyTarget,
+  audioProxyHeadersFor,
+  audioContentTypeForUrl,
+  fetchImpl: fetch,
+});
 
 const READ_ONLY_API_ROUTES = new Map([
   ['/api/app/version', async (_req, res) => {
@@ -2775,6 +2785,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await updateRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await proxyRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
@@ -3564,65 +3578,6 @@ const server = http.createServer(async (req, res) => {
       console.error('[PlaylistTracks]', err);
       sendJSON(res, { error: err.message, tracks: [] }, 500);
     }
-    return;
-  }
-
-  // ---------- 封面代理 (带 CORS 头, 给 canvas 提取像素用) ----------
-  if (pn === '/api/cover') {
-    try {
-      const coverUrl = url.searchParams.get('url');
-      try {
-        assertAllowedProxyTarget(coverUrl);
-      } catch (e) {
-        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, PORT));
-        res.end('Invalid cover url');
-        return;
-      }
-      const resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' } });
-      const ct  = resp.headers.get('content-type') || 'image/jpeg';
-      const cl  = resp.headers.get('content-length');
-      const hdr = {
-        'Content-Type': ct,
-        ...corsHeadersForOrigin(req.headers.origin, PORT),
-        'Cross-Origin-Resource-Policy': 'cross-origin',
-        'Cache-Control': 'public, max-age=86400',
-      };
-      if (cl) hdr['Content-Length'] = cl;
-      res.writeHead(resp.status, hdr);
-      const reader = resp.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
-    } catch (err) { console.error('[Cover]', err); res.writeHead(500); res.end(); }
-    return;
-  }
-
-  // ---------- 音频代理 (支持 Range) ----------
-  if (pn === '/api/audio') {
-    try {
-      const audioUrl = url.searchParams.get('url');
-      if (!audioUrl) { res.writeHead(400); res.end('Missing url'); return; }
-      try {
-        assertAllowedProxyTarget(audioUrl);
-      } catch (e) {
-        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, PORT));
-        res.end('Invalid audio url');
-        return;
-      }
-      const range = req.headers.range || '';
-      const hdr = audioProxyHeadersFor(audioUrl, range);
-      const up = await fetch(audioUrl, { headers: hdr });
-      const out = {
-        'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
-        ...corsHeadersForOrigin(req.headers.origin, PORT),
-        'Accept-Ranges': 'bytes',
-      };
-      const cl = up.headers.get('content-length'); if (cl) out['Content-Length'] = cl;
-      const cr = up.headers.get('content-range');  if (cr) out['Content-Range']  = cr;
-      res.writeHead(up.status, out);
-      const reader = up.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
-    } catch (err) { console.error('[Audio]', err); res.writeHead(500); res.end(); }
     return;
   }
 
