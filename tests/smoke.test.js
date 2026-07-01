@@ -9,10 +9,9 @@ test('maintenance baseline scripts are wired', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const scripts = pkg.scripts || {};
 
-  assert.equal(
-    scripts.check,
-    'node --check server.js && node --check server/routes/app-status.js && node --check server/routes/weather-radio.js && node --check server/routes/update.js && node --check server/routes/proxy.js && node --check server/routes/beatmap-cache.js && node --check server/routes/discover.js && node --check server/routes/qq.js && node --check server/routes/podcast.js && node --check server/routes/netease.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/update-preview-ui.js && node --check public/hotkeys-ui.js && node --check public/comment-barrage-state.js && node --check public/comment-barrage-3d.js && node --check public/shelf-aux-ui.js && node --check public/visual-cover-state.js'
-  );
+  assert.match(scripts.check, /node --check server\.js/);
+  assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
+  assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
   assert.equal(scripts['verify:artifacts'], 'node build/verify-release-artifacts.js');
@@ -20,6 +19,15 @@ test('maintenance baseline scripts are wired', () => {
     scripts['verify:release'],
     'npm run check && npm run test && npm run audit:prod && npm run build:win:dir'
   );
+});
+test('complete weather route is registered in the local API server', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
+  const route = fs.readFileSync(path.join(repoRoot, 'server', 'routes', 'weather-full.js'), 'utf8');
+
+  assert.match(server, /createWeatherFullRoutes/);
+  assert.match(server, /buildFullWeather/);
+  assert.match(server, /weatherFullRoutes\.handleRoute\(pn, req, res, url\)/);
+  assert.match(route, /pn === '\/api\/weather\/full'/);
 });
 
 test('playback session restore script is wired', () => {

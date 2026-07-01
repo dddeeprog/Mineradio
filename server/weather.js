@@ -158,8 +158,8 @@ function buildOpenMeteoForecastUrl(location) {
   u.searchParams.set('latitude', String(location.latitude));
   u.searchParams.set('longitude', String(location.longitude));
   u.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,surface_pressure');
-  u.searchParams.set('hourly', 'precipitation_probability,weather_code,temperature_2m');
-  u.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max');
+  u.searchParams.set('hourly', 'precipitation_probability,precipitation,weather_code,temperature_2m,apparent_temperature,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,uv_index,visibility');
+  u.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max,wind_speed_10m_max,wind_direction_10m_dominant,wind_gusts_10m_max');
   u.searchParams.set('forecast_days', '5');
   u.searchParams.set('timezone', location.timezone || 'auto');
   return u.toString();
@@ -219,28 +219,63 @@ function finiteOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function weatherHourStartKey(time) {
+  const text = String(time || '');
+  const match = text.match(/^(.*T\d{2}):\d{2}/);
+  return match ? `${match[1]}:00` : text;
+}
+
+function assignHourlyField(row, key, source, index) {
+  if (Array.isArray(source)) row[key] = finiteOrNull(source[index]);
+}
+
 function normalizeOpenMeteoHourlyForecast(hourly, currentTime, limit = 12) {
   const times = Array.isArray(hourly && hourly.time) ? hourly.time : [];
   const codes = Array.isArray(hourly && hourly.weather_code) ? hourly.weather_code : [];
   const temps = Array.isArray(hourly && hourly.temperature_2m) ? hourly.temperature_2m : [];
+  const apparentTemps = Array.isArray(hourly && hourly.apparent_temperature) ? hourly.apparent_temperature : null;
   const pops = Array.isArray(hourly && hourly.precipitation_probability) ? hourly.precipitation_probability : [];
-  const startTime = String(currentTime || '');
+  const precipitations = Array.isArray(hourly && hourly.precipitation) ? hourly.precipitation : null;
+  const humidities = Array.isArray(hourly && hourly.relative_humidity_2m) ? hourly.relative_humidity_2m : [];
+  const pressures = Array.isArray(hourly && hourly.surface_pressure) ? hourly.surface_pressure : [];
+  const windSpeeds = Array.isArray(hourly && hourly.wind_speed_10m) ? hourly.wind_speed_10m : [];
+  const windGusts = Array.isArray(hourly && hourly.wind_gusts_10m) ? hourly.wind_gusts_10m : null;
+  const windDirections = Array.isArray(hourly && hourly.wind_direction_10m) ? hourly.wind_direction_10m : [];
+  const cloudCovers = Array.isArray(hourly && hourly.cloud_cover) ? hourly.cloud_cover : [];
+  const uvIndexes = Array.isArray(hourly && hourly.uv_index) ? hourly.uv_index : [];
+  const visibilities = Array.isArray(hourly && hourly.visibility) ? hourly.visibility : null;
+  const startTime = weatherHourStartKey(currentTime);
   const rows = [];
   for (let i = 0; i < times.length && rows.length < limit; i++) {
     const time = String(times[i] || '');
     if (!time) continue;
     if (startTime && time < startTime) continue;
     const weatherCode = finiteOrNull(codes[i]);
-    rows.push({
+    const row = {
       time,
       hourLabel: weatherHourLabel(time),
       temperature: finiteOrNull(temps[i]),
       precipitationProbability: finiteOrNull(pops[i]),
+      humidity: finiteOrNull(humidities[i]),
+      pressure: finiteOrNull(pressures[i]),
+      windSpeed: finiteOrNull(windSpeeds[i]),
+      windDirection: finiteOrNull(windDirections[i]),
+      cloudCover: finiteOrNull(cloudCovers[i]),
+      uvIndex: finiteOrNull(uvIndexes[i]),
       weatherCode,
       label: weatherCode == null ? '天气' : openMeteoWeatherLabel(weatherCode),
-    });
+    };
+    assignHourlyField(row, 'apparentTemperature', apparentTemps, i);
+    assignHourlyField(row, 'precipitation', precipitations, i);
+    assignHourlyField(row, 'windGusts', windGusts, i);
+    assignHourlyField(row, 'visibility', visibilities, i);
+    rows.push(row);
   }
   return rows;
+}
+
+function assignDailyField(row, key, source, index) {
+  if (Array.isArray(source)) row[key] = finiteOrNull(source[index]);
 }
 
 function normalizeOpenMeteoDailyForecast(daily, limit = 5) {
@@ -252,12 +287,15 @@ function normalizeOpenMeteoDailyForecast(daily, limit = 5) {
   const sunsets = Array.isArray(daily && daily.sunset) ? daily.sunset : [];
   const uvs = Array.isArray(daily && daily.uv_index_max) ? daily.uv_index_max : [];
   const pops = Array.isArray(daily && daily.precipitation_probability_max) ? daily.precipitation_probability_max : [];
+  const windSpeeds = Array.isArray(daily && daily.wind_speed_10m_max) ? daily.wind_speed_10m_max : null;
+  const windDirections = Array.isArray(daily && daily.wind_direction_10m_dominant) ? daily.wind_direction_10m_dominant : null;
+  const windGusts = Array.isArray(daily && daily.wind_gusts_10m_max) ? daily.wind_gusts_10m_max : null;
   const rows = [];
   for (let i = 0; i < times.length && rows.length < limit; i++) {
     const date = String(times[i] || '');
     if (!date) continue;
     const weatherCode = finiteOrNull(codes[i]);
-    rows.push({
+    const row = {
       date,
       dayLabel: weatherDayLabel(date, rows.length),
       weatherCode,
@@ -268,9 +306,53 @@ function normalizeOpenMeteoDailyForecast(daily, limit = 5) {
       sunset: sunsets[i] ? String(sunsets[i]) : '',
       uvIndexMax: finiteOrNull(uvs[i]),
       precipitationProbabilityMax: finiteOrNull(pops[i]),
-    });
+    };
+    assignDailyField(row, 'windSpeedMax', windSpeeds, i);
+    assignDailyField(row, 'windDirectionDominant', windDirections, i);
+    assignDailyField(row, 'windGustsMax', windGusts, i);
+    rows.push(row);
   }
   return rows;
+}
+
+function weatherVisualKeyFromCode(code, isDay, label) {
+  const n = Number(code);
+  const text = String(label || '');
+  const suffix = isDay === 0 ? '-night' : '-day';
+  if ([95, 96, 99].includes(n) || /雷/.test(text)) return 'storm' + suffix;
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(n) || /雨/.test(text)) return 'rain' + suffix;
+  if ([71, 73, 75, 77, 85, 86].includes(n) || /雪/.test(text)) return 'snow' + suffix;
+  if ([45, 48].includes(n) || /雾/.test(text)) return 'fog' + suffix;
+  if ([1, 2, 3].includes(n) || /云|阴/.test(text)) return 'cloud' + suffix;
+  return 'clear' + suffix;
+}
+
+function buildWeatherGraphModels(weather) {
+  const hourly = Array.isArray(weather && weather.hourlyForecastFull) ? weather.hourlyForecastFull : [];
+  const metricDefs = [
+    ['temperature', '温度', 'temperature', '°'],
+    ['apparentTemperature', '体感', 'apparentTemperature', '°'],
+    ['humidity', '湿度', 'humidity', '%'],
+    ['windSpeed', '风速', 'windSpeed', 'km/h'],
+    ['pressure', '气压', 'pressure', 'hPa'],
+    ['uvIndex', 'UV', 'uvIndex', '级'],
+    ['precipitationProbability', '降水', 'precipitationProbability', '%'],
+    ['cloudCover', '云量', 'cloudCover', '%'],
+  ];
+  return {
+    metrics: metricDefs.map(([key, label, field, unit]) => ({
+      key,
+      label,
+      field,
+      unit,
+      values: hourly.map(row => ({
+        time: row.time,
+        value: row[field] == null ? null : row[field],
+        weatherCode: row.weatherCode,
+        label: row.label,
+      })),
+    })),
+  };
 }
 
 function normalizeOpenMeteoWeather(body, location, date) {
@@ -302,6 +384,7 @@ function normalizeOpenMeteoWeather(body, location, date) {
     isDay: Number(cur.is_day),
     time: cur.time || '',
     hourlyForecast: normalizeOpenMeteoHourlyForecast(body && body.hourly, cur.time, 12),
+    hourlyForecastFull: normalizeOpenMeteoHourlyForecast(body && body.hourly, cur.time, 24 * 5),
     dailyForecast,
     sunrise: today.sunrise || '',
     sunset: today.sunset || '',
@@ -310,6 +393,39 @@ function normalizeOpenMeteoWeather(body, location, date) {
   };
   weather.mood = buildWeatherMood(weather, date);
   return weather;
+}
+
+function normalizeOpenMeteoFullWeather(body, location, date) {
+  const weather = normalizeOpenMeteoWeather(body, location, date);
+  const current = {
+    label: weather.label,
+    weatherCode: weather.weatherCode,
+    visualKey: weatherVisualKeyFromCode(weather.weatherCode, weather.isDay, weather.label),
+    temperature: weather.temperature,
+    apparentTemperature: weather.apparentTemperature,
+    humidity: weather.humidity,
+    precipitation: weather.precipitation,
+    cloudCover: weather.cloudCover,
+    windSpeed: weather.windSpeed,
+    windGusts: weather.windGusts,
+    windDirection: weather.windDirection,
+    pressure: weather.pressure,
+    isDay: weather.isDay,
+    time: weather.time,
+  };
+  return {
+    ok: true,
+    weather: {
+      provider: weather.provider,
+      location: weather.location,
+      current,
+      daily: weather.dailyForecast,
+      hourly: weather.hourlyForecastFull,
+      graph: buildWeatherGraphModels(weather),
+      mood: weather.mood,
+      updatedAt: weather.updatedAt,
+    },
+  };
 }
 
 function weatherRadioSeedQueries(mood) {
@@ -349,6 +465,7 @@ function fallbackWeatherForRadio(params, err) {
     isDay: null,
     time: '',
     hourlyForecast: [],
+    hourlyForecastFull: [],
     dailyForecast: [],
     sunrise: '',
     sunset: '',
@@ -379,8 +496,10 @@ module.exports = {
   clampNumber,
   fallbackWeatherForRadio,
   locationFromParams,
+  normalizeOpenMeteoFullWeather,
   normalizeOpenMeteoLocation,
   normalizeOpenMeteoWeather,
   openMeteoWeatherLabel,
+  weatherVisualKeyFromCode,
   weatherRadioSeedQueries,
 };

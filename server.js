@@ -73,6 +73,7 @@ const { createPodcastRoutes } = require('./server/routes/podcast');
 const { createProxyRoutes } = require('./server/routes/proxy');
 const { createQQRoutes } = require('./server/routes/qq');
 const { createUpdateRoutes } = require('./server/routes/update');
+const { createWeatherFullRoutes } = require('./server/routes/weather-full');
 const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
 
 const PORT = process.env.PORT || 3000;
@@ -1563,6 +1564,14 @@ async function fetchOpenMeteoWeather(params) {
   return weatherTools.normalizeOpenMeteoWeather(body, location);
 }
 
+async function buildFullWeather(params) {
+  params = params || {};
+  const location = weatherTools.locationFromParams(params)
+    || await resolveOpenMeteoLocation(params.city || params.q || params.location);
+  const body = await requestJson(weatherTools.buildOpenMeteoForecastUrl(location), { headers: { 'User-Agent': UA } });
+  return weatherTools.normalizeOpenMeteoFullWeather(body, location);
+}
+
 async function fetchIpWeatherLocation() {
   const u = new URL(WEATHER_IP_LOCATION_URL);
   u.searchParams.set('fields', 'status,message,country,regionName,city,lat,lon,timezone,query');
@@ -2709,6 +2718,10 @@ const weatherRadioRoutes = createWeatherRadioRoutes({
   buildWeatherRadio,
   fetchIpWeatherLocation,
 });
+const weatherFullRoutes = createWeatherFullRoutes({
+  sendJSON,
+  buildFullWeather,
+});
 const updateRoutes = createUpdateRoutes({
   sendJSON,
   fetchLatestUpdateInfo,
@@ -2865,6 +2878,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await weatherRadioRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await weatherFullRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 

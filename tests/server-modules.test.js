@@ -24,6 +24,7 @@ const {
   buildOpenMeteoGeocodeUrl,
   buildWeatherMood,
   fallbackWeatherForRadio,
+  normalizeOpenMeteoFullWeather,
   normalizeOpenMeteoWeather,
   weatherRadioSeedQueries,
 } = require('../server/weather');
@@ -44,6 +45,7 @@ const { createPodcastRoutes } = require('../server/routes/podcast');
 const { createProxyRoutes } = require('../server/routes/proxy');
 const { createQQRoutes } = require('../server/routes/qq');
 const { createUpdateRoutes } = require('../server/routes/update');
+const { createWeatherFullRoutes } = require('../server/routes/weather-full');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
 
 test('cookie helpers normalize Set-Cookie style inputs and detect login cookies', () => {
@@ -92,7 +94,20 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   assert.match(forecastUrl, /surface_pressure/);
   assert.match(forecastUrl, /wind_direction_10m/);
   assert.match(forecastUrl, /hourly=precipitation_probability/);
+  assert.match(forecastUrl, /relative_humidity_2m/);
+  assert.match(forecastUrl, /surface_pressure/);
+  assert.match(forecastUrl, /wind_speed_10m/);
+  assert.match(forecastUrl, /wind_direction_10m/);
+  assert.match(forecastUrl, /cloud_cover/);
+  assert.match(forecastUrl, /uv_index/);
+  assert.match(forecastUrl, /apparent_temperature/);
+  assert.match(forecastUrl, /visibility/);
+  assert.match(forecastUrl, /precipitation/);
+  assert.match(forecastUrl, /wind_gusts_10m/);
   assert.match(forecastUrl, /daily=weather_code/);
+  assert.match(forecastUrl, /wind_speed_10m_max/);
+  assert.match(forecastUrl, /wind_direction_10m_dominant/);
+  assert.match(forecastUrl, /wind_gusts_10m_max/);
   assert.match(forecastUrl, /forecast_days=5/);
 
   const weather = normalizeOpenMeteoWeather({
@@ -111,10 +126,16 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
       time: '2026-06-28T09:00',
     },
     hourly: {
-      time: ['2026-06-28T08:00', '2026-06-28T09:00', '2026-06-28T10:00', '2026-06-28T11:00'],
-      weather_code: [3, 61, 0, null],
-      temperature_2m: [17.8, 18.2, 20.3, 21.1],
-      precipitation_probability: [10, 65, 5, 0],
+      time: ['2026-06-28T08:00', '2026-06-28T09:00', '2026-06-28T10:00', '2026-06-28T11:00', '2026-06-29T09:00'],
+      weather_code: [3, 61, 0, null, 2],
+      temperature_2m: [17.8, 18.2, 20.3, 21.1, 26.4],
+      precipitation_probability: [10, 65, 5, 0, 18],
+      relative_humidity_2m: [91, 88, 76, null, 66],
+      surface_pressure: [1008.1, 1007.4, 1006.8, null, 1004.2],
+      wind_speed_10m: [11, 12, 14, null, 18],
+      wind_direction_10m: [40, 42, 80, null, 130],
+      cloud_cover: [95, 90, 34, null, 46],
+      uv_index: [0.2, 1.4, 3.2, null, 5.4],
     },
     daily: {
       time: ['2026-06-28', '2026-06-29'],
@@ -132,9 +153,26 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   assert.equal(weather.pressure, 1007.4);
   assert.equal(weather.windDirection, 42);
   assert.deepEqual(weather.hourlyForecast.slice(0, 2), [
-    { time: '2026-06-28T09:00', hourLabel: '09:00', temperature: 18.2, precipitationProbability: 65, weatherCode: 61, label: '雨' },
-    { time: '2026-06-28T10:00', hourLabel: '10:00', temperature: 20.3, precipitationProbability: 5, weatherCode: 0, label: '晴' },
+    { time: '2026-06-28T09:00', hourLabel: '09:00', temperature: 18.2, precipitationProbability: 65, humidity: 88, pressure: 1007.4, windSpeed: 12, windDirection: 42, cloudCover: 90, uvIndex: 1.4, weatherCode: 61, label: '雨' },
+    { time: '2026-06-28T10:00', hourLabel: '10:00', temperature: 20.3, precipitationProbability: 5, humidity: 76, pressure: 1006.8, windSpeed: 14, windDirection: 80, cloudCover: 34, uvIndex: 3.2, weatherCode: 0, label: '晴' },
   ]);
+  assert.equal(weather.hourlyForecast[2].humidity, null);
+  assert.equal(weather.hourlyForecast[2].pressure, null);
+  assert.equal(weather.hourlyForecastFull.length, 4);
+  assert.deepEqual(weather.hourlyForecastFull[3], {
+    time: '2026-06-29T09:00',
+    hourLabel: '09:00',
+    temperature: 26.4,
+    precipitationProbability: 18,
+    humidity: 66,
+    pressure: 1004.2,
+    windSpeed: 18,
+    windDirection: 130,
+    cloudCover: 46,
+    uvIndex: 5.4,
+    weatherCode: 2,
+    label: '少云',
+  });
   assert.deepEqual(weather.dailyForecast[0], {
     date: '2026-06-28',
     dayLabel: '今天',
@@ -155,6 +193,78 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   assert.equal(buildWeatherMood({ weatherCode: 0, temperature: 22, isDay: 0 }, new Date('2026-06-28T22:00:00')).key, 'clear-night');
   assert.deepEqual(weatherRadioSeedQueries({ key: 'rain-night' }).slice(0, 2), ['陈奕迅 阴天快乐', '周杰伦 雨下一整晚']);
   assert.equal(fallbackWeatherForRadio({ city: '杭州' }, new Error('offline')).location.name, '杭州');
+});
+
+test('weather helpers normalize complete Lively-style weather payload', () => {
+  const full = normalizeOpenMeteoFullWeather({
+    timezone: 'Asia/Shanghai',
+    current: {
+      weather_code: 0,
+      temperature_2m: 23,
+      apparent_temperature: 27,
+      relative_humidity_2m: 95,
+      precipitation: 0.2,
+      cloud_cover: 40,
+      wind_speed_10m: 8,
+      wind_gusts_10m: 18,
+      wind_direction_10m: 90,
+      surface_pressure: 1007,
+      is_day: 1,
+      time: '2026-07-02T09:30',
+    },
+    hourly: {
+      time: ['2026-07-02T09:00', '2026-07-02T10:00'],
+      weather_code: [0, 61],
+      temperature_2m: [23, 24],
+      apparent_temperature: [27, 28],
+      precipitation_probability: [5, 80],
+      precipitation: [0, 1.2],
+      relative_humidity_2m: [95, 91],
+      surface_pressure: [1007, 1006],
+      wind_speed_10m: [8, 12],
+      wind_gusts_10m: [18, 24],
+      wind_direction_10m: [90, 135],
+      cloud_cover: [40, 88],
+      uv_index: [2.2, 4.5],
+      visibility: [5000, 4300],
+    },
+    daily: {
+      time: ['2026-07-02'],
+      weather_code: [61],
+      temperature_2m_max: [30],
+      temperature_2m_min: [23],
+      sunrise: ['2026-07-02T05:25'],
+      sunset: ['2026-07-02T19:29'],
+      uv_index_max: [6],
+      precipitation_probability_max: [80],
+      wind_speed_10m_max: [16],
+      wind_direction_10m_dominant: [120],
+      wind_gusts_10m_max: [28],
+    },
+  }, { name: '上海', country: 'China', latitude: 31.2, longitude: 121.5, timezone: 'Asia/Shanghai' }, new Date('2026-07-02T09:30:00+08:00'));
+
+  assert.equal(full.ok, true);
+  assert.equal(full.weather.location.name, '上海');
+  assert.equal(full.weather.current.temperature, 23);
+  assert.equal(full.weather.current.apparentTemperature, 27);
+  assert.equal(full.weather.current.visualKey, 'clear-day');
+  assert.equal(full.weather.hourly[0].apparentTemperature, 27);
+  assert.equal(full.weather.hourly[1].precipitation, 1.2);
+  assert.equal(full.weather.hourly[1].visibility, 4300);
+  assert.equal(full.weather.hourly[1].windGusts, 24);
+  assert.equal(full.weather.daily[0].windSpeedMax, 16);
+  assert.equal(full.weather.daily[0].windDirectionDominant, 120);
+  assert.equal(full.weather.daily[0].windGustsMax, 28);
+  assert.deepEqual(full.weather.graph.metrics.map((item) => item.key), [
+    'temperature',
+    'apparentTemperature',
+    'humidity',
+    'windSpeed',
+    'pressure',
+    'uvIndex',
+    'precipitationProbability',
+    'cloudCover',
+  ]);
 });
 
 test('app status route module dispatches version and login status endpoints', async () => {
@@ -205,6 +315,46 @@ test('weather radio route module dispatches weather endpoints', async () => {
     payload: { ok: true, location: { city: '上海', latitude: 31.2, longitude: 121.5 } },
   });
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('weather full route module dispatches complete weather endpoint', async () => {
+  const writes = [];
+  const routes = createWeatherFullRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    buildFullWeather(params) {
+      return Promise.resolve({
+        ok: true,
+        weather: {
+          location: { name: params.city || params.name || '当前位置' },
+          current: { temperature: 23, apparentTemperature: 27 },
+          daily: [],
+          hourly: [],
+          graph: { metrics: [] },
+        },
+        params,
+      });
+    },
+  });
+
+  const url = new URL('http://localhost/api/weather/full?city=杭州&lat=30.2&lon=120.2&timezone=Asia%2FShanghai');
+  assert.equal(await routes.handleRoute('/api/weather/full', {}, {}, url), true);
+  assert.deepEqual(writes[0], {
+    status: 200,
+    payload: {
+      ok: true,
+      weather: {
+        location: { name: '杭州' },
+        current: { temperature: 23, apparentTemperature: 27 },
+        daily: [],
+        hourly: [],
+        graph: { metrics: [] },
+      },
+      params: { city: '杭州', lat: '30.2', lon: '120.2', timezone: 'Asia/Shanghai' },
+    },
+  });
+  assert.equal(await routes.handleRoute('/api/weather/radio', {}, {}, new URL('http://localhost/api/weather/radio')), false);
 });
 
 test('update route module dispatches update endpoints', async () => {
