@@ -36,6 +36,7 @@ const {
   mapQQTrack,
   qqAlbumCover,
 } = require('../server/music/qq');
+const { createUpdateRoutes } = require('../server/routes/update');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
 
 test('cookie helpers normalize Set-Cookie style inputs and detect login cookies', () => {
@@ -179,6 +180,48 @@ test('weather radio route module dispatches weather endpoints', async () => {
     status: 200,
     payload: { ok: true, location: { city: '上海', latitude: 31.2, longitude: 121.5 } },
   });
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('update route module dispatches update endpoints', async () => {
+  const writes = [];
+  const jobs = new Map([
+    ['download-1', { id: 'download-1', createdAt: 2 }],
+    ['patch-1', { id: 'patch-1', createdAt: 3, mode: 'patch' }],
+  ]);
+  const routes = createUpdateRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    fetchLatestUpdateInfo() {
+      return Promise.resolve({ version: '9.9.9' });
+    },
+    localUpdateFallback(reason, opts) {
+      return { ok: false, reason, configured: opts.configured };
+    },
+    updateConfigured: true,
+    startUpdateDownloadJob(info) {
+      return { ok: true, id: 'download-started', version: info.version };
+    },
+    startUpdatePatchJob(info) {
+      return { ok: false, id: 'patch-started', version: info.version };
+    },
+    publicUpdateJob(job) {
+      return job ? { ok: true, id: job.id, mode: job.mode || 'download' } : { ok: false };
+    },
+    updateDownloadJobs: jobs,
+  });
+
+  assert.equal(await routes.handleRoute('/api/update/latest', {}, {}, new URL('http://localhost/api/update/latest')), true);
+  assert.deepEqual(writes[0], { status: 200, payload: { version: '9.9.9' } });
+  assert.equal(await routes.handleRoute('/api/update/download', {}, {}, new URL('http://localhost/api/update/download')), true);
+  assert.deepEqual(writes[1], { status: 200, payload: { ok: true, id: 'download-started', version: '9.9.9' } });
+  assert.equal(await routes.handleRoute('/api/update/download/status', {}, {}, new URL('http://localhost/api/update/download/status?id=download-1')), true);
+  assert.deepEqual(writes[2], { status: 200, payload: { ok: true, id: 'download-1', mode: 'download' } });
+  assert.equal(await routes.handleRoute('/api/update/patch', {}, {}, new URL('http://localhost/api/update/patch')), true);
+  assert.deepEqual(writes[3], { status: 400, payload: { ok: false, id: 'patch-started', version: '9.9.9' } });
+  assert.equal(await routes.handleRoute('/api/update/patch/status', {}, {}, new URL('http://localhost/api/update/patch/status')), true);
+  assert.deepEqual(writes[4], { status: 200, payload: { ok: true, id: 'patch-1', mode: 'patch' } });
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
 });
 

@@ -65,6 +65,7 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createUpdateRoutes } = require('./server/routes/update');
 const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
 
 const PORT = process.env.PORT || 3000;
@@ -2696,6 +2697,16 @@ const weatherRadioRoutes = createWeatherRadioRoutes({
   buildWeatherRadio,
   fetchIpWeatherLocation,
 });
+const updateRoutes = createUpdateRoutes({
+  sendJSON,
+  fetchLatestUpdateInfo,
+  localUpdateFallback,
+  updateConfigured: UPDATE_CONFIG.configured,
+  startUpdateDownloadJob,
+  startUpdatePatchJob,
+  publicUpdateJob,
+  updateDownloadJobs,
+});
 
 const READ_ONLY_API_ROUTES = new Map([
   ['/api/app/version', async (_req, res) => {
@@ -2763,57 +2774,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pn === '/api/update/latest') {
-    try {
-      sendJSON(res, await fetchLatestUpdateInfo());
-    } catch (err) {
-      sendJSON(res, {
-        ...localUpdateFallback(err.message || 'Update check failed', { configured: UPDATE_CONFIG.configured }),
-        error: err.message || 'Update check failed',
-      });
-    }
-    return;
-  }
-
-  if (pn === '/api/update/download') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdateDownloadJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdateDownload]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_DOWNLOAD_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/download/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
-    return;
-  }
-
-  if (pn === '/api/update/patch') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdatePatchJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdatePatch]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_PATCH_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/patch/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).find(item => item.mode === 'patch');
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
+  if (await updateRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
