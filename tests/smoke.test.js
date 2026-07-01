@@ -11,7 +11,7 @@ test('maintenance baseline scripts are wired', () => {
 
   assert.equal(
     scripts.check,
-    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/comment-barrage-state.js && node --check public/visual-cover-state.js'
+    'node --check server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/overlay-preload.js && node --check dj-analyzer.js && node --check build/after-pack.js && node --check build/verify-release-artifacts.js && node --check public/api-client.js && node --check public/storage.js && node --check public/actions.js && node --check public/performance.js && node --check public/playlist-state.js && node --check public/content-shelf-state.js && node --check public/playback-session-state.js && node --check public/home-weather-hero-state.js && node --check public/home-weather-ui.js && node --check public/update-preview-ui.js && node --check public/hotkeys-ui.js && node --check public/comment-barrage-state.js && node --check public/visual-cover-state.js'
   );
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
@@ -28,6 +28,8 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-hero-state\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-ui\.js"><\/script>/);
+  assert.match(html, /<script src="update-preview-ui\.js"><\/script>/);
+  assert.match(html, /<script src="hotkeys-ui\.js"><\/script>/);
   assert.match(html, /<script src="comment-barrage-state\.js"><\/script>/);
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
@@ -111,6 +113,27 @@ test('home weather cache and forecast UI are wired', () => {
   assert.doesNotMatch(html, /home-lyric-card/);
   assert.doesNotMatch(html, /Random Lyric/);
   assert.doesNotMatch(html, /if \(!emptyHomeActive\) return;\s*\n\s*loadHomeWeatherRadio\(false\);/);
+});
+
+test('update preview and hotkey controllers are externalized', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const updateUi = fs.readFileSync(path.join(repoRoot, 'public', 'update-preview-ui.js'), 'utf8');
+  const hotkeysUi = fs.readFileSync(path.join(repoRoot, 'public', 'hotkeys-ui.js'), 'utf8');
+
+  assert.match(updateUi, /window\.MineradioUpdatePreviewUi/);
+  assert.match(updateUi, /function renderUpdatePreviewPanel\(/);
+  assert.match(updateUi, /function startRealUpdateDownload\(/);
+  assert.match(hotkeysUi, /window\.MineradioHotkeysUi/);
+  assert.match(hotkeysUi, /function ensureHotkeyModal\(/);
+  assert.match(hotkeysUi, /function renderHotkeySettings\(/);
+  assert.match(html, /window\.MineradioUpdatePreviewUi\.init/);
+  assert.match(html, /window\.MineradioHotkeysUi\.init/);
+  assert.match(html, /function openUpdatePanel\(\)/);
+  assert.match(html, /function openHotkeySettings\(\)/);
+  assert.doesNotMatch(html, /function renderUpdatePreviewPanel\(/);
+  assert.doesNotMatch(html, /function startRealUpdateDownload\(/);
+  assert.doesNotMatch(html, /function ensureHotkeyModal\(/);
+  assert.doesNotMatch(html, /function renderHotkeySettings\(/);
 });
 
 test('comment barrage is rendered as Three.js floating text instead of DOM marquee', () => {
