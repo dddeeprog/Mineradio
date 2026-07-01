@@ -37,6 +37,7 @@ const {
   qqAlbumCover,
 } = require('../server/music/qq');
 const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
+const { createDiscoverRoutes } = require('../server/routes/discover');
 const { createProxyRoutes } = require('../server/routes/proxy');
 const { createUpdateRoutes } = require('../server/routes/update');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
@@ -301,6 +302,25 @@ test('beatmap cache route module dispatches cache endpoints', async () => {
   assert.equal(await routes.handleRoute('/api/beatmap/cache', { method: 'POST', body: { key: 'saved' } }, {}, new URL('http://localhost/api/beatmap/cache')), true);
   assert.deepEqual(writes[2].payload, { ok: true, key: 'saved' });
   assert.equal(await routes.handleRoute('/api/search', { method: 'GET' }, {}, new URL('http://localhost/api/search')), false);
+});
+
+test('discover route module dispatches the home discovery endpoint', async () => {
+  const writes = [];
+  const routes = createDiscoverRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    handleDiscoverHome() {
+      return Promise.resolve({ loggedIn: true, dailySongs: [1], playlists: [2], podcasts: [3] });
+    },
+  });
+
+  assert.equal(await routes.handleRoute('/api/discover/home', {}, {}, new URL('http://localhost/api/discover/home')), true);
+  assert.deepEqual(writes[0], {
+    status: 200,
+    payload: { loggedIn: true, dailySongs: [1], playlists: [2], podcasts: [3] },
+  });
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
 });
 
 test('music mapping helpers preserve renderer-facing response shape', () => {

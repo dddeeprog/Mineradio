@@ -66,6 +66,7 @@ const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
+const { createDiscoverRoutes } = require('./server/routes/discover');
 const { createProxyRoutes } = require('./server/routes/proxy');
 const { createUpdateRoutes } = require('./server/routes/update');
 const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
@@ -2725,6 +2726,10 @@ const beatmapCacheRoutes = createBeatmapCacheRoutes({
   writeBeatMapCache,
   readRequestBody,
 });
+const discoverRoutes = createDiscoverRoutes({
+  sendJSON,
+  handleDiscoverHome,
+});
 
 const READ_ONLY_API_ROUTES = new Map([
   ['/api/app/version', async (_req, res) => {
@@ -2804,13 +2809,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pn === '/api/discover/home') {
-    try {
-      sendJSON(res, await handleDiscoverHome());
-    } catch (err) {
-      console.error('[DiscoverHome]', err);
-      sendJSON(res, { error: err.message, loggedIn: false, dailySongs: [], playlists: [], podcasts: [] }, 500);
-    }
+  if (await discoverRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
