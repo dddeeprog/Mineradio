@@ -16,6 +16,9 @@
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
+<script src="weather-lively-graph.js"></script>
+<script src="weather-lively-state.js"></script>
+<script src="weather-lively-ui.js"></script>
 <script src="home-weather-hero-state.js"></script>
 <script src="home-weather-ui.js"></script>
 <script src="update-preview-ui.js"></script>
@@ -32,6 +35,7 @@ try {
 }
 </script>
 <link rel="stylesheet" href="styles/app.css">
+<link rel="stylesheet" href="styles/weather-lively.css">
 </head>
 <body>
 <div id="desktop-window-shell">
@@ -136,12 +140,16 @@ try {
           <div class="home-weather-curve-card">
             <div class="home-weather-curve-head">
               <div>
-                <div class="home-weather-curve-title">Hourly Curve</div>
+                <div class="home-weather-curve-title">未来 12 小时</div>
                 <button id="home-weather-now-btn" class="home-weather-now-btn" type="button">现在</button>
               </div>
               <div class="home-weather-curve-preview" id="home-weather-hour-preview">等待小时预报</div>
             </div>
+            <div class="home-weather-curve-tabs" id="home-weather-curve-tabs"></div>
             <div class="home-weather-curve-wrap" id="home-weather-curve">
+              <div class="home-weather-curve-backdrop" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
               <svg class="home-weather-curve-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                   <linearGradient id="home-weather-curve-gradient" x1="0" y1="0" x2="0" y2="1">
@@ -155,8 +163,9 @@ try {
                 <path id="home-weather-curve-line-glow" class="home-weather-curve-line-glow" d=""></path>
                 <path id="home-weather-curve-line" class="home-weather-curve-line" d=""></path>
                 <line id="home-weather-selected-guide" class="home-weather-selected-guide" x1="0" y1="18" x2="0" y2="86"></line>
-                <circle id="home-weather-selected-dot" class="home-weather-selected-dot" cx="0" cy="0" r="2.5"></circle>
               </svg>
+              <div class="home-weather-value-labels" id="home-weather-value-labels" aria-hidden="true"></div>
+              <div class="home-weather-curve-icons" id="home-weather-curve-icons" aria-hidden="true"></div>
               <div class="home-weather-forecast" id="home-weather-forecast">
                 <div class="home-weather-hour-ticks" id="home-weather-hour-ticks"></div>
               </div>
@@ -182,6 +191,7 @@ try {
             </div>
           </span>
           <button class="home-chip" type="button" onclick="openHomePlayerConsole()">播放器控制台</button>
+          <button id="home-dynamic-lyrics-btn" class="home-chip" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
         </div>
       </div>
     </div>
@@ -14153,13 +14163,14 @@ function makeContentListManager() {
       if (targetPanel && targetPanel.mesh && targetPanel.mesh.material) materials.push(targetPanel.mesh.material);
       if (targetRecordToolbar && targetRecordToolbar.mesh && targetRecordToolbar.mesh.material) materials.push(targetRecordToolbar.mesh.material);
       if (window.gsap) {
+        var isRecordClose = !!(targetRecordToolbar && targetRecordToolbar.mesh);
+        var closeRetreat = isRecordClose ? 0.045 : 0.10;
         window.gsap.killTweensOf(targetGroup.position);
         window.gsap.killTweensOf(targetGroup.scale);
-        window.gsap.to(targetGroup.scale, { x: 0.965, y: 0.965, z: 0.965, duration: 0.18, ease: 'power2.in' });
         window.gsap.to(targetGroup.position, {
-          x: targetGroup.position.x + 0.18,
-          y: targetGroup.position.y - 0.02,
-          z: targetGroup.position.z - 0.10,
+          x: targetGroup.position.x,
+          y: targetGroup.position.y,
+          z: targetGroup.position.z - closeRetreat,
           duration: 0.18,
           ease: 'power2.in'
         });
@@ -15528,16 +15539,37 @@ function buildHomeWeatherCurveSafe(selection) {
   var api = homeWeatherHeroStateApi();
   selection = selection || {};
   var selectedIndex = selection && selection.lockedHourIndex != null ? selection.lockedHourIndex : selection && selection.hoverHourIndex;
-  if (api && typeof api.buildHourlyTemperatureCurve === 'function') return api.buildHourlyTemperatureCurve(homeWeatherRadioState.weather, { limit: 6, selectedIndex: selectedIndex });
-  return { points: [], minTemperature: null, maxTemperature: null, path: '', smoothPath: '', areaPath: '', selectedPoint: null };
+  if (api && typeof api.buildHourlyTemperatureCurve === 'function') {
+    return api.buildHourlyTemperatureCurve(homeWeatherRadioState.weather, {
+      limit: 12,
+      selectedIndex: selectedIndex,
+      selectedDayIndex: selection.selectedDayIndex,
+      metricKey: selection.selectedMetricKey,
+      now: Date.now(),
+    });
+  }
+  return { metricKey: 'temperature', metricLabel: '温度', axisUnit: '°', scopeLabel: '未来 12 小时', points: [], minTemperature: null, maxTemperature: null, path: '', smoothPath: '', areaPath: '', selectedPoint: null };
 }
 function buildHomeWeatherMetricsSafe(selectedDay) {
   var api = homeWeatherHeroStateApi();
   if (api && typeof api.buildWeatherMetrics === 'function') return api.buildWeatherMetrics(homeWeatherRadioState.weather, selectedDay);
   return [];
 }
+function buildHomeWeatherCurveMetricOptionsSafe() {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherCurveMetricOptions === 'function') return api.buildWeatherCurveMetricOptions();
+  return [{ key: 'temperature', label: '温度' }];
+}
+function buildHomeWeatherIconKeySafe(code, isDay, label) {
+  var api = homeWeatherHeroStateApi();
+  if (api && typeof api.buildWeatherIconKey === 'function') return api.buildWeatherIconKey(code, isDay, label);
+  return 'clear-day';
+}
 function createHomeWeatherUiController() {
   if (!window.MineradioHomeWeatherUi || typeof window.MineradioHomeWeatherUi.init !== 'function') return null;
+  var livelyUi = window.MineradioWeatherLivelyUi && typeof window.MineradioWeatherLivelyUi.init === 'function'
+    ? window.MineradioWeatherLivelyUi.init({ document: document })
+    : null;
   return window.MineradioHomeWeatherUi.init({
     getWeatherState: function() { return homeWeatherRadioState; },
     buildFields: buildHomeWeatherHeroFieldsSafe,
@@ -15545,6 +15577,8 @@ function createHomeWeatherUiController() {
     buildAlert: buildHomeWeatherAlertSafe,
     buildDailyFields: buildHomeWeatherDailyFieldsSafe,
     buildCurve: buildHomeWeatherCurveSafe,
+    buildCurveMetricOptions: buildHomeWeatherCurveMetricOptionsSafe,
+    buildIconKey: buildHomeWeatherIconKeySafe,
     buildMetrics: buildHomeWeatherMetricsSafe,
     buildAdvice: buildHomeWeatherAdviceSafe,
     resolveSelection: function(selection, action) {
@@ -15553,13 +15587,14 @@ function createHomeWeatherUiController() {
         return api.resolveInteractiveWeatherSelection(selection, action || {});
       }
       if (action && action.type === 'reset') {
-        return { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null };
+        return { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null, selectedMetricKey: 'temperature' };
       }
-      return selection || { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null };
+      return selection || { hoverHourIndex: null, lockedHourIndex: null, selectedDayIndex: null, expandedMetricKey: null, selectedMetricKey: 'temperature' };
     },
     escHtml: escHtml,
     cityKey: HOME_WEATHER_CITY_KEY,
     cacheKey: HOME_WEATHER_CACHE_KEY,
+    weatherLivelyUi: livelyUi,
     loadWeather: function(force, opts) { return loadHomeWeatherRadio(force, opts); },
     locateWeather: function() { return locateWeatherRadio(); },
     showToast: showToast,
@@ -16331,6 +16366,13 @@ function dismissHomePage(opts) {
   setPeek(document.getElementById('search-area'), false, 'search');
   if (typeof setFocusZone === 'function') setFocusZone(null, true);
 }
+function enterHomeDynamicLyrics(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  dismissHomePage({ reason: 'dynamic-lyrics-button' });
+}
 function isPointInsideRectWithPad(x, y, rect, pad) {
   if (!rect || rect.width <= 0 || rect.height <= 0) return false;
   pad = Number(pad) || 0;
@@ -16356,6 +16398,7 @@ function isHomeBlankDismissClick(e) {
   if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
   var target = e.target;
   if (!target || !target.closest) return false;
+  if (target.closest('#empty-home')) return false;
   var blockedSelector = [
     'button',
     'a',

@@ -1,0 +1,15 @@
+.home-weather-dashboard.weather-lively-dashboard{gap:10px}
+.weather-lively-dashboard{--weather-lively-accent:var(--home-accent);contain:layout paint}
+.weather-lively-panel{background:linear-gradient(145deg,rgba(255,255,255,.074),rgba(255,255,255,.026))!important}
+.weather-lively-graph{isolation:isolate}
+.weather-lively-graph[data-has-selection] .home-weather-selected-guide{opacity:1}
+.weather-lively-graph .home-weather-curve-line{stroke-width:1.25}
+.weather-lively-graph .home-weather-curve-icons{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.weather-lively-day{transition:background .16s,border-color .16s,color .16s,transform .16s}
+.weather-lively-day:hover{transform:translateY(-1px)}
+.weather-lively-metric{transition:background .16s,border-color .16s,color .16s,transform .16s}
+.weather-lively-metric:hover{transform:translateY(-1px)}
+@media (prefers-reduced-motion:reduce){
+  .weather-lively-day,.weather-lively-metric{transition:none}
+  .weather-lively-day:hover,.weather-lively-metric:hover{transform:none}
+}

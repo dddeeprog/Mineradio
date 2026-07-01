@@ -6,6 +6,7 @@
     lockedHourIndex: null,
     selectedDayIndex: null,
     expandedMetricKey: null,
+    selectedMetricKey: 'temperature',
   };
 
   function cloneDefaultSelection() {
@@ -14,6 +15,7 @@
       lockedHourIndex: null,
       selectedDayIndex: null,
       expandedMetricKey: null,
+      selectedMetricKey: 'temperature',
     };
   }
 
@@ -32,6 +34,15 @@
 
     function escHtml(value) {
       return typeof context.escHtml === 'function' ? context.escHtml(value) : fallbackEscHtml(value);
+    }
+
+    function formatWeatherClock(value) {
+      var text = String(value || '');
+      var match = text.match(/T(\d{2}:\d{2})/);
+      if (match) return match[1];
+      var parsed = Date.parse(text);
+      if (isFinite(parsed)) return new Date(parsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return text || '--:--';
     }
 
     function weatherState() {
@@ -63,12 +74,20 @@
       return { points: [], path: '', smoothPath: '', areaPath: '', selectedPoint: null };
     }
 
+    function buildCurveMetricOptions() {
+      return typeof context.buildCurveMetricOptions === 'function' ? (context.buildCurveMetricOptions() || []) : [{ key: 'temperature', label: '温度' }];
+    }
+
     function buildMetrics(selectedDay) {
       return typeof context.buildMetrics === 'function' ? (context.buildMetrics(selectedDay) || []) : [];
     }
 
     function buildAdvice() {
       return typeof context.buildAdvice === 'function' ? (context.buildAdvice() || []) : [];
+    }
+
+    function weatherLivelyUi() {
+      return context.weatherLivelyUi || null;
     }
 
     function resolveSelection(action) {
@@ -94,6 +113,38 @@
       return isFinite(idx) && idx >= 0 ? (curve.points || [])[Math.round(idx)] : null;
     }
 
+    function renderWeatherIcon(iconKey) {
+      iconKey = String(iconKey || 'clear-day');
+      return '<span class="home-weather-icon home-weather-icon-' + escHtml(iconKey) + '" aria-hidden="true"></span>';
+    }
+
+    function renderMetricInstrument(item) {
+      var instrument = item && item.instrument || {};
+      var type = instrument.type || 'none';
+      if (type === 'ring') {
+        return '<div class="home-weather-instrument home-weather-instrument-ring" style="--p:' + escHtml(instrument.percent || 0) + '"><span>' + escHtml(item.value || '--') + '</span></div>';
+      }
+      if (type === 'compass') {
+        return '<div class="home-weather-instrument home-weather-instrument-compass" style="--deg:' + escHtml(instrument.degrees || 0) + 'deg;--p:' + escHtml(instrument.percent || 0) + '"><span></span></div>';
+      }
+      if (type === 'sunArc') {
+        return '<div class="home-weather-instrument home-weather-instrument-sun" style="--p:' + escHtml(instrument.progress || 50) + '"><span></span></div>';
+      }
+      if (type === 'bar') {
+        return '<div class="home-weather-instrument home-weather-instrument-bar" style="--p:' + escHtml(instrument.percent || 0) + '"><span></span></div>';
+      }
+      if (type === 'gauge') {
+        return '<div class="home-weather-instrument home-weather-instrument-gauge" style="--p:' + escHtml(instrument.percent || 50) + '"><span></span></div>';
+      }
+      if (type === 'split') {
+        return '<div class="home-weather-instrument home-weather-instrument-split" style="--p:' + escHtml(instrument.primary || 0) + ';--q:' + escHtml(instrument.secondary || 0) + '"><span></span><i></i></div>';
+      }
+      if (type === 'icon') {
+        return '<div class="home-weather-instrument home-weather-instrument-icon">' + renderWeatherIcon(instrument.iconKey || item.icon || 'clear-day') + '</div>';
+      }
+      return '<div class="home-weather-instrument home-weather-instrument-none"></div>';
+    }
+
     function updateWeatherCityChip(fields) {
       var state = weatherState();
       fields = fields || buildFields();
@@ -115,7 +166,8 @@
       if (title) title.textContent = (fields.city || state.city || '上海') + ' · ' + (fields.label || '天气');
       if (sub) {
         var updated = state.updatedAt ? new Date(state.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '未更新';
-        sub.textContent = (state.error === 'WEATHER_CACHE_STALE' ? '缓存天气 · ' : '天气详情 · ') + updated;
+        var observed = state.weather && state.weather.time ? formatWeatherClock(state.weather.time) : '--:--';
+        sub.textContent = (state.error === 'WEATHER_CACHE_STALE' ? '缓存天气' : '天气详情') + ' · 天气 ' + observed + ' · 刷新 ' + updated;
       }
       if (grid) {
         var details = [
@@ -151,38 +203,65 @@
       var area = document.getElementById('home-weather-curve-area');
       var forecast = document.getElementById('home-weather-forecast');
       var ticks = document.getElementById('home-weather-hour-ticks');
+      var tabs = document.getElementById('home-weather-curve-tabs');
+      var icons = document.getElementById('home-weather-curve-icons');
+      var values = document.getElementById('home-weather-value-labels');
       var guide = document.getElementById('home-weather-selected-guide');
-      var dot = document.getElementById('home-weather-selected-dot');
       var preview = document.getElementById('home-weather-hour-preview');
       var selected = selectedHomeWeatherHourPoint(curve);
+      var metricKey = curve.metricKey || selection.selectedMetricKey || 'temperature';
+      var tickRows = curve.timeTicks || curve.points || [];
+      var iconRows = curve.iconRow || curve.points || [];
+      var valueRows = curve.valueLabels || [];
+      var displayPoint = selected || (curve.points || [])[0] || null;
+      if (tabs) {
+        tabs.innerHTML = buildCurveMetricOptions().map(function(item) {
+          var active = metricKey === item.key;
+          return '<button class="home-weather-curve-tab' + (active ? ' active' : '') + '" type="button" data-weather-curve-metric="' + escHtml(item.key || '') + '">' + escHtml(item.label || '指标') + '</button>';
+        }).join('');
+      }
       if (line) line.setAttribute('d', curve.smoothPath || curve.path || '');
       if (glow) glow.setAttribute('d', curve.smoothPath || curve.path || '');
       if (area) area.setAttribute('d', curve.areaPath || '');
       if (guide) {
-        guide.setAttribute('x1', selected ? selected.x : 0);
-        guide.setAttribute('x2', selected ? selected.x : 0);
-        guide.style.opacity = selected ? '1' : '0';
-      }
-      if (dot) {
-        dot.setAttribute('cx', selected ? selected.x : 0);
-        dot.setAttribute('cy', selected ? selected.y : 0);
-        dot.style.opacity = selected ? '1' : '0';
+        guide.setAttribute('x1', displayPoint ? displayPoint.x : 0);
+        guide.setAttribute('x2', displayPoint ? displayPoint.x : 0);
+        guide.style.opacity = displayPoint ? '1' : '0';
       }
       if (ticks) {
-        ticks.innerHTML = (curve.points || []).map(function(point) {
-          var active = selected && selected.index === point.index;
-          return '<button class="home-weather-hour' + (active ? ' active' : '') + '" type="button" data-weather-hour="' + point.index + '">' +
+        ticks.innerHTML = tickRows.map(function(tick) {
+          var active = selected && selected.index === tick.index;
+          var hourTick = tick.text || String(tick.hourLabel || '--:--').slice(0, 2);
+          return '<button class="home-weather-hour' + (active ? ' active' : '') + '" type="button" data-weather-hour="' + tick.index + '">' +
             '<span class="home-weather-hour-dot"></span>' +
-            '<span class="home-weather-hour-time">' + escHtml(point.hourLabel || '--:--') + '</span>' +
-            '<span class="home-weather-hour-temp">' + escHtml(point.temperatureText || '--°') + '</span>' +
+            '<span class="home-weather-hour-time">' + escHtml(hourTick) + '</span>' +
           '</button>';
         }).join('');
       } else if (forecast) {
         forecast.innerHTML = '';
       }
+      if (icons) {
+        icons.innerHTML = iconRows.map(function(icon) {
+          var x = Math.max(3, Math.min(97, Number(icon.x) || 0));
+          return '<span class="home-weather-curve-icon" style="left:' + x + '%">' + renderWeatherIcon(icon.iconKey || 'clear-day') + '</span>';
+        }).join('');
+      }
+      if (values) {
+        values.innerHTML = displayPoint ? valueRows.filter(function(item) {
+          return item.index === displayPoint.index;
+        }).map(function(item) {
+          var labelX = Math.max(5, Math.min(95, Number(item.x) || 0));
+          var labelY = Math.max(12, Math.min(70, Number(item.y) || 0));
+          return '<span class="home-weather-value-label" style="left:' + labelX + '%;top:' + labelY + '%">' + escHtml(item.text || item.valueText || '') + '</span>';
+        }).join('') : '';
+      }
       if (preview) {
-        if (selected) preview.textContent = selected.hourLabel + ' · ' + selected.temperatureText + ' · ' + selected.label + ' · 降水 ' + selected.rainText;
-        else preview.textContent = (fields && fields.label || '当前天气') + ' · ' + (fields && fields.temperatureText || '--°') + ' · 预览小时曲线';
+        if (selected) preview.textContent = selected.hourLabel + ' · ' + (curve.metricLabel || '指标') + ' ' + (selected.valueText || selected.temperatureText || '--') + ' · ' + selected.label + ' · 降水 ' + selected.rainText;
+        else preview.textContent = (curve.scopeLabel || '未来 12 小时') + ' · ' + (curve.metricLabel || '温度') + '趋势（' + (curve.axisUnit || '°') + '）';
+      }
+      var lively = weatherLivelyUi();
+      if (lively && typeof lively.syncGraphModel === 'function') {
+        lively.syncGraphModel(curve, { metricKey: metricKey, selection: selection, selectedPoint: displayPoint });
       }
     }
 
@@ -195,6 +274,7 @@
         return '<button class="home-weather-day' + (active ? ' active' : '') + '" type="button" data-weather-day="' + index + '">' +
           '<div class="home-weather-day-date">' + escHtml(day.date ? day.date.slice(5) : '--/--') + '</div>' +
           '<div class="home-weather-day-name">' + escHtml(day.dayLabel || '未来') + '</div>' +
+          '<div class="home-weather-day-icon">' + renderWeatherIcon(day.iconKey || 'clear-day') + '</div>' +
           '<div class="home-weather-day-rain">' + escHtml(day.label || '天气') + ' · ' + escHtml(day.rainText || '--') + '</div>' +
           '<div class="home-weather-day-range">' + escHtml(day.rangeText || '-- / --') + '</div>' +
         '</button>';
@@ -208,11 +288,14 @@
       metrics.innerHTML = rows.map(function(item) {
         var active = selection.expandedMetricKey === item.key;
         return '<button class="home-weather-metric' + (active ? ' active' : '') + '" type="button" data-weather-metric="' + escHtml(item.key || '') + '">' +
+          renderMetricInstrument(item) +
           '<div class="home-weather-metric-title">' + escHtml(item.title || '指标') + '</div>' +
           '<div class="home-weather-metric-value">' + escHtml(item.value || '--') + '</div>' +
           '<div class="home-weather-metric-detail">' + escHtml(item.detail || '') + '</div>' +
         '</button>';
       }).join('');
+      var lively = weatherLivelyUi();
+      if (lively && typeof lively.syncMetricCards === 'function') lively.syncMetricCards(rows, selection);
     }
 
     function renderHomeWeatherHero() {
@@ -245,6 +328,10 @@
           return '<div class="home-weather-advice-card"><div class="home-weather-advice-title">' + escHtml(item.title || '建议') + '</div><div class="home-weather-advice-text">' + escHtml(item.text || '') + '</div></div>';
         }).join('');
       }
+      var lively = weatherLivelyUi();
+      if (lively && typeof lively.decorateDashboard === 'function') {
+        lively.decorateDashboard({ fields: fields, selection: selection });
+      }
       updateWeatherCityChip(fields);
       renderWeatherDetailPopover(fields);
     }
@@ -257,6 +344,7 @@
       if (homeWeatherInteractionsBound) return;
       var hero = document.querySelector('.home-hero');
       var forecast = document.getElementById('home-weather-forecast');
+      var curveTabs = document.getElementById('home-weather-curve-tabs');
       var daily = document.getElementById('home-weather-daily');
       var metrics = document.getElementById('home-weather-metrics');
       var nowBtn = document.getElementById('home-weather-now-btn');
@@ -296,6 +384,16 @@
           e.preventDefault();
           e.stopPropagation();
           resolveSelection({ type: 'clickHour', index: btn.getAttribute('data-weather-hour') });
+          renderHomeWeatherHero(false);
+        });
+      }
+      if (curveTabs) {
+        curveTabs.addEventListener('click', function(e) {
+          var btn = e.target && e.target.closest && e.target.closest('[data-weather-curve-metric]');
+          if (!btn) return;
+          e.preventDefault();
+          e.stopPropagation();
+          resolveSelection({ type: 'clickCurveMetric', key: btn.getAttribute('data-weather-curve-metric') });
           renderHomeWeatherHero(false);
         });
       }

@@ -12,6 +12,7 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check server\.js/);
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
+  assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.equal(scripts.test, 'node --test tests/*.test.js');
   assert.equal(scripts['verify:artifacts'], 'node build/verify-release-artifacts.js');
@@ -20,6 +21,7 @@ test('maintenance baseline scripts are wired', () => {
     'npm run check && npm run test && npm run audit:prod && npm run build:win:dir'
   );
 });
+
 test('complete weather route is registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
   const route = fs.readFileSync(path.join(repoRoot, 'server', 'routes', 'weather-full.js'), 'utf8');
@@ -34,6 +36,9 @@ test('playback session restore script is wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
+  assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
+  assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
+  assert.match(html, /<script src="weather-lively-ui\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-hero-state\.js"><\/script>/);
   assert.match(html, /<script src="home-weather-ui\.js"><\/script>/);
   assert.match(html, /<script src="update-preview-ui\.js"><\/script>/);
@@ -51,11 +56,27 @@ test('main stylesheet is loaded as an external asset', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
 
   assert.match(html, /<link rel="stylesheet" href="styles\/app\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="styles\/weather-lively\.css">/);
   assert.doesNotMatch(html, /<style>[\s\S]*<\/style>/);
   assert.match(css, /#empty-home/);
   assert.match(css, /\.home-weather-curve-card/);
   assert.match(css, /#playlist-panel/);
   assert.match(css, /#comment-barrage-layer/);
+});
+
+test('Lively weather dashboard UI boundary is externalized', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const livelyUi = fs.readFileSync(path.join(repoRoot, 'public', 'weather-lively-ui.js'), 'utf8');
+  const livelyCss = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'weather-lively.css'), 'utf8');
+
+  assert.match(html, /window\.MineradioWeatherLivelyUi/);
+  assert.match(livelyUi, /MineradioWeatherLivelyUi/);
+  assert.match(livelyUi, /decorateDashboard/);
+  assert.match(livelyUi, /syncGraphModel/);
+  assert.match(livelyUi, /metricKey/);
+  assert.match(livelyCss, /\.weather-lively-dashboard/);
+  assert.match(livelyCss, /\.weather-lively-graph/);
+  assert.match(livelyCss, /\.weather-lively-metric/);
 });
 
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
@@ -94,25 +115,42 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(html, /document\.addEventListener\('visibilitychange'/);
   assert.match(html, /id="home-weather-forecast"/);
   assert.match(html, /id="home-weather-curve"/);
+  assert.match(html, /未来 12 小时/);
+  assert.match(html, /id="home-weather-curve-tabs"/);
+  assert.match(html, /home-weather-curve-backdrop/);
   assert.match(html, /id="home-weather-curve-gradient"/);
   assert.match(html, /id="home-weather-curve-line-glow"/);
   assert.match(html, /id="home-weather-selected-guide"/);
-  assert.match(html, /id="home-weather-selected-dot"/);
+  assert.doesNotMatch(html, /id="home-weather-selected-dot"/);
+  assert.match(html, /id="home-weather-curve-icons"/);
   assert.match(html, /id="home-weather-hour-ticks"/);
   assert.match(html, /id="home-weather-daily"/);
   assert.match(html, /id="home-weather-metrics"/);
   assert.match(html, /id="home-weather-alert"/);
+  assert.match(html, /进入动态歌词/);
   assert.match(html, /class="home-weather-scene/);
   assert.match(html, /id="home-weather-advice"/);
   assert.match(html, /window\.MineradioHomeWeatherUi\.init/);
   assert.match(homeWeatherUi, /function renderHomeWeatherCurve\(/);
   assert.match(homeWeatherUi, /function renderHomeWeatherMetrics\(/);
+  assert.match(homeWeatherUi, /home-weather-curve-tab/);
+  assert.match(homeWeatherUi, /home-weather-icon/);
+  assert.match(homeWeatherUi, /home-weather-instrument/);
+  assert.match(homeWeatherUi, /axisUnit/);
+  assert.match(homeWeatherUi, /curve\.timeTicks/);
+  assert.match(homeWeatherUi, /curve\.iconRow/);
+  assert.match(homeWeatherUi, /curve\.valueLabels/);
+  assert.match(homeWeatherUi, /var displayPoint = selected \|\| \(curve\.points \|\| \[\]\)\[0\] \|\| null;/);
+  assert.match(homeWeatherUi, /home-weather-value-label/);
   assert.match(homeWeatherUi, /function bindHomeWeatherInteractions\(/);
+  assert.doesNotMatch(homeWeatherUi, /top:' \+ y \+ '%'/);
   assert.doesNotMatch(html, /function renderHomeWeatherCurve\(/);
   assert.doesNotMatch(html, /function renderHomeWeatherMetrics\(/);
   assert.doesNotMatch(html, /function bindHomeWeatherInteractions\(/);
   assert.match(html, /buildWeatherForecastFields/);
   assert.match(html, /buildHourlyTemperatureCurve/);
+  assert.match(html, /buildWeatherCurveMetricOptions/);
+  assert.match(html, /buildWeatherIconKey/);
   assert.match(html, /buildWeatherMetrics/);
   assert.match(html, /resolveInteractiveWeatherSelection/);
   assert.match(html, /buildWeatherAdvice/);
@@ -123,6 +161,43 @@ test('home weather cache and forecast UI are wired', () => {
   assert.doesNotMatch(html, /home-lyric-card/);
   assert.doesNotMatch(html, /Random Lyric/);
   assert.doesNotMatch(html, /if \(!emptyHomeActive\) return;\s*\n\s*loadHomeWeatherRadio\(false\);/);
+});
+
+test('home weather curve follows Lively-style layered graph contract', () => {
+  const state = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-hero-state.js'), 'utf8');
+  const ui = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-ui.js'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(state, /baselineY:\s*82/);
+  assert.match(state, /graphTopY:\s*30/);
+  assert.match(state, /graphBottomY:\s*70/);
+  assert.match(state, /timeTicks:\s*timeTicks/);
+  assert.match(state, /iconRow:\s*iconRow/);
+  assert.match(state, /valueLabels:\s*valueLabels/);
+  assert.match(ui, /curve\.timeTicks \|\| curve\.points/);
+  assert.match(ui, /curve\.iconRow \|\| curve\.points/);
+  assert.match(ui, /curve\.valueLabels \|\| \[\]/);
+  assert.match(css, /\.home-weather-curve-line\{[^}]*stroke-width:1\.25/);
+  assert.match(css, /\.home-weather-curve-backdrop/);
+  assert.match(css, /\.home-weather-curve-icons\{[^}]*background:/);
+  assert.match(css, /\.home-weather-value-label/);
+});
+
+test('home internal clicks do not dismiss and dynamic lyrics exit is explicit', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /id="home-dynamic-lyrics-btn"/);
+  assert.match(html, /dismissHomePage\(\{ reason: 'dynamic-lyrics-button' \}\)/);
+  assert.match(html, /target\.closest\('#empty-home'\)/);
+});
+
+test('home glass is stable before SVG glass filter readiness', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+  const homeBlock = css.match(/\.home-hero,\.home-card,\.home-tile,\.home-mosaic-cell\{[\s\S]*?\}/);
+
+  assert.ok(homeBlock);
+  assert.match(homeBlock[0], /backdrop-filter:blur\(26px\)/);
+  assert.doesNotMatch(homeBlock[0], /url\(#mineradio-control-glass-filter\)/);
 });
 
 test('update preview and hotkey controllers are externalized', () => {
@@ -421,4 +496,12 @@ test('record shelf no longer exposes top or locate shortcuts', () => {
   assert.doesNotMatch(toolbarBlock[0], /key: 'locate'/);
   assert.doesNotMatch(html, /UI_HIT_SELECTOR = '[^']*#record-shelf-fab-actions/);
   assert.doesNotMatch(html, /function syncRecordShelfFabActions\(show\)/);
+});
+
+test('record shelf close animation fades in place without fixed shrink drift', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /var closeRetreat = isRecordClose \? 0\.045 : 0\.10;/);
+  assert.doesNotMatch(html, /window\.gsap\.to\(targetGroup\.scale, \{ x: 0\.965, y: 0\.965, z: 0\.965/);
+  assert.doesNotMatch(html, /x: targetGroup\.position\.x \+ 0\.18/);
 });

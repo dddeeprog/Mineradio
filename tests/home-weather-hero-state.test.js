@@ -11,6 +11,8 @@ const {
   buildWeatherMetrics,
   buildWeatherDailyFields,
   buildHourlyTemperatureCurve,
+  buildWeatherCurveMetricOptions,
+  buildWeatherIconKey,
   resolveInteractiveWeatherSelection,
   collectLyricSnippets,
   selectRotatingLyric,
@@ -124,9 +126,15 @@ test('builds weather scene, alert and dashboard metrics safely', () => {
 
   const metrics = buildWeatherMetrics(weather);
   assert.equal(metrics.length, 6);
-  assert.deepEqual(metrics.map((item) => item.key), ['apparent', 'humidity', 'wind', 'uv', 'pressure', 'sun']);
+  assert.deepEqual(metrics.map((item) => item.key), ['humidity', 'wind', 'sun', 'uv', 'pressure', 'precipitation']);
   assert.equal(metrics.find((item) => item.key === 'wind').value, '东北风 8 km/h');
   assert.equal(metrics.find((item) => item.key === 'pressure').value, '1007 hPa');
+  assert.deepEqual(metrics.find((item) => item.key === 'humidity').instrument, { type: 'ring', percent: 95 });
+  assert.deepEqual(metrics.find((item) => item.key === 'wind').instrument, { type: 'compass', degrees: 45, percent: 8 });
+  assert.equal(metrics.find((item) => item.key === 'sun').instrument.type, 'sunArc');
+  assert.equal(metrics.find((item) => item.key === 'uv').instrument.type, 'bar');
+  assert.equal(metrics.find((item) => item.key === 'pressure').instrument.type, 'gauge');
+  assert.equal(metrics.find((item) => item.key === 'precipitation').instrument.type, 'split');
 });
 
 test('builds daily fields and switches metrics to selected day summaries', () => {
@@ -165,20 +173,30 @@ test('builds daily fields and switches metrics to selected day summaries', () =>
   assert.equal(days[0].rainText, '81%');
 
   const metrics = buildWeatherMetrics(weather, days[1]);
-  assert.equal(metrics.find((item) => item.key === 'apparent').value, '23° / 27°');
+  assert.equal(metrics.find((item) => item.key === 'humidity').value, '23° / 27°');
   assert.equal(metrics.find((item) => item.key === 'uv').value, '4 级');
   assert.equal(metrics.find((item) => item.key === 'sun').value, '05:25 / 19:29');
 });
 
-test('builds bounded hourly curve points for normal, flat and empty forecasts', () => {
+test('builds metric curve options and weather icon keys', () => {
+  assert.deepEqual(buildWeatherCurveMetricOptions().map((item) => item.key), ['temperature', 'precipitation', 'humidity', 'windSpeed', 'pressure', 'uvIndex']);
+  assert.equal(buildWeatherIconKey(0, 1, '晴'), 'clear-day');
+  assert.equal(buildWeatherIconKey(61, 1, '雨'), 'rain');
+  assert.equal(buildWeatherIconKey(45, 0, '雾'), 'fog-night');
+  assert.equal(buildWeatherIconKey(null, 1, '少云'), 'cloud-day');
+});
+
+test('builds bounded multi-metric hourly curve points for normal, flat and empty forecasts', () => {
   const curve = buildHourlyTemperatureCurve({
     hourlyForecast: [
-      { time: '2026-07-01T00:00', temperature: 23, precipitationProbability: 40, label: '雨' },
-      { time: '2026-07-01T01:00', temperature: 29, precipitationProbability: 5, label: '晴' },
-      { time: '2026-07-01T02:00', temperature: 25, precipitationProbability: 12, label: '少云' },
+      { time: '2026-07-01T00:00', temperature: 23, precipitationProbability: 40, humidity: 92, pressure: 1007, windSpeed: 8, uvIndex: 0, weatherCode: 61, label: '雨' },
+      { time: '2026-07-01T01:00', temperature: 29, precipitationProbability: 5, humidity: 70, pressure: 1005, windSpeed: 14, uvIndex: 1.2, weatherCode: 0, label: '晴' },
+      { time: '2026-07-01T02:00', temperature: 25, precipitationProbability: 12, humidity: 76, pressure: 1006, windSpeed: 11, uvIndex: 2.6, weatherCode: 2, label: '少云' },
     ],
   }, { limit: 3, selectedIndex: 1 });
 
+  assert.equal(curve.metricKey, 'temperature');
+  assert.equal(curve.metricLabel, '温度');
   assert.equal(curve.points.length, 3);
   assert.equal(curve.minTemperature, 23);
   assert.equal(curve.maxTemperature, 29);
@@ -190,7 +208,19 @@ test('builds bounded hourly curve points for normal, flat and empty forecasts', 
   curve.points.forEach((point) => {
     assert.ok(point.x >= 0 && point.x <= 100);
     assert.ok(point.y >= 0 && point.y <= 100);
+    assert.match(point.iconKey, /rain|clear|cloud/);
   });
+
+  const humidity = buildHourlyTemperatureCurve({
+    hourlyForecast: [
+      { time: '2026-07-01T00:00', humidity: 40, temperature: 20 },
+      { time: '2026-07-01T01:00', humidity: 90, temperature: 22 },
+    ],
+  }, { metricKey: 'humidity', limit: 2, selectedIndex: 0 });
+  assert.equal(humidity.metricKey, 'humidity');
+  assert.equal(humidity.metricLabel, '湿度');
+  assert.equal(humidity.points[0].valueText, '40%');
+  assert.equal(humidity.points[1].valueText, '90%');
 
   const flat = buildHourlyTemperatureCurve({ hourlyForecast: [
     { time: '2026-07-01T00:00', temperature: 25 },
@@ -207,10 +237,109 @@ test('builds bounded hourly curve points for normal, flat and empty forecasts', 
   assert.equal(empty.selectedPoint, null);
 });
 
+test('builds hourly curve from current time or selected daily forecast', () => {
+  const rows = [];
+  for (let day = 1; day <= 2; day += 1) {
+    for (let hour = 0; hour < 24; hour += 1) {
+      rows.push({
+        time: `2026-07-0${day}T${String(hour).padStart(2, '0')}:00`,
+        temperature: day * 10 + hour,
+        precipitationProbability: hour,
+        humidity: 50 + hour,
+        pressure: 1000 + hour,
+        windSpeed: 8 + hour,
+        uvIndex: hour / 2,
+        weatherCode: hour % 2 ? 2 : 0,
+        label: hour % 2 ? '少云' : '晴',
+      });
+    }
+  }
+  const weather = {
+    hourlyForecast: rows.slice(0, 12),
+    hourlyForecastFull: rows,
+    dailyForecast: [
+      { date: '2026-07-01', dayLabel: '今天' },
+      { date: '2026-07-02', dayLabel: '明天' },
+    ],
+  };
+
+  const currentCurve = buildHourlyTemperatureCurve(weather, {
+    limit: 12,
+    now: Date.parse('2026-07-01T08:24:00'),
+  });
+  assert.equal(currentCurve.points.length, 12);
+  assert.equal(currentCurve.points[0].time, '2026-07-01T08:00');
+  assert.equal(currentCurve.axisUnit, '°');
+  assert.equal(currentCurve.points[0].hourTick, '08');
+  assert.equal(currentCurve.scopeLabel, '未来 12 小时');
+
+  const selectedDayCurve = buildHourlyTemperatureCurve(weather, {
+    limit: 12,
+    selectedDayIndex: 1,
+    now: Date.parse('2026-07-01T08:24:00'),
+  });
+  assert.equal(selectedDayCurve.points.length, 12);
+  assert.equal(selectedDayCurve.points[0].time, '2026-07-02T00:00');
+  assert.equal(selectedDayCurve.points[11].time, '2026-07-02T22:00');
+  assert.equal(selectedDayCurve.scopeLabel, '明天');
+});
+
+test('builds Lively-style graph metadata with stable daily scale and fixed icon row', () => {
+  const rows = [];
+  for (let day = 1; day <= 2; day += 1) {
+    for (let hour = 0; hour < 24; hour += 2) {
+      rows.push({
+        time: `2026-07-0${day}T${String(hour).padStart(2, '0')}:00`,
+        temperature: day === 1 ? 20 + hour / 2 : 80 + hour,
+        precipitationProbability: hour * 3,
+        weatherCode: hour % 4 === 0 ? 61 : 0,
+        label: hour % 4 === 0 ? '雨' : '晴',
+      });
+    }
+  }
+  const weather = {
+    hourlyForecastFull: rows,
+    dailyForecast: [
+      { date: '2026-07-01', dayLabel: '今天' },
+      { date: '2026-07-02', dayLabel: '明天' },
+    ],
+  };
+
+  const curve = buildHourlyTemperatureCurve(weather, {
+    limit: 12,
+    selectedDayIndex: 0,
+    now: Date.parse('2026-07-01T08:24:00'),
+  });
+
+  assert.equal(curve.baselineY, 82);
+  assert.equal(curve.graphTopY, 30);
+  assert.equal(curve.graphBottomY, 70);
+  assert.equal(curve.minValue, 20);
+  assert.equal(curve.maxValue, 102);
+  assert.equal(curve.areaPath.endsWith(' L92 82 L8 82 Z'), true);
+  assert.equal(curve.timeTicks.length, 12);
+  assert.equal(curve.iconRow.length, 12);
+  assert.equal(curve.valueLabels.length, 12);
+  assert.deepEqual(curve.timeTicks.map((tick) => tick.text).slice(0, 3), ['00', '02', '04']);
+  curve.points.forEach((point) => {
+    assert.ok(point.y >= 30 && point.y <= 70);
+  });
+  curve.iconRow.forEach((icon, index) => {
+    assert.equal(icon.x, curve.points[index].x);
+    assert.equal(icon.y, 94);
+    assert.equal(icon.iconKey, curve.points[index].iconKey);
+  });
+  curve.valueLabels.forEach((label, index) => {
+    assert.equal(label.x, curve.points[index].x);
+    assert.equal(label.text, curve.points[index].valueText);
+  });
+});
+
 test('resolves interactive weather selection state', () => {
   let state = resolveInteractiveWeatherSelection(null, { type: 'hoverHour', index: 2 });
   assert.equal(state.hoverHourIndex, 2);
   assert.equal(state.lockedHourIndex, null);
+  assert.equal(state.selectedMetricKey, 'temperature');
 
   state = resolveInteractiveWeatherSelection(state, { type: 'clickHour', index: 2 });
   assert.equal(state.lockedHourIndex, 2);
@@ -228,6 +357,7 @@ test('resolves interactive weather selection state', () => {
 
   state = resolveInteractiveWeatherSelection(state, { type: 'clickMetric', key: 'uv' });
   assert.equal(state.expandedMetricKey, 'uv');
+  assert.equal(state.selectedMetricKey, 'uvIndex');
 
   state = resolveInteractiveWeatherSelection(state, { type: 'reset' });
   assert.deepEqual(state, {
@@ -235,6 +365,7 @@ test('resolves interactive weather selection state', () => {
     lockedHourIndex: null,
     selectedDayIndex: null,
     expandedMetricKey: null,
+    selectedMetricKey: 'temperature',
   });
 });
 
