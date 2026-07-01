@@ -33,6 +33,18 @@ test('playback session restore script is wired', () => {
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
 });
 
+test('main stylesheet is loaded as an external asset', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /<link rel="stylesheet" href="styles\/app\.css">/);
+  assert.doesNotMatch(html, /<style>[\s\S]*<\/style>/);
+  assert.match(css, /#empty-home/);
+  assert.match(css, /\.home-weather-curve-card/);
+  assert.match(css, /#playlist-panel/);
+  assert.match(css, /#comment-barrage-layer/);
+});
+
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
