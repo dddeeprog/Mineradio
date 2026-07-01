@@ -36,6 +36,7 @@ const {
   mapQQTrack,
   qqAlbumCover,
 } = require('../server/music/qq');
+const { createBeatmapCacheRoutes } = require('../server/routes/beatmap-cache');
 const { createProxyRoutes } = require('../server/routes/proxy');
 const { createUpdateRoutes } = require('../server/routes/update');
 const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
@@ -265,6 +266,41 @@ test('proxy route module rejects unsafe media proxy requests', async () => {
   assert.equal(writes[0].status, 400);
   assert.equal(writes[1].body, 'Missing url');
   assert.equal(await routes.handleRoute('/api/search', {}, res, new URL('http://localhost/api/search')), false);
+});
+
+test('beatmap cache route module dispatches cache endpoints', async () => {
+  const writes = [];
+  const routes = createBeatmapCacheRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    beatCacheRootInfo() {
+      return { allowed: true, available: true, dir: 'D:\\MineradioCache\\beatmaps', drive: 'D' };
+    },
+    readBeatMapCache(key) {
+      return key === 'hit' ? { key, map: { beats: [1, 2] }, meta: { bpm: 120 }, savedAt: 7 } : null;
+    },
+    writeBeatMapCache(body) {
+      return { ok: true, key: body.key || 'saved' };
+    },
+    readRequestBody(req) {
+      return Promise.resolve(req.body || {});
+    },
+  });
+
+  assert.equal(await routes.handleRoute('/api/beatmap/cache/status', { method: 'GET' }, {}, new URL('http://localhost/api/beatmap/cache/status')), true);
+  assert.deepEqual(writes[0].payload, {
+    enabled: true,
+    dir: 'D:\\MineradioCache\\beatmaps',
+    drive: 'D',
+    reason: '',
+    mode: 'disk',
+  });
+  assert.equal(await routes.handleRoute('/api/beatmap/cache', { method: 'GET' }, {}, new URL('http://localhost/api/beatmap/cache?key=hit')), true);
+  assert.deepEqual(writes[1].payload, { ok: true, hit: true, key: 'hit', map: { beats: [1, 2] }, meta: { bpm: 120 }, savedAt: 7 });
+  assert.equal(await routes.handleRoute('/api/beatmap/cache', { method: 'POST', body: { key: 'saved' } }, {}, new URL('http://localhost/api/beatmap/cache')), true);
+  assert.deepEqual(writes[2].payload, { ok: true, key: 'saved' });
+  assert.equal(await routes.handleRoute('/api/search', { method: 'GET' }, {}, new URL('http://localhost/api/search')), false);
 });
 
 test('music mapping helpers preserve renderer-facing response shape', () => {
