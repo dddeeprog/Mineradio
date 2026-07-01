@@ -36,6 +36,7 @@ const {
   mapQQTrack,
   qqAlbumCover,
 } = require('../server/music/qq');
+const { createWeatherRadioRoutes } = require('../server/routes/weather-radio');
 
 test('cookie helpers normalize Set-Cookie style inputs and detect login cookies', () => {
   const normalized = normalizeCookieHeader([
@@ -146,6 +147,39 @@ test('weather helpers build URLs, normalize provider payloads and produce radio 
   assert.equal(buildWeatherMood({ weatherCode: 0, temperature: 22, isDay: 0 }, new Date('2026-06-28T22:00:00')).key, 'clear-night');
   assert.deepEqual(weatherRadioSeedQueries({ key: 'rain-night' }).slice(0, 2), ['陈奕迅 阴天快乐', '周杰伦 雨下一整晚']);
   assert.equal(fallbackWeatherForRadio({ city: '杭州' }, new Error('offline')).location.name, '杭州');
+});
+
+test('weather radio route module dispatches weather endpoints', async () => {
+  const writes = [];
+  const routes = createWeatherRadioRoutes({
+    sendJSON(_res, payload, status) {
+      writes.push({ payload, status: status || 200 });
+    },
+    buildWeatherRadio(params) {
+      return Promise.resolve({ ok: true, weather: { location: { name: params.city } }, params });
+    },
+    fetchIpWeatherLocation() {
+      return Promise.resolve({ city: '上海', latitude: 31.2, longitude: 121.5 });
+    },
+  });
+
+  const weatherUrl = new URL('http://localhost/api/weather/radio?city=杭州&lat=30.2&lon=120.2&timezone=Asia%2FShanghai');
+  assert.equal(await routes.handleRoute('/api/weather/radio', {}, {}, weatherUrl), true);
+  assert.deepEqual(writes[0], {
+    status: 200,
+    payload: {
+      ok: true,
+      weather: { location: { name: '杭州' } },
+      params: { city: '杭州', lat: '30.2', lon: '120.2', timezone: 'Asia/Shanghai' },
+    },
+  });
+
+  assert.equal(await routes.handleRoute('/api/weather/ip-location', {}, {}, new URL('http://localhost/api/weather/ip-location')), true);
+  assert.deepEqual(writes[1], {
+    status: 200,
+    payload: { ok: true, location: { city: '上海', latitude: 31.2, longitude: 121.5 } },
+  });
+  assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
 });
 
 test('music mapping helpers preserve renderer-facing response shape', () => {

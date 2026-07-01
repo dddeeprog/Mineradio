@@ -65,6 +65,7 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
 
 const PORT = process.env.PORT || 3000;
 const HOST = resolveBindHost(process.env);
@@ -2690,6 +2691,12 @@ function appVersionPayload() {
   };
 }
 
+const weatherRadioRoutes = createWeatherRadioRoutes({
+  sendJSON,
+  buildWeatherRadio,
+  fetchIpWeatherLocation,
+});
+
 const READ_ONLY_API_ROUTES = new Map([
   ['/api/app/version', async (_req, res) => {
     sendJSON(res, appVersionPayload());
@@ -2703,14 +2710,6 @@ const READ_ONLY_API_ROUTES = new Map([
     } catch (err) {
       console.error('[QQLoginStatus]', err);
       sendJSON(res, { provider: 'qq', loggedIn: false, error: err.message }, 500);
-    }
-  }],
-  ['/api/weather/ip-location', async (_req, res) => {
-    try {
-      sendJSON(res, { ok: true, location: await fetchIpWeatherLocation() });
-    } catch (err) {
-      console.error('[WeatherIpLocation]', err);
-      sendJSON(res, { ok: false, error: err.message, location: null }, 500);
     }
   }],
 ]);
@@ -2757,6 +2756,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await dispatchReadOnlyApiRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await weatherRadioRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
@@ -2876,27 +2879,6 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[DiscoverHome]', err);
       sendJSON(res, { error: err.message, loggedIn: false, dailySongs: [], playlists: [], podcasts: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/weather/radio') {
-    try {
-      const data = await buildWeatherRadio({
-        city: url.searchParams.get('city') || url.searchParams.get('q') || '',
-        lat: url.searchParams.get('lat'),
-        lon: url.searchParams.get('lon'),
-        timezone: url.searchParams.get('timezone') || '',
-      });
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[WeatherRadio]', err);
-      sendJSON(res, {
-        ok: false,
-        error: err.message,
-        weather: null,
-        radio: { title: '天气电台', subtitle: '天气暂时没有回来，可以先听今日推荐。', seedQueries: [], songs: [] },
-      }, 500);
     }
     return;
   }
