@@ -119,6 +119,8 @@ test('home weather board uses a Lively micro weather page layout', () => {
   assert.match(css, /\.home-weather-advice\{[^}]*display:none/);
   assert.match(css, /\.home-weather-day-icon\{[^}]*height:30px/);
   assert.match(css, /\.home-weather-metric\{[^}]*min-height:74px/);
+  assert.match(css, /\.home-weather-metrics\{[^}]*max-height:91px/);
+  assert.match(css, /@media \(min-height:1150px\)\{\.home-weather-metrics\{max-height:none;overflow:visible\}\}/);
   assert.doesNotMatch(css, /\.home-weather-dashboard\{[^}]*overflow:hidden auto/);
 });
 
