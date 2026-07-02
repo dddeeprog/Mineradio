@@ -37,6 +37,7 @@ yarn-error.log*
 # Historical local experiment files
 public/index.*.html
 !public/index.html
+public/folia-stage/
 
 # Screenshots and transient verification artifacts
 .playwright-cli/
