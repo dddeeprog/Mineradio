@@ -271,7 +271,7 @@
   function selectHourlyRowsForCurve(weather, options, limit) {
     options = options || {};
     var fullRows = hourlyRowsForCurve(weather);
-    var selectedDayIndex = Number(options.selectedDayIndex);
+    var selectedDayIndex = options.selectedDayIndex == null ? NaN : Number(options.selectedDayIndex);
     if (isFinite(selectedDayIndex) && selectedDayIndex >= 0) {
       var days = Array.isArray(weather && weather.dailyForecast) ? weather.dailyForecast : [];
       var day = days[Math.round(selectedDayIndex)] || null;
@@ -464,7 +464,7 @@
       return d;
     }
     var smoothPath = smoothPointPath(points);
-    var selectedIndex = Number(options.selectedIndex);
+    var selectedIndex = options.selectedIndex == null ? NaN : Number(options.selectedIndex);
     var selectedPoint = isFinite(selectedIndex) && selectedIndex >= 0 ? points[Math.round(selectedIndex)] || null : null;
     var timeTicks = points.map(function(point) {
       return {

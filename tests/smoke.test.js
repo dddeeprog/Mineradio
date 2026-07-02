@@ -97,12 +97,29 @@ test('weather ambient sound can be enabled manually from Home', () => {
   assert.match(html, /HOME_WEATHER_AMBIENT_KEY = 'mineradio-weather-ambient-v1'/);
   assert.match(html, /id="home-weather-ambient-btn"/);
   assert.match(html, /onclick="toggleHomeWeatherAmbient\(event\)"/);
+  assert.match(html, /id="home-weather-ambient-pop"/);
   assert.match(html, /id="home-weather-ambient-volume"/);
   assert.match(html, /oninput="setHomeWeatherAmbientVolume\(this\.value\)"/);
   assert.match(html, /function toggleHomeWeatherAmbient\(e\)/);
   assert.match(html, /function setHomeWeatherAmbientVolume\(value\)/);
   assert.match(html, /homeWeatherLivelyVisuals\.setWeatherAmbientSettings/);
+  assert.match(css, /\.home-weather-ambient-wrap/);
+  assert.match(css, /\.home-weather-ambient-pop/);
   assert.match(css, /\.home-weather-ambient-control/);
+});
+
+test('home weather board uses a Lively micro weather page layout', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /class="home-hero home-weather-lively-page"/);
+  assert.match(css, /\.home-weather-lively-page\{/);
+  assert.match(css, /\.home-weather-dashboard\{[^}]*display:grid/);
+  assert.match(css, /\.home-weather-dashboard\{[^}]*overflow:visible/);
+  assert.match(css, /\.home-weather-advice\{[^}]*display:none/);
+  assert.match(css, /\.home-weather-day-icon\{[^}]*height:30px/);
+  assert.match(css, /\.home-weather-metric\{[^}]*min-height:74px/);
+  assert.doesNotMatch(css, /\.home-weather-dashboard\{[^}]*overflow:hidden auto/);
 });
 
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
@@ -166,7 +183,13 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(homeWeatherUi, /curve\.timeTicks/);
   assert.match(homeWeatherUi, /curve\.iconRow/);
   assert.match(homeWeatherUi, /curve\.valueLabels/);
-  assert.match(homeWeatherUi, /var displayPoint = selected \|\| \(curve\.points \|\| \[\]\)\[0\] \|\| null;/);
+  const selectedDayFunction = homeWeatherUi.match(/function selectedHomeWeatherDay[\s\S]*?function selectedHomeWeatherHourPoint/);
+  assert.ok(selectedDayFunction);
+  assert.match(selectedDayFunction[0], /if \(idx == null\) return null;/);
+  assert.match(homeWeatherUi, /var displayPoint = selected \|\| null;/);
+  assert.match(homeWeatherUi, /if \(idx == null\) return null;/);
+  assert.match(homeWeatherUi, /guide\.style\.opacity = selected \? '1' : '0';/);
+  assert.match(homeWeatherUi, /values\.innerHTML = selected \?/);
   assert.match(homeWeatherUi, /home-weather-value-label/);
   assert.match(homeWeatherUi, /function bindHomeWeatherInteractions\(/);
   assert.doesNotMatch(homeWeatherUi, /top:' \+ y \+ '%'/);

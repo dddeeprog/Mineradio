@@ -225,10 +225,11 @@ test('builds bounded multi-metric hourly curve points for normal, flat and empty
   const flat = buildHourlyTemperatureCurve({ hourlyForecast: [
     { time: '2026-07-01T00:00', temperature: 25 },
     { time: '2026-07-01T01:00', temperature: 25 },
-  ] });
+  ] }, { selectedIndex: null });
   assert.equal(flat.points[0].y, flat.points[1].y);
   assert.match(flat.smoothPath, /^M/);
   assert.match(flat.areaPath, /Z$/);
+  assert.equal(flat.selectedPoint, null);
 
   const empty = buildHourlyTemperatureCurve(null);
   assert.deepEqual(empty.points, []);
@@ -265,6 +266,7 @@ test('builds hourly curve from current time or selected daily forecast', () => {
 
   const currentCurve = buildHourlyTemperatureCurve(weather, {
     limit: 12,
+    selectedDayIndex: null,
     now: Date.parse('2026-07-01T08:24:00'),
   });
   assert.equal(currentCurve.points.length, 12);

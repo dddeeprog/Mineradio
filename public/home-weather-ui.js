@@ -101,7 +101,9 @@
 
     function selectedHomeWeatherDay(dailyRows) {
       dailyRows = dailyRows || buildDailyFields();
-      var idx = Number(selection && selection.selectedDayIndex);
+      var idx = selection && selection.selectedDayIndex;
+      if (idx == null) return null;
+      idx = Number(idx);
       return isFinite(idx) && idx >= 0 ? dailyRows[Math.round(idx)] : null;
     }
 
@@ -109,6 +111,7 @@
       curve = curve || buildCurve();
       if (curve.selectedPoint) return curve.selectedPoint;
       var idx = selection.lockedHourIndex != null ? selection.lockedHourIndex : selection.hoverHourIndex;
+      if (idx == null) return null;
       idx = Number(idx);
       return isFinite(idx) && idx >= 0 ? (curve.points || [])[Math.round(idx)] : null;
     }
@@ -215,7 +218,7 @@
       var tickRows = curve.timeTicks || curve.points || [];
       var iconRows = curve.iconRow || curve.points || [];
       var valueRows = curve.valueLabels || [];
-      var displayPoint = selected || (curve.points || [])[0] || null;
+      var displayPoint = selected || null;
       if (tabs) {
         tabs.innerHTML = buildCurveMetricOptions().map(function(item) {
           var active = metricKey === item.key;
@@ -226,9 +229,9 @@
       if (glow) glow.setAttribute('d', curve.smoothPath || curve.path || '');
       if (area) area.setAttribute('d', curve.areaPath || '');
       if (guide) {
-        guide.setAttribute('x1', displayPoint ? displayPoint.x : 0);
-        guide.setAttribute('x2', displayPoint ? displayPoint.x : 0);
-        guide.style.opacity = displayPoint ? '1' : '0';
+        guide.setAttribute('x1', selected ? selected.x : 0);
+        guide.setAttribute('x2', selected ? selected.x : 0);
+        guide.style.opacity = selected ? '1' : '0';
       }
       if (ticks) {
         ticks.innerHTML = tickRows.map(function(tick) {
@@ -249,8 +252,8 @@
         }).join('');
       }
       if (values) {
-        values.innerHTML = displayPoint ? valueRows.filter(function(item) {
-          return item.index === displayPoint.index;
+        values.innerHTML = selected ? valueRows.filter(function(item) {
+          return item.index === selected.index;
         }).map(function(item) {
           var labelX = Math.max(5, Math.min(95, Number(item.x) || 0));
           var labelY = Math.max(12, Math.min(70, Number(item.y) || 0));

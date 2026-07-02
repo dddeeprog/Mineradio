@@ -126,7 +126,7 @@ try {
 <!-- 空场 Home -->
 <section id="empty-home" aria-label="Mineradio home">
   <div class="empty-home-shell">
-    <div class="home-hero">
+    <div class="home-hero home-weather-lively-page">
       <div class="home-hero-inner home-weather-hero-inner">
         <div id="home-weather-scene" class="home-weather-scene weather-scene-clear weather-scene-day" aria-hidden="true"></div>
         <div class="home-kicker" id="home-weather-kicker">Weather Console</div>
@@ -192,12 +192,16 @@ try {
             </div>
           </span>
           <button class="home-chip" type="button" onclick="openHomePlayerConsole()">播放器控制台</button>
-          <button id="home-weather-ambient-btn" class="home-chip" type="button" onclick="toggleHomeWeatherAmbient(event)" aria-pressed="false">天气音关</button>
-          <label class="home-weather-ambient-control" title="天气环境音音量">
-            <span>天气音量</span>
-            <input id="home-weather-ambient-volume" type="range" min="0" max="100" step="1" value="24" oninput="setHomeWeatherAmbientVolume(this.value)" aria-label="天气环境音音量">
-            <em id="home-weather-ambient-volume-text">24%</em>
-          </label>
+          <span id="home-weather-ambient-wrap" class="home-weather-ambient-wrap">
+            <button id="home-weather-ambient-btn" class="home-chip" type="button" onclick="toggleHomeWeatherAmbient(event)" aria-pressed="false">天气音关</button>
+            <span id="home-weather-ambient-pop" class="home-weather-ambient-pop" onclick="event.stopPropagation()">
+              <label class="home-weather-ambient-control" title="天气环境音音量">
+                <span>天气音量</span>
+                <input id="home-weather-ambient-volume" type="range" min="0" max="100" step="1" value="24" oninput="setHomeWeatherAmbientVolume(this.value)" aria-label="天气环境音音量">
+                <em id="home-weather-ambient-volume-text">24%</em>
+              </label>
+            </span>
+          </span>
           <button id="home-dynamic-lyrics-btn" class="home-chip" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
         </div>
       </div>
