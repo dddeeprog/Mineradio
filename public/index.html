@@ -192,6 +192,12 @@ try {
             </div>
           </span>
           <button class="home-chip" type="button" onclick="openHomePlayerConsole()">播放器控制台</button>
+          <button id="home-weather-ambient-btn" class="home-chip" type="button" onclick="toggleHomeWeatherAmbient(event)" aria-pressed="false">天气音关</button>
+          <label class="home-weather-ambient-control" title="天气环境音音量">
+            <span>天气音量</span>
+            <input id="home-weather-ambient-volume" type="range" min="0" max="100" step="1" value="24" oninput="setHomeWeatherAmbientVolume(this.value)" aria-label="天气环境音音量">
+            <em id="home-weather-ambient-volume-text">24%</em>
+          </label>
           <button id="home-dynamic-lyrics-btn" class="home-chip" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
         </div>
       </div>
@@ -1044,9 +1050,12 @@ var homeVisualPrevPreset = 0;
 var HOME_LISTEN_STATS_KEY = 'mineradio-listen-stats-v1';
 var HOME_WEATHER_CITY_KEY = 'mineradio-weather-city';
 var HOME_WEATHER_CACHE_KEY = 'mineradio-weather-radio-cache-v1';
+var HOME_WEATHER_AMBIENT_KEY = 'mineradio-weather-ambient-v1';
 var HOME_WEATHER_FRESH_MS = 30 * 60 * 1000;
 var HOME_WEATHER_STALE_MS = 6 * 60 * 60 * 1000;
 var homeWeatherRadioState = { loading: false, loaded: false, city: localStorage.getItem(HOME_WEATHER_CITY_KEY) || '上海', weather: null, radio: null, error: '', updatedAt: 0 };
+var homeWeatherAmbientSettings = loadHomeWeatherAmbientSettings();
+var homeWeatherLivelyVisuals = null;
 var homeWeatherToken = 0;
 var homeWeatherLoadTimer = null;
 var homeWeatherLoadTimerDueAt = 0;
@@ -15566,15 +15575,79 @@ function buildHomeWeatherIconKeySafe(code, isDay, label) {
   if (api && typeof api.buildWeatherIconKey === 'function') return api.buildWeatherIconKey(code, isDay, label);
   return 'clear-day';
 }
+function normalizeHomeWeatherAmbientSettings(input) {
+  var api = window.MineradioWeatherLivelyVisuals || {};
+  if (api && typeof api.normalizeWeatherSoundSettings === 'function') return api.normalizeWeatherSoundSettings(input || {});
+  input = input || {};
+  return {
+    enabled: input.enabled === true,
+    volume: Math.max(0, Math.min(1, isFinite(Number(input.volume)) ? Number(input.volume) : 0.24)),
+    followWeather: input.followWeather !== false,
+    duckWhenMusicPlays: input.duckWhenMusicPlays !== false,
+  };
+}
+function loadHomeWeatherAmbientSettings() {
+  try {
+    return normalizeHomeWeatherAmbientSettings(JSON.parse(localStorage.getItem(HOME_WEATHER_AMBIENT_KEY) || 'null'));
+  } catch (e) {
+    return normalizeHomeWeatherAmbientSettings(null);
+  }
+}
+function saveHomeWeatherAmbientSettings() {
+  try { localStorage.setItem(HOME_WEATHER_AMBIENT_KEY, JSON.stringify(homeWeatherAmbientSettings)); } catch (e) {}
+}
+function isHomeWeatherMusicPlaying() {
+  return !!(playing || (audio && audio.src && !audio.paused && !audio.ended));
+}
+function refreshHomeWeatherAmbientPlayback() {
+  if (homeWeatherLivelyVisuals && typeof homeWeatherLivelyVisuals.updateAmbientPlayback === 'function') {
+    homeWeatherLivelyVisuals.updateAmbientPlayback({ musicPlaying: isHomeWeatherMusicPlaying() });
+  }
+}
+function syncHomeWeatherAmbientControls() {
+  var btn = document.getElementById('home-weather-ambient-btn');
+  var slider = document.getElementById('home-weather-ambient-volume');
+  var volumeText = document.getElementById('home-weather-ambient-volume-text');
+  var enabled = !!(homeWeatherAmbientSettings && homeWeatherAmbientSettings.enabled);
+  var volume = Math.round(((homeWeatherAmbientSettings && homeWeatherAmbientSettings.volume) || 0.24) * 100);
+  if (btn) {
+    btn.classList.toggle('active', enabled);
+    btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    btn.textContent = enabled ? '天气音开' : '天气音关';
+  }
+  if (slider) slider.value = String(Math.max(0, Math.min(100, volume)));
+  if (volumeText) volumeText.textContent = volume + '%';
+}
+function applyHomeWeatherAmbientSettings(next, reason) {
+  homeWeatherAmbientSettings = normalizeHomeWeatherAmbientSettings(Object.assign({}, homeWeatherAmbientSettings || {}, next || {}));
+  saveHomeWeatherAmbientSettings();
+  if (homeWeatherLivelyVisuals && typeof homeWeatherLivelyVisuals.setWeatherAmbientSettings === 'function') {
+    homeWeatherLivelyVisuals.setWeatherAmbientSettings(homeWeatherAmbientSettings);
+  }
+  syncHomeWeatherAmbientControls();
+  if (reason === 'toggle' && typeof showToast === 'function') showToast(homeWeatherAmbientSettings.enabled ? '天气环境音已开启' : '天气环境音已关闭');
+  return homeWeatherAmbientSettings;
+}
+function toggleHomeWeatherAmbient(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  return applyHomeWeatherAmbientSettings({ enabled: !(homeWeatherAmbientSettings && homeWeatherAmbientSettings.enabled) }, 'toggle');
+}
+function setHomeWeatherAmbientVolume(value) {
+  var n = Math.max(0, Math.min(100, Number(value) || 0));
+  return applyHomeWeatherAmbientSettings({ volume: n / 100 }, 'volume');
+}
 function createHomeWeatherUiController() {
   if (!window.MineradioHomeWeatherUi || typeof window.MineradioHomeWeatherUi.init !== 'function') return null;
   var livelyVisuals = window.MineradioWeatherLivelyVisuals && typeof window.MineradioWeatherLivelyVisuals.initWeatherVisuals === 'function'
     ? window.MineradioWeatherLivelyVisuals.initWeatherVisuals({
       document: document,
       root: document.getElementById('home-weather-scene'),
-      isMusicPlaying: function() { return !!(playing || (audio && audio.src && !audio.paused && !audio.ended)); },
+      isMusicPlaying: isHomeWeatherMusicPlaying,
+      sound: homeWeatherAmbientSettings,
     })
     : null;
+  homeWeatherLivelyVisuals = livelyVisuals;
+  applyHomeWeatherAmbientSettings(homeWeatherAmbientSettings, 'controller-init');
   var livelyUi = window.MineradioWeatherLivelyUi && typeof window.MineradioWeatherLivelyUi.init === 'function'
     ? window.MineradioWeatherLivelyUi.init({ document: document, visuals: livelyVisuals })
     : null;
@@ -20484,6 +20557,9 @@ function bindPlaybackProgressEvents(audioEl) {
   });
   ['play', 'playing', 'pause', 'ended', 'emptied', 'abort', 'error'].forEach(function(name){
     audioEl.addEventListener(name, function(){ syncPlaybackStateFromAudioEvent(name); });
+  });
+  ['play', 'playing', 'pause', 'ended', 'emptied'].forEach(function(name){
+    audioEl.addEventListener(name, refreshHomeWeatherAmbientPlayback);
   });
 }
 function emitProgressDragParticles(x, y) {

@@ -90,6 +90,21 @@ test('Lively weather dashboard UI boundary is externalized', () => {
   assert.match(livelyCss, /\.weather-lively-layer-rain/);
 });
 
+test('weather ambient sound can be enabled manually from Home', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /HOME_WEATHER_AMBIENT_KEY = 'mineradio-weather-ambient-v1'/);
+  assert.match(html, /id="home-weather-ambient-btn"/);
+  assert.match(html, /onclick="toggleHomeWeatherAmbient\(event\)"/);
+  assert.match(html, /id="home-weather-ambient-volume"/);
+  assert.match(html, /oninput="setHomeWeatherAmbientVolume\(this\.value\)"/);
+  assert.match(html, /function toggleHomeWeatherAmbient\(e\)/);
+  assert.match(html, /function setHomeWeatherAmbientVolume\(value\)/);
+  assert.match(html, /homeWeatherLivelyVisuals\.setWeatherAmbientSettings/);
+  assert.match(css, /\.home-weather-ambient-control/);
+});
+
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const homeWeatherUi = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-ui.js'), 'utf8');

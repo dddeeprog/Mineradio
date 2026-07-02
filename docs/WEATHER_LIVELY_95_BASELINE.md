@@ -89,6 +89,9 @@ metricsCount: 6
 dayCount: 5
 detailExists: true
 hasLivelyTitle: true
+hasAmbientButton: true
+ambientText: 天气音关
+ambientVolume: 24
 visualLayers: 2
 ```
 
