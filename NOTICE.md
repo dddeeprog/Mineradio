@@ -10,6 +10,9 @@ Mineradio 使用了以下第三方项目或服务。各项目版权归其原作�
 - music-tempo
 - NeteaseCloudMusicApi
 - mpg123-decoder
+- Folia / folia-major (AGPL-3.0, source imported under `third_party/folia-major/`)
+
+更完整的第三方源码、许可证和引入 commit 记录见 `THIRD_PARTY_NOTICES.md`。
 
 ## Third-party Services
 
