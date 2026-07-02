@@ -16,6 +16,7 @@
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
+<script src="folia-bridge-state.js"></script>
 <script src="weather-lively-graph.js"></script>
 <script src="weather-lively-state.js"></script>
 <script src="weather-lively-visuals.js"></script>
@@ -17328,6 +17329,7 @@ function applyLyricsState(lines, hasNativeKaraoke, timingSource) {
   renderLyrics();
   clearLyricTextureCache();
   updateCustomLyricControls();
+  pushFoliaPlaybackBridge('lyrics-state', { force: true });
 }
 function applyOriginalLyricsState() {
   lyricSourceMode = 'original';
@@ -17376,6 +17378,7 @@ function applyCustomLyricState(song, silent) {
   clearLyricTextureCache();
   updateCustomLyricControls();
   if (emptyHomeActive) renderHomeWeatherHero(true);
+  pushFoliaPlaybackBridge('custom-lyrics-state', { force: true });
   return true;
 }
 function preferredLyricSourceForSong(song) {
@@ -18948,6 +18951,7 @@ function syncPlaybackStateFromAudioEvent(reason) {
     else if (!isPlaying) clearCommentBarrage3D(true);
   }
   forcePlaybackControlsInteractive();
+  pushFoliaPlaybackBridge('audio-' + reason, { force: reason === 'play' || reason === 'playing' || reason === 'pause' || reason === 'ended' });
 }
 
 function isPlaybackRecursionError(err) {
@@ -19047,6 +19051,7 @@ async function playQueueAt(idx, opts) {
     updateControlTrackInfo(song);
     document.getElementById('thumb-wrap').classList.add('visible');
   });
+  safePlaybackStep('folia-bridge-track', function(){ pushFoliaPlaybackBridge('track-switch', { force: true }); });
   markPlayPhase('lyric-prep');
   safePlaybackStep('lyric-prep', function(){
     var initialLyricLines = withLyricFallback([]);
@@ -20624,6 +20629,7 @@ setInterval(function(){
   updateListenStatsTick(false);
   updatePlaybackProgressUi();
   if (audio.currentTime) updateLyricsHighlight();
+  pushFoliaPlaybackBridge('playback-tick');
 }, 200);
 
 // ============================================================
@@ -26070,9 +26076,144 @@ var desktopOverlayPushState = {
   lastLyricsBeatKey: '',
   lastWallpaperKey: ''
 };
+var foliaStageBridgeState = {
+  targets: [],
+  subscribers: [],
+  lastAt: 0,
+  lastKey: ''
+};
 function getDesktopWindowApi() {
   return window.desktopWindow && window.desktopWindow.isDesktop ? window.desktopWindow : null;
 }
+function foliaBridgeStateApi() {
+  return window.MineradioFoliaBridgeState || null;
+}
+function currentFoliaBridgeSong() {
+  var song = currentCoverSong() || {};
+  var cover = (typeof songCoverSrc === 'function' && song) ? songCoverSrc(song, 720) : '';
+  return Object.assign({}, song, {
+    coverUrl: cover || song.cover || song.picUrl || ''
+  });
+}
+function foliaBridgePlaybackPayload() {
+  var time = audio && isFinite(audio.currentTime) ? Number(audio.currentTime) : getPlaybackCurrentSeconds();
+  var duration = audio && isFinite(audio.duration) ? Number(audio.duration) : getPlaybackDurationSeconds();
+  var rate = audio && isFinite(audio.playbackRate) && audio.playbackRate > 0 ? Number(audio.playbackRate) : 1;
+  return {
+    playing: !!playing,
+    currentTime: Math.max(0, time || 0),
+    duration: Math.max(0, duration || 0),
+    rate: rate,
+    queueIndex: currentIdx,
+    queueLength: playQueue && playQueue.length || 0
+  };
+}
+function foliaBridgeLyricsPayload() {
+  return {
+    lines: Array.isArray(lyricsLines) ? lyricsLines : [],
+    timingSource: lyricsTimingSource || 'none',
+    hasNativeKaraoke: !!lyricsHasNativeKaraoke
+  };
+}
+function foliaBridgeAudioPayload() {
+  return {
+    energy: isFinite(audioEnergy) ? audioEnergy : 0,
+    bass: isFinite(bass) ? bass : 0,
+    mid: isFinite(mid) ? mid : 0,
+    treble: isFinite(treble) ? treble : 0,
+    beatPulse: isFinite(beatPulse) ? beatPulse : 0,
+    beatOnset: !!beatOnsetFlag
+  };
+}
+function createFoliaPlaybackBridgeSnapshot(reason) {
+  var api = foliaBridgeStateApi();
+  if (!api || typeof api.createFoliaBridgeSnapshot !== 'function') return null;
+  return api.createFoliaBridgeSnapshot({
+    now: Date.now(),
+    reason: reason || 'sync',
+    song: currentFoliaBridgeSong(),
+    playback: foliaBridgePlaybackPayload(),
+    lyrics: foliaBridgeLyricsPayload(),
+    audio: foliaBridgeAudioPayload()
+  });
+}
+function foliaBridgeHasConsumers() {
+  return !!(foliaStageBridgeState.targets.length || foliaStageBridgeState.subscribers.length);
+}
+function notifyFoliaBridgeSubscribers(message) {
+  foliaStageBridgeState.subscribers.slice().forEach(function(handler) {
+    try { handler(message.payload, message); }
+    catch (e) { console.warn('[FoliaBridgeSubscriber]', e); }
+  });
+}
+function postFoliaBridgeTargets(message) {
+  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
+    var target = entry && entry.target;
+    if (!target || typeof target.postMessage !== 'function') return false;
+    try {
+      target.postMessage(message, entry.origin || window.location.origin || '*');
+      return true;
+    } catch (e) {
+      console.warn('[FoliaBridgeTarget]', e);
+      return false;
+    }
+  });
+}
+function pushFoliaPlaybackBridge(reason, opts) {
+  opts = opts || {};
+  var force = opts.force === true;
+  if (!force && !foliaBridgeHasConsumers()) return null;
+  var api = foliaBridgeStateApi();
+  if (!api || typeof api.createFoliaBridgeMessage !== 'function') return null;
+  var now = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+  if (!force && now - foliaStageBridgeState.lastAt < 96) return null;
+  var snapshot = createFoliaPlaybackBridgeSnapshot(reason);
+  if (!snapshot) return null;
+  var key = typeof api.foliaBridgeSnapshotKey === 'function' ? api.foliaBridgeSnapshotKey(snapshot) : '';
+  if (!force && key && key === foliaStageBridgeState.lastKey && now - foliaStageBridgeState.lastAt < 820) return snapshot;
+  foliaStageBridgeState.lastAt = now;
+  foliaStageBridgeState.lastKey = key;
+  var message = api.createFoliaBridgeMessage(snapshot);
+  try { window.dispatchEvent(new CustomEvent(api.FOLIA_BRIDGE_MESSAGE_TYPE || 'mineradio:folia-playback-state', { detail: snapshot })); } catch (e) {}
+  notifyFoliaBridgeSubscribers(message);
+  postFoliaBridgeTargets(message);
+  return snapshot;
+}
+function registerFoliaBridgeTarget(targetWindow, targetOrigin) {
+  if (!targetWindow || typeof targetWindow.postMessage !== 'function') return function(){};
+  var origin = targetOrigin || window.location.origin || '*';
+  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
+    return entry.target !== targetWindow;
+  });
+  foliaStageBridgeState.targets.push({ target: targetWindow, origin: origin });
+  pushFoliaPlaybackBridge('target-register', { force: true });
+  return function() { unregisterFoliaBridgeTarget(targetWindow); };
+}
+function unregisterFoliaBridgeTarget(targetWindow) {
+  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
+    return entry.target !== targetWindow;
+  });
+}
+function subscribeFoliaBridge(handler) {
+  if (typeof handler !== 'function') return function(){};
+  foliaStageBridgeState.subscribers.push(handler);
+  var snapshot = createFoliaPlaybackBridgeSnapshot('subscriber-register');
+  if (snapshot) {
+    try { handler(snapshot, foliaBridgeStateApi().createFoliaBridgeMessage(snapshot)); } catch (e) {}
+  }
+  return function() {
+    foliaStageBridgeState.subscribers = foliaStageBridgeState.subscribers.filter(function(fn) {
+      return fn !== handler;
+    });
+  };
+}
+window.MineradioFoliaBridge = {
+  snapshot: createFoliaPlaybackBridgeSnapshot,
+  push: pushFoliaPlaybackBridge,
+  registerTarget: registerFoliaBridgeTarget,
+  unregisterTarget: unregisterFoliaBridgeTarget,
+  subscribe: subscribeFoliaBridge
+};
 function currentDesktopSongMeta() {
   var song = playQueue && currentIdx >= 0 ? playQueue[currentIdx] : null;
   song = song || currentLyricSong && currentLyricSong() || {};
@@ -26786,6 +26927,7 @@ function animate() {
   uniforms.uTreble.value = treble;
   uniforms.uBeat.value   = beatPulse;
   uniforms.uEnergy.value = audioEnergy;
+  pushFoliaPlaybackBridge('audio-frame');
   uniforms.uMouseXY.value.set(mouseWorld.x, mouseWorld.y);
   uniforms.uMouseActive.value = mouseActive ? 1 : 0;
   var skullBackdropDim = fx && fx.preset === SKULL_PRESET_INDEX ? 0.58 : 1;

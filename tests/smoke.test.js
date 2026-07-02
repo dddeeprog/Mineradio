@@ -37,6 +37,7 @@ test('playback session restore script is wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
+  assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-visuals\.js"><\/script>/);
@@ -51,6 +52,20 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
+});
+
+test('Folia playback bridge is wired without taking over playback', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+
+  assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
+  assert.match(html, /window\.MineradioFoliaBridge = \{/);
+  assert.match(html, /registerFoliaBridgeTarget/);
+  assert.match(html, /pushFoliaPlaybackBridge\('track-switch', \{ force: true \}\)/);
+  assert.match(html, /pushFoliaPlaybackBridge\('lyrics-state', \{ force: true \}\)/);
+  assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
+  assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
+  assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
 });
 
 test('main stylesheet is loaded as an external asset', () => {
