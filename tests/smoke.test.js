@@ -38,6 +38,7 @@ test('playback session restore script is wired', () => {
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
+  assert.match(html, /<script src="folia-stage-ui\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-visuals\.js"><\/script>/);
@@ -59,6 +60,7 @@ test('Folia playback bridge is wired without taking over playback', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
   assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
+  assert.match(pkg.scripts.check, /node --check public\/folia-stage-ui\.js/);
   assert.match(html, /window\.MineradioFoliaBridge = \{/);
   assert.match(html, /registerFoliaBridgeTarget/);
   assert.match(html, /pushFoliaPlaybackBridge\('track-switch', \{ force: true \}\)/);
@@ -66,6 +68,24 @@ test('Folia playback bridge is wired without taking over playback', () => {
   assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
   assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
   assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
+});
+
+test('Folia stage entry loads as an isolated iframe visual layer', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+  const stageUi = fs.readFileSync(path.join(repoRoot, 'public', 'folia-stage-ui.js'), 'utf8');
+
+  assert.match(html, /id="folia-stage-btn"/);
+  assert.match(html, /id="folia-stage-root"/);
+  assert.match(html, /id="folia-stage-frame"/);
+  assert.match(html, /window\.MineradioFoliaStageUi\.init/);
+  assert.match(html, /bridge: window\.MineradioFoliaBridge/);
+  assert.match(html, /#folia-stage-root/);
+  assert.match(css, /#folia-stage-root\{[^}]*position:fixed/);
+  assert.match(css, /\.folia-stage-toggle\.active/);
+  assert.match(stageUi, /DEFAULT_STAGE_SRC = 'folia-stage\/index\.html'/);
+  assert.match(stageUi, /registerTarget\(frame\.contentWindow/);
+  assert.match(stageUi, /Folia 舞台未构建/);
 });
 
 test('main stylesheet is loaded as an external asset', () => {

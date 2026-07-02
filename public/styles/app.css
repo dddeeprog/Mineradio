@@ -1920,6 +1920,24 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 /*  舞台歌词 (大字 + 3D 入场 + 呼吸)                              */
 /* ============================================================ */
 #stage-lyrics{display:none}
+.folia-stage-toggle{font-size:16px;font-weight:900;font-family:'PingFang SC','Microsoft YaHei',sans-serif}
+.folia-stage-toggle.active{color:#fff;background:linear-gradient(145deg,rgba(var(--fc-accent-rgb),.24),rgba(255,255,255,.12));border-color:rgba(var(--fc-accent-rgb),.42);box-shadow:0 0 0 1px rgba(var(--fc-accent-rgb),.16),0 10px 28px rgba(0,0,0,.28),0 0 24px rgba(var(--fc-accent-rgb),.13)}
+#folia-stage-root{position:fixed;inset:0;z-index:5;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .28s cubic-bezier(.16,1,.3,1),visibility 0s linear .28s}
+#folia-stage-root.show{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .28s cubic-bezier(.16,1,.3,1)}
+.folia-stage-shell{position:absolute;inset:0;overflow:hidden;background:radial-gradient(circle at 50% 36%,rgba(var(--fc-accent-rgb),.08),transparent 34%),rgba(0,0,0,.18);backdrop-filter:blur(12px) saturate(1.12);-webkit-backdrop-filter:blur(12px) saturate(1.12)}
+#folia-stage-frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .34s cubic-bezier(.16,1,.3,1)}
+#folia-stage-root.ready #folia-stage-frame{opacity:1}
+.folia-stage-chrome{position:absolute;left:24px;top:24px;z-index:2;display:flex;align-items:center;gap:14px;padding:11px 12px 11px 15px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(255,255,255,.13),rgba(7,9,13,.34));box-shadow:0 18px 58px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.17);backdrop-filter:blur(28px) saturate(1.28);-webkit-backdrop-filter:blur(28px) saturate(1.28)}
+.folia-stage-title{font-size:13px;font-weight:900;color:rgba(255,255,255,.92);letter-spacing:.2px}
+.folia-stage-sub{margin-top:2px;font-size:10.5px;color:rgba(255,255,255,.46);white-space:nowrap}
+.folia-stage-close{width:30px;height:30px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:rgba(255,255,255,.82);font-size:18px;line-height:1;cursor:pointer}
+.folia-stage-close:hover{background:rgba(255,255,255,.14);color:#fff}
+.folia-stage-loading{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:12px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(10,12,17,.42);color:rgba(255,255,255,.72);font-size:12px;letter-spacing:.2px;box-shadow:0 18px 58px rgba(0,0,0,.28);backdrop-filter:blur(28px) saturate(1.24);-webkit-backdrop-filter:blur(28px) saturate(1.24);opacity:0;transition:opacity .2s}
+#folia-stage-root.loading .folia-stage-loading{opacity:1}
+#folia-stage-root.ready .folia-stage-loading{opacity:0}
+body.immersive-mode #folia-stage-root.show{z-index:12}
+body.folia-stage-open #stage-lyrics{display:none!important}
+@media (max-width:720px){.folia-stage-chrome{left:14px;right:14px;top:14px;justify-content:space-between}.folia-stage-sub{display:none}}
 .stage-lyric-line{position:absolute;font-family:var(--font-sans);font-weight:700;font-size:clamp(34px,5.6vw,76px);letter-spacing:2px;text-align:center;color:#fff;white-space:nowrap;max-width:92vw;padding:0 24px;text-shadow:0 0 14px rgba(168,246,255,.38),0 0 36px rgba(143,233,255,.30),0 0 80px rgba(115,167,255,.16);background:linear-gradient(180deg,rgba(246,253,255,1) 0%,rgba(168,246,255,1) 55%,rgba(126,205,255,1) 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;opacity:0;transform-style:preserve-3d;will-change:transform,opacity,filter;filter:drop-shadow(0 4px 22px rgba(143,233,255,.30))}
 .stage-lyric-line.in{animation:lyr-in 900ms cubic-bezier(.16,.84,.32,1.02) forwards,lyr-bob 5.6s ease-in-out 900ms infinite}
 .stage-lyric-line.out{animation:lyr-out 700ms cubic-bezier(.55,0,.85,.45) forwards}

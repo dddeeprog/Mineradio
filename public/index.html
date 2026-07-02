@@ -17,6 +17,7 @@
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
 <script src="folia-bridge-state.js"></script>
+<script src="folia-stage-ui.js"></script>
 <script src="weather-lively-graph.js"></script>
 <script src="weather-lively-state.js"></script>
 <script src="weather-lively-visuals.js"></script>
@@ -613,6 +614,19 @@ try {
 
 <!-- 舞台歌词 (大字 3D, 由 JS 动态填充) -->
 <div id="stage-lyrics"></div>
+<div id="folia-stage-root" aria-hidden="true">
+  <div class="folia-stage-shell">
+    <iframe id="folia-stage-frame" title="Folia 歌词舞台" loading="lazy" allow="autoplay; fullscreen; clipboard-read; clipboard-write"></iframe>
+    <div class="folia-stage-chrome">
+      <div>
+        <div class="folia-stage-title">Folia 歌词舞台</div>
+        <div class="folia-stage-sub">接收 Mineradio 播放状态 · 不接管播放器</div>
+      </div>
+      <button class="folia-stage-close" type="button" data-folia-stage-action="close" title="关闭 Folia 舞台" aria-label="关闭 Folia 舞台">×</button>
+    </div>
+    <div class="folia-stage-loading">正在打开 Folia 舞台…</div>
+  </div>
+</div>
 
 <!-- 手势 HUD + 手骨架 -->
 <div id="gesture-hud" class="gesture-hud">
@@ -736,6 +750,7 @@ try {
     <div class="control-cluster modes">
     <button id="comment-barrage-btn" class="ctrl-btn comment-barrage-toggle" onclick="toggleCommentBarrage()" title="评论弹幕" aria-label="评论弹幕" aria-pressed="false">弹</button>
     <button class="ctrl-btn lyrics-toggle-btn" onclick="toggleLyricsPanel()" title="歌词"><span class="lyrics-word-icon">词</span></button>
+    <button id="folia-stage-btn" class="ctrl-btn folia-stage-toggle" type="button" title="打开 Folia 歌词舞台" aria-label="打开 Folia 歌词舞台" aria-pressed="false">舞</button>
     <div id="volume-control" class="volume-control">
       <button id="volume-btn" class="ctrl-btn" onclick="toggleVolumePanel(event)" title="音量 / 静音"><svg id="volume-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15 9.5a4 4 0 0 1 0 5"/></svg></button>
       <div class="volume-popover" onclick="event.stopPropagation()">
@@ -3837,7 +3852,7 @@ var particlePointerLocalHit = new THREE.Vector3();
 var particlePointerQuat = new THREE.Quaternion();
 var particlePointerFrame = { dirty:false, ndcX:0, ndcY:0 };
 var CLICK_THRESHOLD = 6;  // 像素, 拖动 > 6px 视为 drag
-var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
+var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#folia-stage-root,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
 
 function isPointerOverUi(e) {
   if (!e) return false;
@@ -26214,6 +26229,32 @@ window.MineradioFoliaBridge = {
   unregisterTarget: unregisterFoliaBridgeTarget,
   subscribe: subscribeFoliaBridge
 };
+var foliaStageUi = null;
+function createFoliaStageUiController() {
+  if (!window.MineradioFoliaStageUi || typeof window.MineradioFoliaStageUi.init !== 'function') return null;
+  return window.MineradioFoliaStageUi.init({
+    document: document,
+    bridge: window.MineradioFoliaBridge,
+    showToast: showToast,
+    fetch: window.fetch ? window.fetch.bind(window) : null
+  });
+}
+function foliaStageUiCall(method, args) {
+  if (!foliaStageUi && window.MineradioFoliaStageUi) foliaStageUi = createFoliaStageUiController();
+  if (foliaStageUi && typeof foliaStageUi[method] === 'function') return foliaStageUi[method].apply(foliaStageUi, args || []);
+  return null;
+}
+foliaStageUi = createFoliaStageUiController();
+function toggleFoliaStage(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  return foliaStageUiCall('toggle', []);
+}
+function closeFoliaStage() {
+  return foliaStageUiCall('close', arguments);
+}
 function currentDesktopSongMeta() {
   var song = playQueue && currentIdx >= 0 ? playQueue[currentIdx] : null;
   song = song || currentLyricSong && currentLyricSong() || {};
