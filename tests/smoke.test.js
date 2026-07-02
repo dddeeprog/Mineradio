@@ -516,3 +516,15 @@ test('record shelf close animation fades in place without fixed shrink drift', (
   assert.doesNotMatch(html, /window\.gsap\.to\(targetGroup\.scale, \{ x: 0\.965, y: 0\.965, z: 0\.965/);
   assert.doesNotMatch(html, /x: targetGroup\.position\.x \+ 0\.18/);
 });
+
+test('Lively Weather 95 percent acceptance report is recorded', () => {
+  const baseline = fs.readFileSync(path.join(repoRoot, 'docs', 'WEATHER_LIVELY_95_BASELINE.md'), 'utf8');
+
+  assert.match(baseline, /## 最终 95% 验收记录/);
+  assert.match(baseline, /总分：95\.[0-9]+\/100/);
+  assert.match(baseline, /浏览器验收证据/);
+  assert.match(baseline, /metricsCount: 6/);
+  assert.match(baseline, /visualLayers: 2/);
+  assert.match(baseline, /遗留差异/);
+  assert.match(baseline, /DirectX\/Avalonia\/Win2D/);
+});

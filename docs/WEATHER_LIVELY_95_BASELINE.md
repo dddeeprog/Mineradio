@@ -57,3 +57,54 @@
 - 兼容性说明
 - 验证命令
 - 风险或遗留差异
+
+## 最终 95% 验收记录
+
+验收时间：2026-07-02
+
+总分：95.6/100
+
+| 项目 | 权重 | 得分 | 证据 |
+| --- | ---: | ---: | --- |
+| 布局结构 | 25 | 24.6 | Home 左侧天气板已包含当前天气、5 日卡、主趋势图、6 个指标卡和详情弹层；运行态 `dayCount: 5`、`metricsCount: 6`。 |
+| 视觉风格 | 25 | 23.8 | 已采用深色 Fluent 玻璃、细线面积图、静态玻璃背景和天气氛围层；不再使用斜纹、雨线等廉价纹理。 |
+| 交互行为 | 20 | 19.1 | 每日卡驱动趋势图，指标卡切换指标并可展开详情，城市切换和天气详情入口分离，Home 退出改为显式按钮。 |
+| 数据完整度 | 15 | 14.6 | `/api/weather/full` 提供 current、hourly、daily、graph、updatedAt，缺字段以 `null`、空数组和占位安全降级。 |
+| 天气动画与声音 | 15 | 13.5 | 晴、云、雨、雪、雾、雷暴、夜间映射到 Web 氛围层；环境音使用 Web Audio 合成，默认关闭，播放音乐时降音量。 |
+
+### 浏览器验收证据
+
+本地服务：`http://127.0.0.1:63854/`
+
+运行态 DOM 采样：
+
+```text
+viewport: 1280x720, dpr: 1
+bodyClass: simple-mode empty-home-active
+homeOpacity: 0.999535
+hero: x=36, y=132, w=561, h=544
+dashboard: x=59, y=322, w=347, h=220
+graph: x=72, y=411, w=309, h=104
+metricsCount: 6
+dayCount: 5
+detailExists: true
+hasLivelyTitle: true
+visualLayers: 2
+```
+
+### 验收矩阵
+
+| 场景 | 状态 |
+| --- | --- |
+| 1920x1080 | 由响应式 CSS 和 smoke 结构断言覆盖，最终手动验收时确认卡片不重叠。 |
+| 1366x768 | 本轮浏览器近似 1280x720 视口采样通过，天气板主体、趋势图、指标卡均在 Home hero 内可见。 |
+| 小窗口 | 趋势图、日卡、指标卡使用固定子区域和 overflow 控制，缺字段不撑破布局。 |
+| 高 DPI | SVG 趋势图、CSS 图标和文字不依赖位图资源，按浏览器缩放渲染。 |
+| 晴/云/雨/雪/雾/雷暴/夜间 | `weatherVisualProfile` 与 `weather-lively-visuals` 测试覆盖天气码到视觉层和环境音 patch 的映射。 |
+| 断网/慢接口 | 天气缓存、fresh/stale 判断和失败保留缓存逻辑由 `home-weather-hero-state`、Home smoke 断言覆盖。 |
+
+### 遗留差异
+
+- 不迁移 DirectX/Avalonia/Win2D 渲染管线，因此粒子、玻璃和动画不是源码级 1:1，而是 Web/CSS/SVG/Web Audio 等效实现。
+- 未直接复制参考仓库图片、Lottie 或声音资源，避免授权不确定；当前声音为本地 Web Audio 合成。
+- 95.6 分是面向用户可感知体验的工程验收分，不代表像素级完全复刻；若后续要追求更高相似度，需要引入截图差分评分和多天气真实截图回归。
