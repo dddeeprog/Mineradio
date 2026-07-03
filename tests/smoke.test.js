@@ -37,6 +37,7 @@ test('playback session restore script is wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
+  assert.match(html, /<script src="folia-fx-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-stage-ui\.js"><\/script>/);
   assert.match(html, /<script src="folia-lyric-match-state\.js"><\/script>/);
@@ -77,6 +78,7 @@ test('Folia playback bridge is wired without taking over playback', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
   assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
+  assert.match(pkg.scripts.check, /node --check public\/folia-fx-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-stage-ui\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-lyric-match-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-theme-state\.js/);
@@ -88,6 +90,8 @@ test('Folia playback bridge is wired without taking over playback', () => {
   assert.match(html, /pushFoliaPlaybackBridge\('lyrics-state', \{ force: true \}\)/);
   assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
   assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
+  assert.match(html, /foliaBridgeFxPayload/);
+  assert.match(html, /foliaFx: foliaBridgeFxPayload\(\)/);
   assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
 });
 

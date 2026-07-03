@@ -9,8 +9,10 @@
   var MAX_LYRIC_LINES = 1200;
   var MAX_WORDS_PER_LINE = 160;
   var nodeThemeApi = null;
+  var nodeFoliaFxApi = null;
   if (typeof module === 'object' && module.exports && typeof require === 'function') {
     try { nodeThemeApi = require('./folia-theme-state'); } catch (_err) {}
+    try { nodeFoliaFxApi = require('./folia-fx-state'); } catch (_err) {}
   }
 
   function finiteNumber(value, fallback) {
@@ -167,6 +169,18 @@
     };
   }
 
+  function foliaFxApi() {
+    return nodeFoliaFxApi || (root && root.MineradioFoliaFxState) || null;
+  }
+
+  function normalizeFoliaFxPayload(input) {
+    var api = foliaFxApi();
+    if (api && typeof api.foliaFxToBridgePayload === 'function') {
+      return api.foliaFxToBridgePayload(input || {});
+    }
+    return input || {};
+  }
+
   function createFoliaBridgeSnapshot(state) {
     state = state || {};
     var playback = normalizePlaybackPayload(state.playback || state);
@@ -182,6 +196,7 @@
       lyrics: normalizeLyricsPayload(state.lyrics || {}),
       audio: normalizeAudioPayload(state.audio || {}),
       theme: normalizeThemePayload(state.theme || {}),
+      foliaFx: normalizeFoliaFxPayload(state.foliaFx || {}),
     };
   }
 
@@ -200,6 +215,7 @@
     var lyrics = snapshot.lyrics || {};
     var audio = snapshot.audio || {};
     var theme = snapshot.theme || {};
+    var foliaFx = snapshot.foliaFx || {};
     var darkTheme = theme.foliaStageTheme && theme.foliaStageTheme.dark || {};
     return [
       song.provider || '',
@@ -214,6 +230,13 @@
       audio.beatOnset ? 1 : 0,
       theme.source || '',
       darkTheme.accentColor || theme.particleTint || '',
+      foliaFx.enabled === false ? 0 : 1,
+      foliaFx.visualMode || '',
+      foliaFx.performanceMode || '',
+      foliaFx.lyricScale || '',
+      foliaFx.glow || '',
+      foliaFx.particleAmount || '',
+      foliaFx.beatMotion || '',
     ].join('|');
   }
 
@@ -230,5 +253,6 @@
     normalizeProvider: normalizeProvider,
     normalizeSongMeta: normalizeSongMeta,
     normalizeThemePayload: normalizeThemePayload,
+    normalizeFoliaFxPayload: normalizeFoliaFxPayload,
   };
 });

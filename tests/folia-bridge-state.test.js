@@ -120,3 +120,18 @@ test('includes sanitized Folia theme state in bridge snapshots', () => {
   assert.equal(snapshot.theme.foliaStageTheme.dark.accentColor, '#55ddff');
   assert.match(foliaBridgeSnapshotKey(snapshot), /#55ddff/);
 });
+
+test('includes sanitized Folia FX state in bridge snapshots', () => {
+  const snapshot = createFoliaBridgeSnapshot({
+    foliaFx: {
+      lyricScale: 9,
+      glow: 0.8,
+      performanceMode: 'battery',
+    },
+  });
+
+  assert.equal(snapshot.foliaFx.lyricScale, 1.8);
+  assert.equal(snapshot.foliaFx.glow, 0.8);
+  assert.equal(snapshot.foliaFx.performanceMode, 'battery');
+  assert.match(foliaBridgeSnapshotKey(snapshot), /battery/);
+});

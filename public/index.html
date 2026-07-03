@@ -17,6 +17,7 @@
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
 <script src="folia-theme-state.js"></script>
+<script src="folia-fx-state.js"></script>
 <script src="folia-bridge-state.js"></script>
 <script src="folia-stage-ui.js"></script>
 <script src="folia-lyric-match-state.js"></script>
@@ -1083,6 +1084,8 @@ var foliaLyricMatchCandidates = [];
 var foliaLyricMatchLoading = false;
 var foliaLyricMatchToken = 0;
 var foliaLyricCurrent = null;
+var FOLIA_FX_KEY = 'mineradio-folia-fx-v1';
+var foliaFx = readFoliaFxState();
 var FOLIA_THEME_SETTINGS_KEY = 'mineradio-folia-theme-settings-v1';
 var FOLIA_THEME_CACHE_KEY = 'mineradio-folia-theme-cache-v1';
 var foliaThemeSettings = readFoliaThemeSettings();
@@ -17570,6 +17573,15 @@ function updateCustomLyricControls() {
 function foliaThemeApi() {
   return window.MineradioFoliaThemeState || {};
 }
+function foliaFxApi() {
+  return window.MineradioFoliaFxState || {};
+}
+function readFoliaFxState() {
+  var api = foliaFxApi();
+  var raw = {};
+  try { raw = JSON.parse(localStorage.getItem(FOLIA_FX_KEY) || '{}') || {}; } catch (e) { raw = {}; }
+  return api && typeof api.normalizeFoliaFx === 'function' ? api.normalizeFoliaFx(raw) : raw;
+}
 function readFoliaThemeSettings() {
   var api = foliaThemeApi();
   var raw = {};
@@ -17794,6 +17806,12 @@ async function generateFoliaThemeForCurrentSong(force) {
 }
 function foliaBridgeThemePayload() {
   return foliaThemeCurrent || {};
+}
+function foliaBridgeFxPayload() {
+  var api = window.MineradioFoliaFxState || {};
+  return api && typeof api.foliaFxToBridgePayload === 'function'
+    ? api.foliaFxToBridgePayload(foliaFx)
+    : (foliaFx || {});
 }
 function setCustomLyricStatus(text, tone) {
   var el = document.getElementById('custom-lyric-status');
@@ -26769,7 +26787,8 @@ function createFoliaPlaybackBridgeSnapshot(reason) {
     playback: foliaBridgePlaybackPayload(),
     lyrics: foliaBridgeLyricsPayload(),
     audio: foliaBridgeAudioPayload(),
-    theme: foliaBridgeThemePayload()
+    theme: foliaBridgeThemePayload(),
+    foliaFx: foliaBridgeFxPayload()
   });
 }
 function foliaBridgeHasConsumers() {
