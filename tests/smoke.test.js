@@ -112,6 +112,24 @@ test('Folia AI theme generation is wired into DIY controls and local API', () =>
   assert.match(css, /\.folia-theme-preview/);
 });
 
+test('Folia DIY controls are wired into Mineradio visual panel', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /id="folia-fx-card"/);
+  assert.match(html, /id="folia-fx-enabled"/);
+  assert.match(html, /id="folia-fx-visual-mode"/);
+  assert.match(html, /id="folia-fx-lyric-scale"/);
+  assert.match(html, /id="folia-fx-glow"/);
+  assert.match(html, /id="folia-fx-particle-amount"/);
+  assert.match(html, /id="folia-fx-beat-motion"/);
+  assert.match(html, /id="folia-fx-performance-mode"/);
+  assert.match(html, /function syncFoliaFxControls\(/);
+  assert.match(html, /function updateFoliaFxFromControl\(/);
+  assert.match(html, /pushFoliaPlaybackBridge\('folia-fx-state', \{ force: true \}\)/);
+  assert.match(css, /\.folia-fx-card/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 

@@ -379,6 +379,32 @@ try {
         </div>
         <div id="folia-lyric-source-status" class="folia-lyric-source-status">当前：原歌词</div>
       </div>
+      <div class="fx-section-label">Folia 舞台效果</div>
+      <div class="folia-fx-card" id="folia-fx-card">
+        <div class="folia-fx-head">
+          <div><b>舞台 DIY</b><span id="folia-fx-status">实时推送到 Folia iframe</span></div>
+          <button class="fx-mini-btn ghost" type="button" onclick="resetFoliaFxSettings()">重置</button>
+        </div>
+        <label class="fx-check"><input id="folia-fx-enabled" type="checkbox" onchange="updateFoliaFxFromControl('enabled', this.checked)">启用 Folia 舞台效果</label>
+        <div class="fx-section-label">舞台模式</div>
+        <div class="fx-seg" id="folia-fx-visual-mode">
+          <button type="button" data-folia-fx="visualMode" data-value="auto" onclick="updateFoliaFxFromControl('visualMode','auto')">自动</button>
+          <button type="button" data-folia-fx="visualMode" data-value="cappella" onclick="updateFoliaFxFromControl('visualMode','cappella')">Cappella</button>
+          <button type="button" data-folia-fx="visualMode" data-value="partita" onclick="updateFoliaFxFromControl('visualMode','partita')">Partita</button>
+          <button type="button" data-folia-fx="visualMode" data-value="minimal" onclick="updateFoliaFxFromControl('visualMode','minimal')">极简</button>
+        </div>
+        <label>歌词大小<input id="folia-fx-lyric-scale" type="range" min="0.65" max="1.8" step="0.01" oninput="updateFoliaFxFromControl('lyricScale', this.value)"></label>
+        <label>逐字高亮<input id="folia-fx-word-highlight" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('wordHighlight', this.value)"></label>
+        <label>光晕<input id="folia-fx-glow" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('glow', this.value)"></label>
+        <label>粒子<input id="folia-fx-particle-amount" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('particleAmount', this.value)"></label>
+        <label>鼓点响应<input id="folia-fx-beat-motion" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('beatMotion', this.value)"></label>
+        <div class="fx-section-label">性能</div>
+        <div class="fx-seg" id="folia-fx-performance-mode">
+          <button type="button" data-folia-fx="performanceMode" data-value="quality" onclick="updateFoliaFxFromControl('performanceMode','quality')">高质量</button>
+          <button type="button" data-folia-fx="performanceMode" data-value="balanced" onclick="updateFoliaFxFromControl('performanceMode','balanced')">平衡</button>
+          <button type="button" data-folia-fx="performanceMode" data-value="battery" onclick="updateFoliaFxFromControl('performanceMode','battery')">省电</button>
+        </div>
+      </div>
       <div class="fx-section-label">Folia AI 主题</div>
       <div class="folia-theme-card" id="folia-theme-card">
         <div class="folia-theme-card-head">
@@ -17582,6 +17608,68 @@ function readFoliaFxState() {
   try { raw = JSON.parse(localStorage.getItem(FOLIA_FX_KEY) || '{}') || {}; } catch (e) { raw = {}; }
   return api && typeof api.normalizeFoliaFx === 'function' ? api.normalizeFoliaFx(raw) : raw;
 }
+function readFoliaFxSettings() {
+  return readFoliaFxState();
+}
+function saveFoliaFxSettings() {
+  var api = foliaFxApi();
+  foliaFx = api && typeof api.normalizeFoliaFx === 'function'
+    ? api.normalizeFoliaFx(foliaFx || {})
+    : Object.assign({}, foliaFx || {});
+  try {
+    localStorage.setItem(FOLIA_FX_KEY, JSON.stringify(foliaFx));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function applyFoliaFxPatch(patch, reason) {
+  var api = foliaFxApi();
+  foliaFx = api && typeof api.patchFoliaFx === 'function'
+    ? api.patchFoliaFx(foliaFx || {}, patch || {})
+    : Object.assign({}, foliaFx || {}, patch || {});
+  var saved = saveFoliaFxSettings();
+  syncFoliaFxControls();
+  pushFoliaPlaybackBridge('folia-fx-state', { force: true });
+  var status = document.getElementById('folia-fx-status');
+  if (status) status.textContent = saved ? '已保存并实时推送 · ' + (reason || 'updated') : '保存失败，已尝试实时推送';
+  return foliaFx;
+}
+function syncFoliaFxControls() {
+  var api = foliaFxApi();
+  foliaFx = api && typeof api.normalizeFoliaFx === 'function' ? api.normalizeFoliaFx(foliaFx || {}) : (foliaFx || {});
+  var enabled = document.getElementById('folia-fx-enabled');
+  if (enabled) enabled.checked = foliaFx.enabled !== false;
+  var ranges = [
+    ['folia-fx-lyric-scale', 'lyricScale'],
+    ['folia-fx-word-highlight', 'wordHighlight'],
+    ['folia-fx-glow', 'glow'],
+    ['folia-fx-particle-amount', 'particleAmount'],
+    ['folia-fx-beat-motion', 'beatMotion'],
+  ];
+  ranges.forEach(function(pair) {
+    var el = document.getElementById(pair[0]);
+    if (el) el.value = foliaFx[pair[1]];
+  });
+  document.querySelectorAll('[data-folia-fx]').forEach(function(btn) {
+    var key = btn.getAttribute('data-folia-fx');
+    btn.classList.toggle('active', String(foliaFx[key]) === btn.getAttribute('data-value'));
+  });
+}
+function updateFoliaFxFromControl(key, value) {
+  var patch = {};
+  patch[key] = value;
+  return applyFoliaFxPatch(patch, key);
+}
+function resetFoliaFxSettings() {
+  var api = foliaFxApi();
+  foliaFx = api && typeof api.normalizeFoliaFx === 'function' ? api.normalizeFoliaFx({}) : {};
+  try { localStorage.removeItem(FOLIA_FX_KEY); } catch (e) {}
+  saveFoliaFxSettings();
+  syncFoliaFxControls();
+  pushFoliaPlaybackBridge('folia-fx-state', { force: true });
+  showToast('Folia 舞台效果已重置');
+}
 function readFoliaThemeSettings() {
   var api = foliaThemeApi();
   var raw = {};
@@ -23168,6 +23256,7 @@ function bindFxPanel() {
   renderUserFxArchives();
   buildLyricColorControls();
   syncFoliaThemeControls();
+  syncFoliaFxControls();
   var ids = [
     ['fx-intensity','intensity'],['fx-depth','depth'],['fx-coverres','coverResolution'],['fx-cineshake','cinemaShake'],['fx-lyricglow','lyricGlowStrength'],['fx-bgopacity','backgroundOpacity'],['fx-glassaberration','controlGlassChromaticOffset'],
     ['fx-desktoplyricssize','desktopLyricsSize'],['fx-desktoplyricsopacity','desktopLyricsOpacity'],['fx-desktoplyricsy','desktopLyricsY'],['fx-wallpaperopacity','wallpaperOpacity'],
