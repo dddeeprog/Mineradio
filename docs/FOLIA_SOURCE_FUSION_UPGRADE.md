@@ -457,6 +457,52 @@ feat: 将 Home 左侧升级为歌词舞台入口
 - 兼容旧 Home 交互。
 - 验证结果。
 
+### 阶段 8：Folia DIY 配置接入
+
+目标：把 Folia 舞台效果配置纳入 Mineradio DIY 面板，由 Mineradio 负责保存、归一化和实时推送，Folia 内嵌舞台只消费配置并渲染，不接管播放、不重新连接音乐平台。
+
+配置边界：
+
+- Mineradio 新增 `mineradio-folia-fx-v1` 本地配置。
+- DIY 面板暴露舞台开关、舞台模式、歌词大小、逐字高亮、光晕、粒子、鼓点响应和性能模式。
+- `MineradioFoliaBridge` 在 `song`、`playback`、`lyrics`、`audio`、`theme` 之外同步推送 `foliaFx`。
+- Folia bridge mode 监听 `mineradio:folia-playback-state`，将 `foliaFx` 映射到自己的 visualizer、歌词字号、背景透明度和性能参数。
+- Folia iframe 默认以 `mineradioBridge=1` 打开，DIY 参数变化只通过 bridge 热更新，不重载 iframe。
+
+验证：
+
+```bash
+npm run check
+npm test
+npm test --prefix third_party/folia-major -- src/mineradioBridge/__tests__/foliaFx.test.ts
+npm run folia:build
+node --check public/folia-fx-state.js
+git diff --check
+```
+
+手动验收：
+
+- 打开 Mineradio 并播放歌曲。
+- 打开 Folia 舞台，确认 Folia 不再要求连接网易云。
+- Folia 显示 Mineradio 当前歌曲、封面和歌词。
+- 拖动 `Folia 舞台效果` 中的歌词大小、光晕、粒子、鼓点响应，确认舞台实时变化且 iframe 不重载。
+- 切换 `性能` 到省电，确认 Folia 降低重型效果。
+- 切歌后 Folia 继续保留当前 DIY 配置，并刷新歌曲、封面和歌词。
+- 关闭 Folia 舞台后 Mineradio 播放继续。
+
+提交信息：
+
+```text
+docs: 补充 Folia DIY 配置接入验收说明
+```
+
+提交正文建议说明：
+
+- Folia DIY 配置由 Mineradio 统一保存和推送。
+- Folia bridge mode 不接管播放和平台连接。
+- iframe bridge mode 与热更新验证结果。
+- 涉及 Folia 源码修改时第三方声明已同步。
+
 ## 6. 失败与降级策略
 
 必须保证以下场景不影响 Mineradio 主播放器：
