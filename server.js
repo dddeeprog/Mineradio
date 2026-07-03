@@ -69,6 +69,7 @@ const { createAppStatusRoutes } = require('./server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
 const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
+const { createFoliaThemeRoutes } = require('./server/routes/folia-theme');
 const { createNeteaseRoutes } = require('./server/routes/netease');
 const { createPodcastRoutes } = require('./server/routes/podcast');
 const { createProxyRoutes } = require('./server/routes/proxy');
@@ -2777,6 +2778,11 @@ const foliaLyricRoutes = createFoliaLyricRoutes({
   handleQQSearch,
   handleQQLyric,
 });
+const foliaThemeRoutes = createFoliaThemeRoutes({
+  sendJSON,
+  readRequestBody,
+  fetchImpl: fetch,
+});
 const podcastRoutes = createPodcastRoutes({
   sendJSON,
   getUserCookie: () => userCookie,
@@ -2881,6 +2887,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await foliaLyricRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await foliaThemeRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 

@@ -12,6 +12,7 @@ const POST_ONLY_ROUTES = new Set([
   '/api/song/like',
   '/api/playlist/create',
   '/api/playlist/add-song',
+  '/api/folia/theme/generate',
 ]);
 
 function normalizeHost(value) {

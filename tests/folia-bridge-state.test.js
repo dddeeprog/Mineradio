@@ -92,3 +92,31 @@ test('creates stable bridge messages and throttle keys', () => {
   assert.equal(message.payload, snapshot);
   assert.match(foliaBridgeSnapshotKey(snapshot), /netease\|101\|49\|400\|1\|lrc\|1/);
 });
+
+test('includes sanitized Folia theme state in bridge snapshots', () => {
+  const snapshot = createFoliaBridgeSnapshot({
+    now: 2000,
+    song: { id: 202, name: 'Theme Song' },
+    theme: {
+      source: 'ai',
+      generated: true,
+      lyricFont: 'serif-en',
+      theme: {
+        dark: {
+          name: 'Theme Night',
+          backgroundColor: '#111827',
+          primaryColor: '#ffffff',
+          accentColor: '#55ddff',
+          secondaryColor: '#cbd5e1',
+        },
+      },
+      particleTint: '#55ddff',
+    },
+  });
+
+  assert.equal(snapshot.theme.source, 'ai');
+  assert.equal(snapshot.theme.generated, true);
+  assert.equal(snapshot.theme.lyricFont, 'serif-en');
+  assert.equal(snapshot.theme.foliaStageTheme.dark.accentColor, '#55ddff');
+  assert.match(foliaBridgeSnapshotKey(snapshot), /#55ddff/);
+});

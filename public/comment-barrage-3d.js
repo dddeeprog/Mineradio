@@ -26,12 +26,14 @@ function ensureCommentBarrage3DGroup() {
 }
 function commentBarragePaletteColor(profile) {
   var pal = stageLyrics && stageLyrics.palette || {};
+  var themeColor = '';
+  try { themeColor = foliaThemeCurrent && foliaThemeCurrent.commentColor || ''; } catch (_err) { themeColor = ''; }
   var fallback = '#d6f8ff';
   if (profile && profile.kind === 'requiem') fallback = '#d9b8ff';
   else if (profile && profile.kind === 'starfield') fallback = '#bfe8ff';
   else if (profile && profile.kind === 'groove') fallback = '#fff0b8';
   else if (profile && profile.kind === 'void-whisper') fallback = '#d8d6ff';
-  return lyricThreeColor(pal.highlight || pal.primary || fallback, fallback, 0.46);
+  return lyricThreeColor(themeColor || pal.highlight || pal.primary || fallback, fallback, 0.46);
 }
 function makeCommentBarrageTextTexture(text, profile) {
   text = stripUnsupportedEmojiSafe(text).replace(/\s+/g, ' ').trim();

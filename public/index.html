@@ -16,6 +16,7 @@
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
+<script src="folia-theme-state.js"></script>
 <script src="folia-bridge-state.js"></script>
 <script src="folia-stage-ui.js"></script>
 <script src="folia-lyric-match-state.js"></script>
@@ -395,6 +396,26 @@ try {
           <button id="lyric-source-folia" type="button" onclick="openFoliaLyricMatchModal()">匹配</button>
         </div>
         <div id="folia-lyric-source-status" class="folia-lyric-source-status">当前：原歌词</div>
+      </div>
+      <div class="fx-section-label">Folia AI 主题</div>
+      <div class="folia-theme-card" id="folia-theme-card">
+        <div class="folia-theme-card-head">
+          <div><b>歌曲主题生成</b><span id="folia-theme-status">手动触发，不会切歌自动请求</span></div>
+          <button class="fx-mini-btn" type="button" onclick="generateFoliaThemeForCurrentSong(false)">生成/应用</button>
+        </div>
+        <div class="folia-theme-field-grid">
+          <label>API URL<input id="folia-theme-api-url" type="text" autocomplete="off" spellcheck="false" value="https://api.openai.com/v1"></label>
+          <label>模型<input id="folia-theme-model" type="text" autocomplete="off" spellcheck="false" value="gpt-4o-mini"></label>
+          <label class="wide">API Key<input id="folia-theme-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只在本机保存"></label>
+        </div>
+        <div class="folia-theme-actions">
+          <button class="fx-mini-btn ghost" type="button" onclick="saveFoliaThemeSettingsFromUi()">保存配置</button>
+          <button class="fx-mini-btn ghost" type="button" onclick="generateFoliaThemeForCurrentSong(true)">重新生成</button>
+        </div>
+        <div class="folia-theme-preview" id="folia-theme-preview">
+          <span style="--c:#0f172a"></span><span style="--c:#f8fafc"></span><span style="--c:#7dd3fc"></span>
+          <em>还没有生成主题</em>
+        </div>
       </div>
       <div class="fx-section-label">歌词字体</div>
       <div class="fx-font-grid expanded" id="lyric-font-grid">
@@ -1081,6 +1102,12 @@ var foliaLyricMatchCandidates = [];
 var foliaLyricMatchLoading = false;
 var foliaLyricMatchToken = 0;
 var foliaLyricCurrent = null;
+var FOLIA_THEME_SETTINGS_KEY = 'mineradio-folia-theme-settings-v1';
+var FOLIA_THEME_CACHE_KEY = 'mineradio-folia-theme-cache-v1';
+var foliaThemeSettings = readFoliaThemeSettings();
+var foliaThemeCache = readFoliaThemeCache();
+var foliaThemeCurrent = null;
+var foliaThemeGenerating = false;
 var localBeatAnalysis = { song:null, audioUrl:'', mode:'mr', active:false, token:0 };
 var likedSongMap = {}, likeBusyMap = {}, likeStatusToken = 0;
 var collectTargetSong = null, collectBusy = false;
@@ -17490,6 +17517,234 @@ function updateCustomLyricControls() {
     foliaStatus.textContent = '当前：' + label;
   }
 }
+function foliaThemeApi() {
+  return window.MineradioFoliaThemeState || {};
+}
+function readFoliaThemeSettings() {
+  var api = foliaThemeApi();
+  var raw = {};
+  try { raw = JSON.parse(localStorage.getItem(FOLIA_THEME_SETTINGS_KEY) || '{}') || {}; } catch (e) { raw = {}; }
+  if (api && typeof api.normalizeFoliaThemeSettings === 'function') return api.normalizeFoliaThemeSettings(raw);
+  return {
+    provider: 'openai',
+    apiUrl: raw.apiUrl || 'https://api.openai.com/v1',
+    model: raw.model || 'gpt-4o-mini',
+    apiKey: raw.apiKey || '',
+    hasApiKey: !!raw.apiKey,
+  };
+}
+function saveFoliaThemeSettings(settings) {
+  var api = foliaThemeApi();
+  foliaThemeSettings = api && typeof api.normalizeFoliaThemeSettings === 'function'
+    ? api.normalizeFoliaThemeSettings(settings || {})
+    : Object.assign({}, settings || {});
+  try {
+    localStorage.setItem(FOLIA_THEME_SETTINGS_KEY, JSON.stringify({
+      apiUrl: foliaThemeSettings.apiUrl || 'https://api.openai.com/v1',
+      model: foliaThemeSettings.model || 'gpt-4o-mini',
+      apiKey: foliaThemeSettings.apiKey || '',
+    }));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function readFoliaThemeCache() {
+  try { return JSON.parse(localStorage.getItem(FOLIA_THEME_CACHE_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function saveFoliaThemeCache() {
+  try {
+    localStorage.setItem(FOLIA_THEME_CACHE_KEY, JSON.stringify(foliaThemeCache || {}));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function currentFoliaThemeSong() {
+  return currentCoverSong() || currentLyricSong() || currentLocalSong || null;
+}
+function currentFoliaThemeCoverColors() {
+  var pal = stageLyrics && (stageLyrics.coverPalette || stageLyrics.palette) || {};
+  var list = [pal.background, pal.primary, pal.secondary, pal.highlight, fx.visualTintColor, fx.uiAccentColor, fx.homeAccentColor];
+  if (typeof coverPickerSwatchColors === 'function') list = list.concat(coverPickerSwatchColors());
+  var api = foliaThemeApi();
+  if (api && typeof api.normalizeCoverColors === 'function') return api.normalizeCoverColors(list);
+  return list.filter(Boolean).slice(0, 6);
+}
+function foliaThemeCacheKeyForSong(song) {
+  var api = foliaThemeApi();
+  if (api && typeof api.foliaThemeCacheKey === 'function') return api.foliaThemeCacheKey(song || {});
+  return songCustomCoverKey(song || {}) || '';
+}
+function getCachedFoliaThemeForSong(song) {
+  var key = foliaThemeCacheKeyForSong(song);
+  var api = foliaThemeApi();
+  if (!key) return null;
+  if (api && typeof api.getCachedFoliaTheme === 'function') return api.getCachedFoliaTheme(foliaThemeCache, key, Date.now());
+  var item = foliaThemeCache && foliaThemeCache[key];
+  return item && item.themeResult || null;
+}
+function writeCachedFoliaThemeForSong(song, result) {
+  var key = foliaThemeCacheKeyForSong(song);
+  var api = foliaThemeApi();
+  if (!key || !result) return;
+  foliaThemeCache = api && typeof api.writeCachedFoliaTheme === 'function'
+    ? api.writeCachedFoliaTheme(foliaThemeCache, key, result, Date.now())
+    : Object.assign({}, foliaThemeCache, { [key]: { updatedAt: Date.now(), themeResult: result } });
+  saveFoliaThemeCache();
+}
+function setFoliaThemeStatus(text, tone) {
+  var el = document.getElementById('folia-theme-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('good', tone === 'good');
+  el.classList.toggle('fail', tone === 'fail');
+}
+function renderFoliaThemePreview(result) {
+  var el = document.getElementById('folia-theme-preview');
+  if (!el) return;
+  var theme = result && result.theme && result.theme.dark || {};
+  var background = theme.backgroundColor || '#0f172a';
+  var primary = theme.primaryColor || '#f8fafc';
+  var accent = theme.accentColor || result && result.particleTint || '#7dd3fc';
+  var label = result ? ((result.generated === false ? '封面降级' : 'AI 主题') + ' · ' + (theme.name || 'Folia Theme')) : '还没有生成主题';
+  el.innerHTML = '<span style="--c:' + escHtml(background) + '"></span><span style="--c:' + escHtml(primary) + '"></span><span style="--c:' + escHtml(accent) + '"></span><em>' + escHtml(label) + '</em>';
+}
+function syncFoliaThemeControls() {
+  var settings = foliaThemeSettings || readFoliaThemeSettings();
+  var apiUrl = document.getElementById('folia-theme-api-url');
+  var model = document.getElementById('folia-theme-model');
+  var apiKey = document.getElementById('folia-theme-api-key');
+  if (apiUrl) apiUrl.value = settings.apiUrl || 'https://api.openai.com/v1';
+  if (model) model.value = settings.model || 'gpt-4o-mini';
+  if (apiKey) apiKey.value = settings.apiKey || '';
+  renderFoliaThemePreview(foliaThemeCurrent);
+  if (!foliaThemeCurrent) setFoliaThemeStatus(settings.hasApiKey ? '已保存 API Key，可手动生成' : '未设置 API Key 时使用封面色降级', settings.hasApiKey ? 'good' : '');
+}
+function saveFoliaThemeSettingsFromUi() {
+  var settings = {
+    apiUrl: document.getElementById('folia-theme-api-url') && document.getElementById('folia-theme-api-url').value,
+    model: document.getElementById('folia-theme-model') && document.getElementById('folia-theme-model').value,
+    apiKey: document.getElementById('folia-theme-api-key') && document.getElementById('folia-theme-api-key').value,
+  };
+  var saved = saveFoliaThemeSettings(settings);
+  syncFoliaThemeControls();
+  showToast(saved ? 'Folia AI 主题配置已保存' : 'Folia AI 主题配置保存失败');
+  return saved;
+}
+function currentFoliaThemeRequestPayload() {
+  var song = currentFoliaThemeSong();
+  if (!song) return null;
+  var settings = {
+    apiUrl: document.getElementById('folia-theme-api-url') && document.getElementById('folia-theme-api-url').value || foliaThemeSettings.apiUrl,
+    model: document.getElementById('folia-theme-model') && document.getElementById('folia-theme-model').value || foliaThemeSettings.model,
+    apiKey: document.getElementById('folia-theme-api-key') && document.getElementById('folia-theme-api-key').value || foliaThemeSettings.apiKey,
+  };
+  saveFoliaThemeSettings(settings);
+  return {
+    song: song,
+    lyricsLines: Array.isArray(lyricsLines) ? lyricsLines : [],
+    coverColors: currentFoliaThemeCoverColors(),
+    isPureMusic: lyricsTimingSource === 'fallback' && (!lyricsLines || lyricsLines.length <= 1),
+    settings: foliaThemeSettings,
+  };
+}
+function applyFoliaThemeResult(result, opts) {
+  opts = opts || {};
+  var api = foliaThemeApi();
+  result = api && typeof api.sanitizeFoliaThemeResult === 'function' ? api.sanitizeFoliaThemeResult(result || {}) : result;
+  if (!result) return false;
+  var patch = api && typeof api.themeResultToFxPatch === 'function' ? api.themeResultToFxPatch(result) : {};
+  foliaThemeCurrent = result;
+  if (patch.lyricFont) fx.lyricFont = normalizeLyricFontKey(patch.lyricFont);
+  if (patch.lyricColor) {
+    fx.lyricColorMode = 'custom';
+    fx.lyricColor = normalizeHexColor(patch.lyricColor);
+  }
+  if (patch.lyricHighlightColor) {
+    fx.lyricHighlightMode = 'custom';
+    fx.lyricHighlightColor = normalizeHexColor(patch.lyricHighlightColor);
+  }
+  if (patch.lyricGlowColor) {
+    fx.lyricGlowLinked = false;
+    fx.lyricGlowColor = normalizeHexColor(patch.lyricGlowColor);
+  }
+  if (patch.visualTintColor) {
+    fx.visualTintMode = 'custom';
+    fx.visualTintColor = normalizeHexColor(patch.visualTintColor);
+  }
+  if (patch.backgroundColor) {
+    fx.backgroundColorMode = 'custom';
+    fx.backgroundColorCustom = true;
+    fx.backgroundColor = normalizeHexColor(patch.backgroundColor, fx.backgroundColor || '#000000');
+  }
+  document.documentElement.style.setProperty('--folia-comment-color', result.commentColor || patch.commentColor || '#d6f8ff');
+  setStageLyricPalette(fx.lyricColorMode === 'custom' ? lyricPaletteFromHex(fx.lyricColor) : (stageLyrics.coverPalette || stageLyrics.palette));
+  updateLyricFontControls();
+  updateLyricColorControls();
+  updateLyricHighlightControls();
+  updateLyricGlowControls();
+  updateVisualTintControls();
+  updateCustomBackgroundControls();
+  syncFxUniforms();
+  refreshCurrentLyricStyle();
+  saveLyricLayout();
+  pushDesktopLyricsState(true);
+  pushFoliaPlaybackBridge('theme-state', { force: true });
+  renderFoliaThemePreview(result);
+  setFoliaThemeStatus(result.generated === false ? '已使用封面色降级主题' : '已应用 Folia AI 主题', result.generated === false ? '' : 'good');
+  if (!opts.silent) showToast(result.generated === false ? '已用封面色生成 Folia 主题' : 'Folia AI 主题已应用');
+  return true;
+}
+async function generateFoliaThemeForCurrentSong(force) {
+  if (foliaThemeGenerating) return;
+  var song = currentFoliaThemeSong();
+  if (!song) {
+    showToast('先播放或选择一首歌');
+    return;
+  }
+  if (!force) {
+    var cached = getCachedFoliaThemeForSong(song);
+    if (cached) {
+      applyFoliaThemeResult(cached);
+      setFoliaThemeStatus('已应用缓存主题', 'good');
+      return;
+    }
+  }
+  var payload = currentFoliaThemeRequestPayload();
+  if (!payload) return;
+  foliaThemeGenerating = true;
+  setFoliaThemeStatus(payload.settings && payload.settings.hasApiKey ? '正在请求 AI 主题...' : '未设置 API Key，使用封面色生成...', '');
+  try {
+    var data = await apiJson('/api/folia/theme/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      timeoutMs: 32000,
+    });
+    var result = data && data.themeResult;
+    if (!result) throw new Error(data && data.error || 'FOLIA_THEME_EMPTY');
+    writeCachedFoliaThemeForSong(song, result);
+    applyFoliaThemeResult(result, { silent: true });
+    showToast(data && data.ok === false ? 'AI 主题失败，已使用封面色降级' : (result.generated === false ? '已用封面色生成 Folia 主题' : 'Folia AI 主题已应用'));
+  } catch (err) {
+    var api = foliaThemeApi();
+    var fallbackInput = api && typeof api.buildFoliaThemeInput === 'function' ? api.buildFoliaThemeInput(payload) : payload;
+    var fallback = api && typeof api.buildFallbackFoliaThemeResult === 'function' ? api.buildFallbackFoliaThemeResult(fallbackInput) : null;
+    if (fallback) {
+      writeCachedFoliaThemeForSong(song, fallback);
+      applyFoliaThemeResult(fallback, { silent: true });
+    }
+    setFoliaThemeStatus('主题生成失败，已尝试封面降级', 'fail');
+    showToast('Folia AI 主题生成失败');
+  } finally {
+    foliaThemeGenerating = false;
+  }
+}
+function foliaBridgeThemePayload() {
+  return foliaThemeCurrent || {};
+}
 function setCustomLyricStatus(text, tone) {
   var el = document.getElementById('custom-lyric-status');
   if (!el) return;
@@ -22844,6 +23099,7 @@ function bindFxPanel() {
   buildPresetGrid();
   renderUserFxArchives();
   buildLyricColorControls();
+  syncFoliaThemeControls();
   var ids = [
     ['fx-intensity','intensity'],['fx-depth','depth'],['fx-coverres','coverResolution'],['fx-cineshake','cinemaShake'],['fx-lyricglow','lyricGlowStrength'],['fx-bgopacity','backgroundOpacity'],['fx-glassaberration','controlGlassChromaticOffset'],
     ['fx-desktoplyricssize','desktopLyricsSize'],['fx-desktoplyricsopacity','desktopLyricsOpacity'],['fx-desktoplyricsy','desktopLyricsY'],['fx-wallpaperopacity','wallpaperOpacity'],
@@ -26462,7 +26718,8 @@ function createFoliaPlaybackBridgeSnapshot(reason) {
     song: currentFoliaBridgeSong(),
     playback: foliaBridgePlaybackPayload(),
     lyrics: foliaBridgeLyricsPayload(),
-    audio: foliaBridgeAudioPayload()
+    audio: foliaBridgeAudioPayload(),
+    theme: foliaBridgeThemePayload()
   });
 }
 function foliaBridgeHasConsumers() {

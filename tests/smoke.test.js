@@ -40,6 +40,7 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-stage-ui\.js"><\/script>/);
   assert.match(html, /<script src="folia-lyric-match-state\.js"><\/script>/);
+  assert.match(html, /<script src="folia-theme-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-visuals\.js"><\/script>/);
@@ -78,7 +79,9 @@ test('Folia playback bridge is wired without taking over playback', () => {
   assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-stage-ui\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-lyric-match-state\.js/);
+  assert.match(pkg.scripts.check, /node --check public\/folia-theme-state\.js/);
   assert.match(pkg.scripts.check, /node --check server\/routes\/folia-lyrics\.js/);
+  assert.match(pkg.scripts.check, /node --check server\/routes\/folia-theme\.js/);
   assert.match(html, /window\.MineradioFoliaBridge = \{/);
   assert.match(html, /registerFoliaBridgeTarget/);
   assert.match(html, /pushFoliaPlaybackBridge\('track-switch', \{ force: true \}\)/);
@@ -86,6 +89,23 @@ test('Folia playback bridge is wired without taking over playback', () => {
   assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
   assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
   assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
+});
+
+test('Folia AI theme generation is wired into DIY controls and local API', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+  const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
+
+  assert.match(server, /createFoliaThemeRoutes/);
+  assert.match(server, /foliaThemeRoutes\.handleRoute\(pn, req, res, url\)/);
+  assert.match(html, /id="folia-theme-card"/);
+  assert.match(html, /id="folia-theme-api-key"/);
+  assert.match(html, /saveFoliaThemeSettingsFromUi/);
+  assert.match(html, /generateFoliaThemeForCurrentSong/);
+  assert.match(html, /applyFoliaThemeResult/);
+  assert.match(html, /foliaBridgeThemePayload/);
+  assert.match(css, /\.folia-theme-card/);
+  assert.match(css, /\.folia-theme-preview/);
 });
 
 test('Folia lyric provider routes are registered in the local API server', () => {

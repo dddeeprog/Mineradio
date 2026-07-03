@@ -1,13 +1,17 @@
 (function(root, factory) {
-  var api = factory();
+  var api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioFoliaBridgeState = api;
-})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function() {
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function(root) {
   var FOLIA_BRIDGE_VERSION = 1;
   var FOLIA_BRIDGE_MESSAGE_TYPE = 'mineradio:folia-playback-state';
   var MAX_STRING_LENGTH = 360;
   var MAX_LYRIC_LINES = 1200;
   var MAX_WORDS_PER_LINE = 160;
+  var nodeThemeApi = null;
+  if (typeof module === 'object' && module.exports && typeof require === 'function') {
+    try { nodeThemeApi = require('./folia-theme-state'); } catch (_err) {}
+  }
 
   function finiteNumber(value, fallback) {
     var n = Number(value);
@@ -144,6 +148,25 @@
     };
   }
 
+  function themeApi() {
+    return nodeThemeApi || (root && root.MineradioFoliaThemeState) || null;
+  }
+
+  function normalizeThemePayload(input) {
+    var api = themeApi();
+    if (api && typeof api.sanitizeFoliaThemeResult === 'function') {
+      return api.sanitizeFoliaThemeResult(input || {});
+    }
+    input = input || {};
+    return {
+      source: text(input.source || 'none', 'none'),
+      generated: input.generated === true,
+      lyricFont: text(input.lyricFont || 'sans', 'sans'),
+      foliaStageTheme: input.foliaStageTheme || input.theme || null,
+      particleTint: text(input.particleTint || ''),
+    };
+  }
+
   function createFoliaBridgeSnapshot(state) {
     state = state || {};
     var playback = normalizePlaybackPayload(state.playback || state);
@@ -158,6 +181,7 @@
       playback: playback,
       lyrics: normalizeLyricsPayload(state.lyrics || {}),
       audio: normalizeAudioPayload(state.audio || {}),
+      theme: normalizeThemePayload(state.theme || {}),
     };
   }
 
@@ -175,6 +199,8 @@
     var playback = snapshot.playback || {};
     var lyrics = snapshot.lyrics || {};
     var audio = snapshot.audio || {};
+    var theme = snapshot.theme || {};
+    var darkTheme = theme.foliaStageTheme && theme.foliaStageTheme.dark || {};
     return [
       song.provider || '',
       song.id || song.mid || song.title || '',
@@ -186,6 +212,8 @@
       Math.round((audio.energy || 0) * 20),
       Math.round((audio.beatPulse || 0) * 20),
       audio.beatOnset ? 1 : 0,
+      theme.source || '',
+      darkTheme.accentColor || theme.particleTint || '',
     ].join('|');
   }
 
@@ -201,5 +229,6 @@
     normalizePlaybackPayload: normalizePlaybackPayload,
     normalizeProvider: normalizeProvider,
     normalizeSongMeta: normalizeSongMeta,
+    normalizeThemePayload: normalizeThemePayload,
   };
 });
