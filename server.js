@@ -68,6 +68,7 @@ const qqMusic = require('./server/music/qq');
 const { createAppStatusRoutes } = require('./server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
+const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
 const { createNeteaseRoutes } = require('./server/routes/netease');
 const { createPodcastRoutes } = require('./server/routes/podcast');
 const { createProxyRoutes } = require('./server/routes/proxy');
@@ -2770,6 +2771,12 @@ const qqRoutes = createQQRoutes({
   parseSongCommentLimit,
   handleQQSongComments,
 });
+const foliaLyricRoutes = createFoliaLyricRoutes({
+  sendJSON,
+  fetchImpl: fetch,
+  handleQQSearch,
+  handleQQLyric,
+});
 const podcastRoutes = createPodcastRoutes({
   sendJSON,
   getUserCookie: () => userCookie,
@@ -2870,6 +2877,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await qqRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await foliaLyricRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 

@@ -1068,6 +1068,22 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .custom-lyric-status.fail{color:#ff8f9d}
 .lyric-source-row{display:grid;grid-template-columns:1fr;gap:8px;margin:8px 0 12px}
 .lyric-source-seg button.has-custom::after{content:'';display:inline-block;width:5px;height:5px;margin-left:5px;border-radius:50%;background:rgba(126,226,168,.86);vertical-align:middle;box-shadow:0 0 10px rgba(126,226,168,.50)}
+.folia-lyric-source-status{font-size:10.5px;color:rgba(255,255,255,.42);line-height:1.35;min-height:14px}
+.folia-lyric-match-modal{width:min(620px,92vw);max-width:min(620px,92vw);padding:28px;text-align:left}
+.folia-lyric-match-modal h2{text-align:center;margin-bottom:14px}
+.folia-lyric-match-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 4px}
+.folia-lyric-match-actions .modal-btn{padding:9px 12px}
+.folia-lyric-match-list{display:grid;gap:9px;margin-top:12px;max-height:min(360px,42vh);overflow:auto;padding-right:2px;scrollbar-width:none;-ms-overflow-style:none}
+.folia-lyric-match-list::-webkit-scrollbar{width:0;height:0}
+.folia-lyric-empty{padding:18px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:rgba(255,255,255,.48);font-size:12px;text-align:center}
+.folia-lyric-candidate{display:grid;gap:4px;width:100%;text-align:left;border:1px solid rgba(255,255,255,.09);border-radius:14px;background:linear-gradient(135deg,rgba(255,255,255,.085),rgba(255,255,255,.035));color:#fff;padding:12px 13px;cursor:pointer;font-family:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.08);transition:background .18s,border-color .18s,transform .18s}
+.folia-lyric-candidate:hover{background:linear-gradient(135deg,rgba(244,210,138,.14),rgba(255,255,255,.055));border-color:rgba(244,210,138,.30);transform:translateY(-1px)}
+.folia-lyric-candidate-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11.5px;color:rgba(255,255,255,.72)}
+.folia-lyric-candidate-head b{font-size:12px;color:rgba(255,255,255,.92)}
+.folia-lyric-candidate-head em{font-style:normal;color:rgba(244,210,138,.88)}
+.folia-lyric-candidate-main{font-size:14px;font-weight:800;color:rgba(255,255,255,.95);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.folia-lyric-candidate-sub{font-size:11px;color:rgba(255,255,255,.48);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.folia-lyric-candidate-foot{font-size:10.5px;color:rgba(255,255,255,.34);letter-spacing:.3px}
 
 /* ---------- 加载/拖放 ---------- */
 #loading-overlay{position:fixed;inset:0;z-index:40;pointer-events:none;display:none}

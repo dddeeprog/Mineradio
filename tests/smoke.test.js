@@ -39,6 +39,7 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-stage-ui\.js"><\/script>/);
+  assert.match(html, /<script src="folia-lyric-match-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-visuals\.js"><\/script>/);
@@ -55,12 +56,29 @@ test('playback session restore script is wired', () => {
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
 });
 
+test('Folia lyric matching UI is wired into lyric source controls', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /id="lyric-source-folia"/);
+  assert.match(html, /openFoliaLyricMatchModal\(\)/);
+  assert.match(html, /id="folia-lyric-match-modal"/);
+  assert.match(html, /id="folia-lyric-match-list"/);
+  assert.match(html, /fetchFoliaLyricMatchCandidates/);
+  assert.match(html, /applyFoliaLyricCandidate/);
+  assert.match(html, /parseFoliaTtmlLyricText/);
+  assert.match(css, /\.folia-lyric-match-modal/);
+  assert.match(css, /\.folia-lyric-candidate/);
+});
+
 test('Folia playback bridge is wired without taking over playback', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
   assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-stage-ui\.js/);
+  assert.match(pkg.scripts.check, /node --check public\/folia-lyric-match-state\.js/);
+  assert.match(pkg.scripts.check, /node --check server\/routes\/folia-lyrics\.js/);
   assert.match(html, /window\.MineradioFoliaBridge = \{/);
   assert.match(html, /registerFoliaBridgeTarget/);
   assert.match(html, /pushFoliaPlaybackBridge\('track-switch', \{ force: true \}\)/);
@@ -68,6 +86,15 @@ test('Folia playback bridge is wired without taking over playback', () => {
   assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
   assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
   assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
+});
+
+test('Folia lyric provider routes are registered in the local API server', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
+
+  assert.match(server, /createFoliaLyricRoutes/);
+  assert.match(server, /foliaLyricRoutes\.handleRoute\(pn, req, res, url\)/);
+  assert.match(server, /handleQQSearch/);
+  assert.match(server, /handleQQLyric/);
 });
 
 test('Folia stage entry loads as an isolated iframe visual layer', () => {

@@ -18,6 +18,7 @@
 <script src="playback-session-state.js"></script>
 <script src="folia-bridge-state.js"></script>
 <script src="folia-stage-ui.js"></script>
+<script src="folia-lyric-match-state.js"></script>
 <script src="weather-lively-graph.js"></script>
 <script src="weather-lively-state.js"></script>
 <script src="weather-lively-visuals.js"></script>
@@ -391,7 +392,9 @@ try {
         <div class="fx-seg lyric-source-seg" id="lyric-source-seg">
           <button id="lyric-source-original" type="button" class="active" onclick="setLyricSourceMode('original')">原词</button>
           <button id="lyric-source-custom" type="button" onclick="setLyricSourceMode('custom')">自定义</button>
+          <button id="lyric-source-folia" type="button" onclick="openFoliaLyricMatchModal()">匹配</button>
         </div>
+        <div id="folia-lyric-source-status" class="folia-lyric-source-status">当前：原歌词</div>
       </div>
       <div class="fx-section-label">歌词字体</div>
       <div class="fx-font-grid expanded" id="lyric-font-grid">
@@ -918,6 +921,25 @@ try {
   </div>
 </div>
 
+<div id="folia-lyric-match-modal" class="modal-mask">
+  <div class="modal folia-lyric-match-modal">
+    <h2>Folia 歌词匹配</h2>
+    <div class="custom-lyric-track">
+      <div id="folia-lyric-match-title" class="custom-lyric-title">当前歌曲</div>
+      <div id="folia-lyric-match-sub" class="custom-lyric-sub">网易云 / AMLL / QQ / 酷狗 多源匹配</div>
+    </div>
+    <div class="folia-lyric-match-actions">
+      <button class="modal-btn primary" type="button" onclick="matchBestFoliaLyric()">一键最佳</button>
+      <button class="modal-btn" type="button" onclick="refreshFoliaLyricMatchCandidates()">重新匹配</button>
+    </div>
+    <div id="folia-lyric-match-status" class="custom-lyric-status">准备匹配歌词版本</div>
+    <div id="folia-lyric-match-list" class="folia-lyric-match-list"></div>
+    <div class="btn-row">
+      <button class="modal-btn" onclick="closeFoliaLyricMatchModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="track-detail-modal" class="modal-mask">
   <div class="modal track-detail-modal">
     <h2 id="track-detail-heading">歌曲详情</h2>
@@ -1054,6 +1076,11 @@ var coverCropState = null, coverCropBound = false;
 var currentLocalSong = null;
 var lyricSourceMode = 'original';
 var originalLyricsState = { lines: [], hasNativeKaraoke: false, timingSource: 'none' };
+var foliaLyricsState = { lines: [], hasNativeKaraoke: false, timingSource: 'none', sourceLabel: '' };
+var foliaLyricMatchCandidates = [];
+var foliaLyricMatchLoading = false;
+var foliaLyricMatchToken = 0;
+var foliaLyricCurrent = null;
 var localBeatAnalysis = { song:null, audioUrl:'', mode:'mr', active:false, token:0 };
 var likedSongMap = {}, likeBusyMap = {}, likeStatusToken = 0;
 var collectTargetSong = null, collectBusy = false;
@@ -17414,6 +17441,11 @@ function applyPreferredLyricsForCurrent(silent) {
 function setLyricSourceMode(mode, silent) {
   var song = currentLyricSong();
   var key = songCustomLyricKey(song);
+  if (mode === 'folia') {
+    if (!silent) openFoliaLyricMatchModal();
+    updateCustomLyricControls();
+    return true;
+  }
   mode = mode === 'custom' ? 'custom' : 'original';
   if (mode === 'custom') {
     if (!applyCustomLyricState(song, true)) {
@@ -17437,14 +17469,25 @@ function updateCustomLyricControls() {
   var hasCustom = hasCustomLyricForSong(song);
   var originalBtn = document.getElementById('lyric-source-original');
   var customBtn = document.getElementById('lyric-source-custom');
+  var foliaBtn = document.getElementById('lyric-source-folia');
+  var foliaStatus = document.getElementById('folia-lyric-source-status');
   if (originalBtn) {
-    originalBtn.classList.toggle('active', lyricSourceMode !== 'custom');
-    originalBtn.title = '使用网易云或本地解析歌词';
+    originalBtn.classList.toggle('active', lyricSourceMode === 'original');
+    originalBtn.title = '使用当前平台原歌词';
   }
   if (customBtn) {
     customBtn.classList.toggle('active', lyricSourceMode === 'custom');
     customBtn.classList.toggle('has-custom', hasCustom);
     customBtn.title = hasCustom ? '打开并编辑自定义歌词' : '新增自定义歌词';
+  }
+  if (foliaBtn) {
+    foliaBtn.classList.toggle('active', lyricSourceMode === 'folia');
+    foliaBtn.classList.toggle('has-custom', !!foliaLyricCurrent);
+    foliaBtn.title = foliaLyricCurrent ? ('当前使用 ' + foliaLyricCurrent.label) : '打开 Folia 多源歌词匹配';
+  }
+  if (foliaStatus) {
+    var label = lyricSourceMode === 'custom' ? '自定义歌词' : (lyricSourceMode === 'folia' && foliaLyricCurrent ? foliaLyricCurrent.label : '原歌词');
+    foliaStatus.textContent = '当前：' + label;
   }
 }
 function setCustomLyricStatus(text, tone) {
@@ -17523,6 +17566,267 @@ function deleteCustomLyricForCurrent() {
   if (input) input.value = '';
   setCustomLyricStatus('已删除，恢复原歌词', 'good');
   showToast('已恢复原歌词');
+}
+function foliaLyricMatchApi() {
+  return window.MineradioFoliaLyricMatchState || {};
+}
+function resetFoliaLyricMatchForSong() {
+  foliaLyricsState = { lines: [], hasNativeKaraoke: false, timingSource: 'none', sourceLabel: '' };
+  foliaLyricMatchCandidates = [];
+  foliaLyricCurrent = null;
+  updateCustomLyricControls();
+}
+function foliaLyricSourceLabel(candidate) {
+  candidate = candidate || {};
+  var api = foliaLyricMatchApi();
+  if (api.sourceDisplayLabel) return api.sourceDisplayLabel(candidate.source, candidate.providerPlatform);
+  if (candidate.source === 'amll') return 'AMLL TTML';
+  if (candidate.source === 'qq') return 'QQ 歌词';
+  if (candidate.source === 'kugou') return '酷狗歌词';
+  if (candidate.source === 'netease-current') return '网易云当前歌词';
+  return 'Folia 歌词';
+}
+function normalizeFoliaCandidate(candidate, song) {
+  var api = foliaLyricMatchApi();
+  var normalized = api.normalizeLyricMatchCandidate ? api.normalizeLyricMatchCandidate(candidate) : Object.assign({}, candidate || {});
+  normalized.title = normalized.title || (song && (song.name || song.title)) || '';
+  normalized.artist = normalized.artist || (song && (song.artist || song.author)) || '';
+  normalized.album = normalized.album || (song && (song.album || song.albumName)) || '';
+  normalized.durationMs = normalized.durationMs || normalizeFoliaDurationMs(song && (song.duration || song.durationMs || song.dt));
+  normalized.label = normalized.label || foliaLyricSourceLabel(normalized);
+  return normalized;
+}
+function normalizeFoliaDurationMs(value) {
+  var n = Number(value) || 0;
+  if (!n || n < 0) return 0;
+  return n > 1000 ? Math.round(n) : Math.round(n * 1000);
+}
+function currentNeteaseFoliaCandidate(song, body) {
+  body = body || {};
+  var lyric = body.lyric || body.yrc || '';
+  if (!lyric) return null;
+  return normalizeFoliaCandidate({
+    source: 'netease-current',
+    id: song && song.id,
+    title: song && (song.name || song.title),
+    artist: song && (song.artist || song.author),
+    album: song && (song.album || song.albumName),
+    durationMs: normalizeFoliaDurationMs(song && (song.duration || song.durationMs || song.dt)),
+    format: body.yrc ? 'yrc' : 'lrc',
+    lyric: body.lyric || '',
+    yrc: body.yrc || '',
+    tlyric: body.tlyric || '',
+    providerSource: body.source || 'netease',
+  }, song);
+}
+function foliaCandidatesFromResponse(source, body, song) {
+  if (source === 'netease-current') {
+    var current = currentNeteaseFoliaCandidate(song, body);
+    return current ? [current] : [];
+  }
+  return (Array.isArray(body && body.candidates) ? body.candidates : [])
+    .map(function(candidate){ return normalizeFoliaCandidate(candidate, song); })
+    .filter(function(candidate){ return candidate && (candidate.lyric || candidate.yrc || candidate.qrc); });
+}
+function rankFoliaCandidates(song, candidates) {
+  var api = foliaLyricMatchApi();
+  var target = api.normalizeLyricMatchTarget ? api.normalizeLyricMatchTarget(song || {}) : (song || {});
+  return (Array.isArray(candidates) ? candidates : []).map(function(candidate){
+    var normalized = normalizeFoliaCandidate(candidate, song);
+    var details = api.calculateLyricMatchScoreDetails ? api.calculateLyricMatchScoreDetails(target, normalized) : { score: 0 };
+    normalized.score = details.score || 0;
+    normalized.scoreDetails = details;
+    normalized.label = normalized.label || foliaLyricSourceLabel(normalized);
+    return normalized;
+  }).sort(function(a, b){
+    return (b.score || 0) - (a.score || 0);
+  });
+}
+function setFoliaLyricMatchStatus(text, tone) {
+  var el = document.getElementById('folia-lyric-match-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('good', tone === 'good');
+  el.classList.toggle('fail', tone === 'fail');
+}
+function renderFoliaLyricMatchCandidates() {
+  var list = document.getElementById('folia-lyric-match-list');
+  if (!list) return;
+  if (foliaLyricMatchLoading) {
+    list.innerHTML = '<div class="folia-lyric-empty">正在向多个歌词源请求，请稍候...</div>';
+    return;
+  }
+  if (!foliaLyricMatchCandidates.length) {
+    list.innerHTML = '<div class="folia-lyric-empty">暂时没有找到可用歌词版本</div>';
+    return;
+  }
+  list.innerHTML = foliaLyricMatchCandidates.map(function(candidate, index){
+    var title = candidate.title || '未知歌曲';
+    var sub = [candidate.artist, candidate.album].filter(Boolean).join(' · ');
+    var format = String(candidate.format || 'lrc').toUpperCase();
+    return '<button class="folia-lyric-candidate" type="button" onclick="applyFoliaLyricCandidate(' + index + ')">' +
+      '<span class="folia-lyric-candidate-head"><b>' + escHtml(candidate.label || foliaLyricSourceLabel(candidate)) + '</b><em>' + Math.round(candidate.score || 0) + ' 分</em></span>' +
+      '<span class="folia-lyric-candidate-main">' + escHtml(title) + '</span>' +
+      '<span class="folia-lyric-candidate-sub">' + escHtml(sub || '可用歌词版本') + '</span>' +
+      '<span class="folia-lyric-candidate-foot">' + escHtml(format) + ' · 点击使用</span>' +
+    '</button>';
+  }).join('');
+}
+async function fetchFoliaLyricMatchCandidates(force) {
+  var song = currentLyricSong();
+  if (!song) {
+    setFoliaLyricMatchStatus('请先播放或选择一首歌', 'fail');
+    renderFoliaLyricMatchCandidates();
+    return [];
+  }
+  var api = foliaLyricMatchApi();
+  if (!api.buildLyricMatchRequestPlan) {
+    setFoliaLyricMatchStatus('Folia 匹配模块未加载', 'fail');
+    return [];
+  }
+  if (!force && foliaLyricMatchCandidates.length) {
+    renderFoliaLyricMatchCandidates();
+    return foliaLyricMatchCandidates;
+  }
+  var token = ++foliaLyricMatchToken;
+  foliaLyricMatchLoading = true;
+  setFoliaLyricMatchStatus('正在匹配网易云 / AMLL / QQ / 酷狗歌词...', '');
+  renderFoliaLyricMatchCandidates();
+  var plan = api.buildLyricMatchRequestPlan(song).filter(function(item){
+    if (item.source === 'netease-current' && (!(song && song.id) || songProviderKey(song) === 'qq')) return false;
+    return !!item.endpoint;
+  });
+  var batches = await Promise.all(plan.map(async function(item){
+    try {
+      var body = await apiJson(item.endpoint, { timeoutMs: item.timeoutMs || 5000 });
+      return foliaCandidatesFromResponse(item.source, body, song);
+    } catch (err) {
+      return [];
+    }
+  }));
+  if (token !== foliaLyricMatchToken) return foliaLyricMatchCandidates;
+  foliaLyricMatchCandidates = rankFoliaCandidates(song, batches.reduce(function(all, arr){ return all.concat(arr || []); }, []));
+  foliaLyricMatchLoading = false;
+  setFoliaLyricMatchStatus(foliaLyricMatchCandidates.length ? ('找到 ' + foliaLyricMatchCandidates.length + ' 个歌词版本') : '没有找到可用歌词版本', foliaLyricMatchCandidates.length ? 'good' : 'fail');
+  renderFoliaLyricMatchCandidates();
+  return foliaLyricMatchCandidates;
+}
+function refreshFoliaLyricMatchCandidates() {
+  foliaLyricMatchCandidates = [];
+  fetchFoliaLyricMatchCandidates(true);
+}
+async function matchBestFoliaLyric() {
+  var candidates = await fetchFoliaLyricMatchCandidates(false);
+  if (!candidates.length) {
+    showToast('没有找到可用歌词版本');
+    return;
+  }
+  applyFoliaLyricCandidate(0);
+}
+function decodeFoliaTtmlText(text) {
+  var div = document.createElement('div');
+  div.innerHTML = String(text || '').replace(/<br\s*\/?>/gi, '\n');
+  return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim();
+}
+function foliaTtmlTimeToSeconds(value) {
+  var raw = String(value || '').trim();
+  if (!raw) return 0;
+  if (/^\d+(?:\.\d+)?ms$/i.test(raw)) return (parseFloat(raw) || 0) / 1000;
+  if (/^\d+(?:\.\d+)?s$/i.test(raw)) return parseFloat(raw) || 0;
+  var parts = raw.split(':');
+  var sec = 0;
+  parts.forEach(function(part){ sec = sec * 60 + (parseFloat(part) || 0); });
+  return sec;
+}
+function parseFoliaTtmlLyricText(text) {
+  var lines = [];
+  var reg = /<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+  var m;
+  while ((m = reg.exec(String(text || '')))) {
+    var attrs = m[1] || '';
+    var begin = (attrs.match(/\bbegin=["']([^"']+)["']/i) || [])[1] || '';
+    var end = (attrs.match(/\bend=["']([^"']+)["']/i) || [])[1] || '';
+    var t = foliaTtmlTimeToSeconds(begin);
+    var endTime = foliaTtmlTimeToSeconds(end);
+    var lineText = decodeFoliaTtmlText(m[2] || '');
+    if (!lineText) continue;
+    lines.push({
+      t: t,
+      duration: endTime > t ? endTime - t : 4.8,
+      text: lineText,
+      charCount: Math.max(1, lineText.length),
+      source: 'folia-ttml',
+    });
+  }
+  return finalizeLyricLineDurations(lines);
+}
+function foliaCandidateToLyricState(candidate) {
+  candidate = candidate || {};
+  var format = String(candidate.format || '').toLowerCase();
+  var lines = [];
+  var hasNativeKaraoke = false;
+  var timingSource = 'folia-lrc';
+  if (format === 'ttml' || /^<tt[\s>]/i.test(String(candidate.lyric || '').trim())) {
+    lines = parseFoliaTtmlLyricText(candidate.lyric || '');
+    timingSource = 'folia-ttml';
+  }
+  if (!lines.length && (candidate.yrc || candidate.qrc || format === 'yrc' || format === 'qrc')) {
+    lines = parseYrcText(candidate.yrc || candidate.qrc || candidate.lyric || '');
+    hasNativeKaraoke = lines.some(function(line){ return line.words && line.words.length; });
+    timingSource = hasNativeKaraoke ? 'folia-word' : 'folia-line';
+  }
+  if (!lines.length) {
+    lines = parseLyricText(candidate.lyric || '');
+    timingSource = 'folia-lrc';
+  }
+  return {
+    lines: withLyricFallback(lines),
+    hasNativeKaraoke: hasNativeKaraoke,
+    timingSource: lines.length ? timingSource : 'fallback',
+    sourceLabel: candidate.label || foliaLyricSourceLabel(candidate),
+  };
+}
+function applyFoliaLyricCandidate(index) {
+  var candidate = foliaLyricMatchCandidates[index];
+  if (!candidate) {
+    setFoliaLyricMatchStatus('歌词版本不存在，请重新匹配', 'fail');
+    return false;
+  }
+  var state = foliaCandidateToLyricState(candidate);
+  if (!state.lines.length || (state.lines.length && state.lines[0].fallback)) {
+    setFoliaLyricMatchStatus('这个歌词版本无法解析', 'fail');
+    return false;
+  }
+  foliaLyricsState = state;
+  foliaLyricCurrent = {
+    label: state.sourceLabel,
+    source: candidate.source,
+    format: candidate.format,
+    score: candidate.score || 0,
+  };
+  lyricSourceMode = 'folia';
+  applyLyricsState(state.lines, state.hasNativeKaraoke, state.timingSource);
+  updateCustomLyricControls();
+  closeFoliaLyricMatchModal();
+  showToast('已使用 ' + state.sourceLabel);
+  return true;
+}
+function openFoliaLyricMatchModal() {
+  var song = currentLyricSong();
+  if (!song) {
+    showToast('先播放或选择一首歌');
+    return;
+  }
+  if (immersiveMode) setImmersiveMode(false);
+  var title = document.getElementById('folia-lyric-match-title');
+  var sub = document.getElementById('folia-lyric-match-sub');
+  if (title) title.textContent = song.name || song.title || '当前歌曲';
+  if (sub) sub.textContent = [song.artist || song.author, '网易云 / AMLL / QQ / 酷狗'].filter(Boolean).join(' · ');
+  openGsapModal(document.getElementById('folia-lyric-match-modal'));
+  fetchFoliaLyricMatchCandidates(false);
+}
+function closeFoliaLyricMatchModal() {
+  closeGsapModal(document.getElementById('folia-lyric-match-modal'));
 }
 function isCloudSong(song) {
   if (!song || !song.id) return false;
@@ -19674,12 +19978,14 @@ async function fetchLyric(songOrId, token) {
     var lines = withLyricFallback(nativeLines.length ? nativeLines : lrcLines);
     if (lines.length && lines[0].fallback) timingSource = 'fallback';
     setOriginalLyricsState(lines, hasNativeKaraoke, timingSource);
+    resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
     if (emptyHomeActive) renderHomeWeatherHero(true);
   } catch (e) {
     if (token !== trackSwitchToken) return;
     var fallbackLines = withLyricFallback([]);
     setOriginalLyricsState(fallbackLines, false, 'fallback');
+    resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
     if (emptyHomeActive) renderHomeWeatherHero(true);
   }
@@ -23139,6 +23445,7 @@ function bindModalBackdropClose() {
     ['login-modal', closeLoginModal],
     ['user-modal', closeUserModal],
     ['custom-lyric-modal', closeCustomLyricModal],
+    ['folia-lyric-match-modal', closeFoliaLyricMatchModal],
     ['update-modal', closeUpdatePanel]
   ].forEach(function(pair){
     var mask = document.getElementById(pair[0]);
@@ -25133,6 +25440,12 @@ document.addEventListener('keydown', function(e){
     if (customLyricModal && customLyricModal.classList.contains('show')) {
       e.preventDefault();
       closeCustomLyricModal();
+      return;
+    }
+    var foliaLyricModal = document.getElementById('folia-lyric-match-modal');
+    if (foliaLyricModal && foliaLyricModal.classList.contains('show')) {
+      e.preventDefault();
+      closeFoliaLyricMatchModal();
       return;
     }
     var trackDetailModal = document.getElementById('track-detail-modal');
