@@ -130,55 +130,37 @@ try {
 <!-- 空场 Home -->
 <section id="empty-home" aria-label="Mineradio home">
   <div class="empty-home-shell">
-    <div class="home-hero home-weather-lively-page">
-      <div class="home-hero-inner home-weather-hero-inner">
-        <div id="home-weather-scene" class="home-weather-scene weather-scene-clear weather-scene-day" aria-hidden="true"></div>
-        <div class="home-kicker" id="home-weather-kicker">Weather Console</div>
-        <div class="home-title home-weather-title"><span id="home-weather-temp">--</span><span class="home-weather-degree">°</span></div>
-        <div class="home-weather-place">
-          <span class="home-weather-city" id="home-weather-city">上海</span>
-          <span class="home-weather-label" id="home-weather-label">正在整理天气</span>
-        </div>
-        <div class="home-weather-meta" id="home-weather-meta"></div>
-        <div class="home-weather-alert" id="home-weather-alert">天气正在整理，先按常规出行准备。</div>
-        <div class="home-weather-dashboard">
-          <div class="home-weather-curve-card">
-            <div class="home-weather-curve-head">
-              <div>
-                <div class="home-weather-curve-title">未来 12 小时</div>
-                <button id="home-weather-now-btn" class="home-weather-now-btn" type="button">现在</button>
-              </div>
-              <div class="home-weather-curve-preview" id="home-weather-hour-preview">等待小时预报</div>
-            </div>
-            <div class="home-weather-curve-tabs" id="home-weather-curve-tabs"></div>
-            <div class="home-weather-curve-wrap" id="home-weather-curve">
-              <div class="home-weather-curve-backdrop" aria-hidden="true">
-                <span></span><span></span><span></span>
-              </div>
-              <svg class="home-weather-curve-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="home-weather-curve-gradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="var(--home-accent)" stop-opacity="0.30"></stop>
-                    <stop offset="70%" stop-color="var(--home-accent)" stop-opacity="0.08"></stop>
-                    <stop offset="100%" stop-color="var(--home-accent)" stop-opacity="0"></stop>
-                  </linearGradient>
-                </defs>
-                <line class="home-weather-curve-grid" x1="0" y1="82" x2="100" y2="82"></line>
-                <path id="home-weather-curve-area" class="home-weather-curve-area" d=""></path>
-                <path id="home-weather-curve-line-glow" class="home-weather-curve-line-glow" d=""></path>
-                <path id="home-weather-curve-line" class="home-weather-curve-line" d=""></path>
-                <line id="home-weather-selected-guide" class="home-weather-selected-guide" x1="0" y1="18" x2="0" y2="86"></line>
-              </svg>
-              <div class="home-weather-value-labels" id="home-weather-value-labels" aria-hidden="true"></div>
-              <div class="home-weather-curve-icons" id="home-weather-curve-icons" aria-hidden="true"></div>
-              <div class="home-weather-forecast" id="home-weather-forecast">
-                <div class="home-weather-hour-ticks" id="home-weather-hour-ticks"></div>
-              </div>
-            </div>
+    <div class="home-hero home-stage-hero">
+      <div class="home-hero-inner home-stage-hero-inner">
+        <div class="home-stage-copy">
+          <div class="home-kicker">Lyric Stage</div>
+          <div class="home-title home-stage-title" id="home-stage-title">选择一首歌</div>
+          <div class="home-stage-meta">
+            <span id="home-stage-artist">Mineradio</span>
+            <span id="home-stage-album">等待播放</span>
           </div>
-          <div class="home-weather-daily" id="home-weather-daily"></div>
-          <div class="home-weather-metrics" id="home-weather-metrics"></div>
-          <div class="home-weather-advice" id="home-weather-advice"></div>
+        </div>
+        <div class="home-stage-cover-shell" aria-hidden="true">
+          <div id="home-stage-cover" class="home-stage-cover"></div>
+          <div class="home-stage-cover-ring"></div>
+        </div>
+        <div class="home-stage-lyric-panel">
+          <div class="home-stage-panel-label">当前歌词</div>
+          <div id="home-stage-lyric" class="home-stage-lyric">播放后会在这里显示当前歌词摘要。</div>
+          <div class="home-stage-lyric-foot">
+            <span id="home-stage-lyric-source">歌词源：原歌词</span>
+            <button class="home-stage-inline-btn" type="button" onclick="openFoliaLyricMatchModal()">切换版本</button>
+          </div>
+        </div>
+        <div id="home-stage-weather-pill" class="home-stage-weather-pill">
+          <span class="home-stage-weather-dot" aria-hidden="true"></span>
+          <span id="home-stage-weather-title">天气电台</span>
+          <span id="home-stage-weather-sub">正在整理天气</span>
+        </div>
+        <div class="home-stage-actions">
+          <button id="home-stage-folia-btn" class="home-stage-action primary" type="button" onclick="toggleFoliaStage(event)">Folia 歌词舞台</button>
+          <button id="home-stage-dynamic-btn" class="home-stage-action" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
+          <button class="home-stage-action" type="button" onclick="openFoliaLyricMatchModal()">匹配歌词</button>
         </div>
         <div class="home-quick-row">
           <button class="home-chip home-console-chip" type="button" data-home-radio-start>天气电台</button>
@@ -206,7 +188,6 @@ try {
               </label>
             </span>
           </span>
-          <button id="home-dynamic-lyrics-btn" class="home-chip" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
         </div>
       </div>
     </div>
@@ -15762,7 +15743,11 @@ function homeWeatherUiCall(method, args) {
 }
 homeWeatherUi = createHomeWeatherUiController();
 function resolveHomeWeatherSelection(action) { return homeWeatherUiCall('resolveSelection', arguments); }
-function renderHomeWeatherHero() { return homeWeatherUiCall('renderHomeWeatherHero', arguments); }
+function renderHomeWeatherHero() {
+  var result = homeWeatherUiCall('renderHomeWeatherHero', arguments);
+  renderHomeStageHero();
+  return result;
+}
 function updateWeatherCityChip(fields) { return homeWeatherUiCall('updateWeatherCityChip', arguments); }
 function renderWeatherDetailPopover(fields) { return homeWeatherUiCall('renderWeatherDetailPopover', arguments); }
 function syncHomeWeatherInteractionState() { return homeWeatherUiCall('syncHomeWeatherInteractionState', arguments); }
@@ -15778,6 +15763,71 @@ function submitWeatherCityInput() { return submitHomeWeatherCityInput(); }
 if (homeWeatherUi) {
   homeWeatherUi.bindWeatherCityEditorControls();
   homeWeatherUi.bindHomeWeatherInteractions();
+}
+function currentHomeStageSong() {
+  return (typeof currentCoverSong === 'function' && currentCoverSong()) ||
+    (typeof currentLyricSong === 'function' && currentLyricSong()) ||
+    currentLocalSong ||
+    null;
+}
+function homeStageSongTitle(song) {
+  return String(song && (song.name || song.title) || '').trim() || '选择一首歌';
+}
+function homeStageSongArtist(song) {
+  var value = song && (song.artist || song.author || song.singer || song.creator) || '';
+  if (Array.isArray(value)) value = value.map(function(item){ return item && (item.name || item.title || item); }).filter(Boolean).join(' / ');
+  return String(value || '').trim() || '播放后显示歌手';
+}
+function homeStageSongAlbum(song) {
+  var value = song && (song.album || song.albumName || (song.al && song.al.name) || (song.albumInfo && song.albumInfo.name)) || '';
+  return String(value || '').trim() || songSourceLabel(song) || '等待播放';
+}
+function currentHomeStageLyricText() {
+  var snapshot = null;
+  try {
+    snapshot = typeof currentDesktopLyricSnapshot === 'function' ? currentDesktopLyricSnapshot() : null;
+  } catch (e) {
+    snapshot = null;
+  }
+  var text = snapshot && snapshot.text || (typeof currentLyricFallbackText === 'function' ? currentLyricFallbackText() : '');
+  text = String(text || '').replace(/\s+/g, ' ').trim();
+  return text || '播放后会在这里显示当前歌词摘要。';
+}
+function currentHomeStageLyricSourceLabel() {
+  if (lyricSourceMode === 'custom') return '歌词源：自定义歌词';
+  if (lyricSourceMode === 'folia' && foliaLyricCurrent) return '歌词源：' + (foliaLyricCurrent.label || 'Folia 多源歌词');
+  if (lyricsTimingSource === 'fallback') return '歌词源：占位歌词';
+  if (lyricsTimingSource === 'yrc-word') return '歌词源：网易云逐字歌词';
+  if (lyricsTimingSource === 'folia-ttml') return '歌词源：Folia TTML';
+  if (lyricsTimingSource === 'folia-word') return '歌词源：Folia 逐字歌词';
+  return '歌词源：原歌词';
+}
+function renderHomeStageHero() {
+  var song = currentHomeStageSong();
+  var title = document.getElementById('home-stage-title');
+  var artist = document.getElementById('home-stage-artist');
+  var album = document.getElementById('home-stage-album');
+  var lyric = document.getElementById('home-stage-lyric');
+  var source = document.getElementById('home-stage-lyric-source');
+  var cover = document.getElementById('home-stage-cover');
+  var weatherTitle = document.getElementById('home-stage-weather-title');
+  var weatherSub = document.getElementById('home-stage-weather-sub');
+  var fields = buildHomeWeatherHeroFieldsSafe();
+  if (title) title.textContent = homeStageSongTitle(song);
+  if (artist) artist.textContent = homeStageSongArtist(song);
+  if (album) album.textContent = homeStageSongAlbum(song);
+  if (lyric) lyric.textContent = currentHomeStageLyricText();
+  if (source) source.textContent = currentHomeStageLyricSourceLabel();
+  if (cover) {
+    var src = song ? songCoverSrc(song, 520) : '';
+    cover.style.backgroundImage = src ? 'url("' + cssImageUrl(src) + '")' : '';
+    cover.classList.toggle('has-cover', !!src);
+  }
+  if (weatherTitle) weatherTitle.textContent = (fields.city || homeWeatherRadioState.city || '上海') + ' · ' + (fields.label || '天气');
+  if (weatherSub) {
+    var bits = [fields.temperatureText, fields.humidityText, fields.windText].filter(function(item){ return item && item !== '--°'; });
+    weatherSub.textContent = bits.length ? bits.join(' · ') : '天气电台已保留，可随时开启';
+  }
 }
 function fallbackHomeTiles() {
   return [

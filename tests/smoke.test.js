@@ -143,7 +143,7 @@ test('main stylesheet is loaded as an external asset', () => {
   assert.match(html, /<link rel="stylesheet" href="styles\/weather-lively\.css">/);
   assert.doesNotMatch(html, /<style>[\s\S]*<\/style>/);
   assert.match(css, /#empty-home/);
-  assert.match(css, /\.home-weather-curve-card/);
+  assert.match(css, /\.home-stage-hero/);
   assert.match(css, /#playlist-panel/);
   assert.match(css, /#comment-barrage-layer/);
 });
@@ -190,20 +190,33 @@ test('weather ambient sound can be enabled manually from Home', () => {
   assert.match(css, /\.home-weather-ambient-control/);
 });
 
-test('home weather board uses a Lively micro weather page layout', () => {
+test('home left card is a music and Folia lyric stage entry', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
 
-  assert.match(html, /class="home-hero home-weather-lively-page"/);
-  assert.match(css, /\.home-weather-lively-page\{/);
-  assert.match(css, /\.home-weather-dashboard\{[^}]*display:grid/);
-  assert.match(css, /\.home-weather-dashboard\{[^}]*overflow:visible/);
-  assert.match(css, /\.home-weather-advice\{[^}]*display:none/);
-  assert.match(css, /\.home-weather-day-icon\{[^}]*height:30px/);
-  assert.match(css, /\.home-weather-metric\{[^}]*min-height:74px/);
-  assert.match(css, /\.home-weather-metrics\{[^}]*max-height:91px/);
-  assert.match(css, /@media \(min-height:1150px\)\{\.home-weather-metrics\{max-height:none;overflow:visible\}\}/);
-  assert.doesNotMatch(css, /\.home-weather-dashboard\{[^}]*overflow:hidden auto/);
+  assert.match(html, /class="home-hero home-stage-hero"/);
+  assert.match(html, /id="home-stage-cover"/);
+  assert.match(html, /id="home-stage-title"/);
+  assert.match(html, /id="home-stage-artist"/);
+  assert.match(html, /id="home-stage-album"/);
+  assert.match(html, /id="home-stage-lyric"/);
+  assert.match(html, /id="home-stage-lyric-source"/);
+  assert.match(html, /id="home-stage-folia-btn"/);
+  assert.match(html, /onclick="toggleFoliaStage\(event\)"/);
+  assert.match(html, /id="home-stage-dynamic-btn"/);
+  assert.match(html, /onclick="enterHomeDynamicLyrics\(event\)"/);
+  assert.match(html, /id="home-stage-weather-pill"/);
+  assert.match(html, /data-home-radio-start/);
+  assert.match(html, /id="home-weather-city-switch"/);
+  assert.match(html, /function renderHomeStageHero\(/);
+  assert.match(html, /function currentHomeStageLyricSourceLabel\(/);
+  assert.match(css, /\.home-stage-hero\{/);
+  assert.match(css, /\.home-stage-cover\{/);
+  assert.match(css, /\.home-stage-action\.primary/);
+  assert.doesNotMatch(html, /home-weather-dashboard/);
+  assert.doesNotMatch(html, /id="home-weather-curve"/);
+  assert.doesNotMatch(html, /id="home-weather-daily"/);
+  assert.doesNotMatch(html, /id="home-weather-metrics"/);
 });
 
 test('home city switch uses its own glass editor while top chip opens weather details', () => {
@@ -229,7 +242,7 @@ test('home city switch uses its own glass editor while top chip opens weather de
   assert.doesNotMatch(html, /window\.prompt\(.*天气城市/s);
 });
 
-test('home weather cache and forecast UI are wired', () => {
+test('home weather cache and lightweight controls stay wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const homeWeatherUi = fs.readFileSync(path.join(repoRoot, 'public', 'home-weather-ui.js'), 'utf8');
 
@@ -240,23 +253,11 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(html, /function saveHomeWeatherRadioCache\(/);
   assert.match(html, /function shouldRefreshHomeWeatherRadio\(/);
   assert.match(html, /document\.addEventListener\('visibilitychange'/);
-  assert.match(html, /id="home-weather-forecast"/);
-  assert.match(html, /id="home-weather-curve"/);
-  assert.match(html, /未来 12 小时/);
-  assert.match(html, /id="home-weather-curve-tabs"/);
-  assert.match(html, /home-weather-curve-backdrop/);
-  assert.match(html, /id="home-weather-curve-gradient"/);
-  assert.match(html, /id="home-weather-curve-line-glow"/);
-  assert.match(html, /id="home-weather-selected-guide"/);
-  assert.doesNotMatch(html, /id="home-weather-selected-dot"/);
-  assert.match(html, /id="home-weather-curve-icons"/);
-  assert.match(html, /id="home-weather-hour-ticks"/);
-  assert.match(html, /id="home-weather-daily"/);
-  assert.match(html, /id="home-weather-metrics"/);
-  assert.match(html, /id="home-weather-alert"/);
+  assert.match(html, /id="home-stage-weather-pill"/);
+  assert.match(html, /id="home-stage-weather-title"/);
+  assert.match(html, /id="home-stage-weather-sub"/);
+  assert.match(html, /data-home-radio-start/);
   assert.match(html, /进入动态歌词/);
-  assert.match(html, /class="home-weather-scene/);
-  assert.match(html, /id="home-weather-advice"/);
   assert.match(html, /window\.MineradioHomeWeatherUi\.init/);
   assert.match(homeWeatherUi, /function renderHomeWeatherCurve\(/);
   assert.match(homeWeatherUi, /function renderHomeWeatherMetrics\(/);
@@ -287,6 +288,12 @@ test('home weather cache and forecast UI are wired', () => {
   assert.match(html, /buildWeatherMetrics/);
   assert.match(html, /resolveInteractiveWeatherSelection/);
   assert.match(html, /buildWeatherAdvice/);
+  assert.doesNotMatch(html, /id="home-weather-forecast"/);
+  assert.doesNotMatch(html, /id="home-weather-curve"/);
+  assert.doesNotMatch(html, /id="home-weather-curve-tabs"/);
+  assert.doesNotMatch(html, /id="home-weather-daily"/);
+  assert.doesNotMatch(html, /id="home-weather-metrics"/);
+  assert.doesNotMatch(html, /id="home-weather-advice"/);
   assert.doesNotMatch(html, /@keyframes home-weather-rain/);
   assert.doesNotMatch(html, /\.weather-scene-rain::after/);
   assert.doesNotMatch(html, /\.home-weather-scene::after/);
@@ -319,7 +326,7 @@ test('home weather curve follows Lively-style layered graph contract', () => {
 test('home internal clicks do not dismiss and dynamic lyrics exit is explicit', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
-  assert.match(html, /id="home-dynamic-lyrics-btn"/);
+  assert.match(html, /id="home-stage-dynamic-btn"/);
   assert.match(html, /dismissHomePage\(\{ reason: 'dynamic-lyrics-button' \}\)/);
   assert.match(html, /target\.closest\('#empty-home'\)/);
 });
