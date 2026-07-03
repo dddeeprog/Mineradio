@@ -10,7 +10,7 @@
 - 固定 commit：`baa5e846b7404f1893e8b7812bca79e959f21d3f`
 - 引入方式：从上游仓库复制源码树，排除 `.git`、依赖目录和本地构建输出目录。
 - 许可证：GNU Affero General Public License v3.0，见 `third_party/folia-major/LICENSE`。
-- 当前修改状态：阶段 1 仅引入上游源码，暂未修改 Folia 源码。
+- 当前修改状态：已在 `src/mineradioBridge/` 增加 Mineradio Bridge 接入层，并调整 `src/App.tsx` 让 Folia bridge mode 消费 Mineradio 传入的播放状态、歌词和 DIY 舞台效果配置；未改变 Folia 原始项目的许可证。
 
 Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必须保留 Folia 原始许可证、作者声明和本通知，并按 AGPL-3.0 及 GPL-3.0 兼容组合要求提供对应源码获取方式。
 

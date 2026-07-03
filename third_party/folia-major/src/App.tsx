@@ -53,6 +53,15 @@ import { usePlaybackQueueController } from './hooks/usePlaybackQueueController';
 import { usePlaybackTransportController } from './hooks/usePlaybackTransportController';
 import { usePlaybackVisualizerBridge } from './hooks/usePlaybackVisualizerBridge';
 import { useObsBrowserSourcePublisher } from './hooks/useObsBrowserSourcePublisher';
+import { mapMineradioFoliaFxToVisualizer } from './mineradioBridge/foliaFx';
+import {
+    findMineradioBridgeLineIndex,
+    mineradioBridgeSnapshotLyricsKey,
+    mineradioBridgeSnapshotSongKey,
+    mineradioBridgeSnapshotToLyrics,
+    mineradioBridgeSnapshotToSong,
+    useMineradioBridge,
+} from './mineradioBridge/useMineradioBridge';
 import { ObsBrowserSourceLyrics } from './components/obs/ObsBrowserSourceLyrics';
 import { useSessionRestoreController } from './hooks/useSessionRestoreController';
 import { useStagePlaybackController } from './hooks/useStagePlaybackController';
@@ -380,6 +389,14 @@ export default function App() {
         [lyricFilterPattern],
     );
     const lyricCurrentTime = useMotionValue(0);
+    const mineradioBridge = useMineradioBridge();
+    const mineradioBridgeSongKeyRef = useRef('');
+    const mineradioBridgeLyricsKeyRef = useRef('');
+    const mineradioFoliaVisualizerModel = useMemo(
+        () => mapMineradioFoliaFxToVisualizer(mineradioBridge.foliaFx),
+        [mineradioBridge.foliaFx],
+    );
+    const isMineradioFoliaBridgeActive = mineradioBridge.bridgeMode && mineradioBridge.foliaFx.enabled;
 
     useEffect(() => {
         setLyricTimelineOffsetMs(0);
@@ -691,6 +708,45 @@ export default function App() {
             setIsPanelOpen(false);
         }
     }, [currentView, isPanelOpen]);
+
+    useEffect(() => {
+        if (!mineradioBridge.bridgeMode) return;
+        setActivePlaybackContext('stage');
+        if (currentView !== 'player') {
+            navigateToPlayer();
+        }
+    }, [currentView, mineradioBridge.bridgeMode]);
+
+    useEffect(() => {
+        const snapshot = mineradioBridge.snapshot;
+        if (!mineradioBridge.bridgeMode || !snapshot) return;
+
+        const nextSongKey = mineradioBridgeSnapshotSongKey(snapshot);
+        if (nextSongKey !== mineradioBridgeSongKeyRef.current) {
+            const bridgeSong = mineradioBridgeSnapshotToSong(snapshot);
+            setCurrentSong(bridgeSong);
+            setCachedCoverUrl(bridgeSong?.album?.picUrl || null);
+            setAudioSrc(null);
+            setIsFmMode(false);
+            mineradioBridgeSongKeyRef.current = nextSongKey;
+        }
+
+        const bridgeLyrics = mineradioBridgeSnapshotToLyrics(snapshot);
+        const nextLyricsKey = mineradioBridgeSnapshotLyricsKey(snapshot);
+        if (nextLyricsKey !== mineradioBridgeLyricsKeyRef.current) {
+            setLyrics(bridgeLyrics);
+            mineradioBridgeLyricsKeyRef.current = nextLyricsKey;
+        }
+
+        const playbackTime = Math.max(0, Number(snapshot.playback?.currentTime || 0));
+        const playbackDuration = Math.max(0, Number(snapshot.playback?.duration || snapshot.song?.duration || 0));
+        currentTime.set(playbackTime);
+        lyricCurrentTime.set(playbackTime);
+        setDuration(playbackDuration);
+        setCurrentLineIndex(findMineradioBridgeLineIndex(bridgeLyrics, playbackTime));
+        setPlayerState(snapshot.playback?.playing ? PlayerState.PLAYING : PlayerState.PAUSED);
+        setIsLyricsLoading(false);
+    }, [currentTime, lyricCurrentTime, mineradioBridge.bridgeMode, mineradioBridge.snapshot, setLyrics]);
 
     const {
         isSearchOpen,
@@ -1318,14 +1374,38 @@ export default function App() {
         defaultTheme: DEFAULT_THEME,
         transparentBackground: shouldUseTransparentAppBackground,
     }), [bgMode, isDaylight, shouldUseTransparentAppBackground, theme]);
+    const effectiveVisualizerMode = isMineradioFoliaBridgeActive && mineradioFoliaVisualizerModel.visualizerMode !== 'auto'
+        ? mineradioFoliaVisualizerModel.visualizerMode
+        : visualizerMode;
+    const effectiveStaticMode = isMineradioFoliaBridgeActive
+        ? (staticMode || mineradioFoliaVisualizerModel.performance.staticMode)
+        : staticMode;
+    const effectiveBackgroundOpacity = isMineradioFoliaBridgeActive
+        ? Math.max(0, Math.min(1, backgroundOpacity * mineradioFoliaVisualizerModel.app.backgroundOpacity))
+        : backgroundOpacity;
+    const effectiveVisualizerOpacity = isMineradioFoliaBridgeActive
+        ? Math.max(0, Math.min(1, visualizerOpacity * mineradioFoliaVisualizerModel.app.visualizerOpacity))
+        : visualizerOpacity;
+    const effectiveSubtitleOverlayOpacity = isMineradioFoliaBridgeActive
+        ? Math.max(0, Math.min(1, subtitleOverlayOpacity * mineradioFoliaVisualizerModel.app.subtitleOverlayOpacity))
+        : subtitleOverlayOpacity;
+    const effectiveDisableGeometricBackground = isMineradioFoliaBridgeActive
+        ? (disableVisualizerGeometricBackground || mineradioFoliaVisualizerModel.app.disableGeometricBackground)
+        : disableVisualizerGeometricBackground;
+    const effectiveVisualizerBackgroundMode = isMineradioFoliaBridgeActive
+        ? (mineradioFoliaVisualizerModel.app.visualizerBackgroundMode ?? visualizerBackgroundMode)
+        : visualizerBackgroundMode;
+    const effectiveLyricsFontScale = isMineradioFoliaBridgeActive
+        ? Math.max(0.3, Math.min(3, lyricsFontScale * mineradioFoliaVisualizerModel.lyrics.fontScale))
+        : lyricsFontScale;
     const { visualizerTheme, visualizerGeometrySeed } = useMemo(() => buildVisualizerTheme({
         appStyle,
         theme,
         lyricsFontStyle,
         lyricsCustomFontFamily,
         currentSongId: currentSong?.id,
-        visualizerMode,
-    }), [appStyle, currentSong?.id, lyricsCustomFontFamily, lyricsFontStyle, theme, visualizerMode]);
+        visualizerMode: effectiveVisualizerMode,
+    }), [appStyle, currentSong?.id, effectiveVisualizerMode, lyricsCustomFontFamily, lyricsFontStyle, theme]);
     const isNowPlayingControlDisabled = isNowPlayingStageActive;
 
     useEffect(() => {
@@ -2672,7 +2752,7 @@ export default function App() {
             >
                 {!isObsBrowserSourceRendering && (
                     <VisualizerRenderer
-                        mode={visualizerMode}
+                        mode={effectiveVisualizerMode}
                         currentTime={lyricCurrentTime}
                         currentLineIndex={currentLineIndex}
                         lines={lyrics?.lines || []}
@@ -2687,16 +2767,16 @@ export default function App() {
                         showText={currentView === 'player' && !isSettingsModalOpen}
                         useCoverColorBg={useCoverColorBg}
                         seed={visualizerGeometrySeed}
-                        staticMode={staticMode}
+                        staticMode={effectiveStaticMode}
                         paused={shouldPauseVisualizerBackground}
-                        backgroundOpacity={backgroundOpacity}
-                        visualizerOpacity={visualizerOpacity}
+                        backgroundOpacity={effectiveBackgroundOpacity}
+                        visualizerOpacity={effectiveVisualizerOpacity}
                         transparentBackground={currentView === 'player' && isPlayerPageTransparent && !isSettingsModalOpen}
-                        disableGeometricBackground={disableVisualizerGeometricBackground || isSettingsSubviewOpen}
+                        disableGeometricBackground={effectiveDisableGeometricBackground || isSettingsSubviewOpen}
                         disableVignette={disableVisualizerVignette}
-                        visualizerBackgroundMode={visualizerBackgroundMode}
-                        lyricsFontScale={lyricsFontScale}
-                        subtitleOverlayOpacity={subtitleOverlayOpacity}
+                        visualizerBackgroundMode={effectiveVisualizerBackgroundMode}
+                        lyricsFontScale={effectiveLyricsFontScale}
+                        subtitleOverlayOpacity={effectiveSubtitleOverlayOpacity}
                         isPlayerChromeHidden={isPlayerChromeHidden}
                         hideTranslationSubtitle={shouldHidePlayerTranslationSubtitle}
                         classicTuning={classicTuning}
@@ -2735,15 +2815,19 @@ export default function App() {
                 <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center px-6">
                     <div className={`max-w-lg rounded-3xl border px-6 py-5 text-center backdrop-blur-md ${isDaylight ? 'border-black/10 bg-white/50 text-zinc-800' : 'border-white/10 bg-black/30 text-white'}`}>
                         <div className="text-xs uppercase tracking-[0.22em] opacity-50">
-                            {stageSource === 'now-playing' ? 'Stage · Now Playing' : 'Stage · Stage API'}
+                            {mineradioBridge.bridgeMode ? 'Stage · Mineradio Bridge' : (stageSource === 'now-playing' ? 'Stage · Now Playing' : 'Stage · Stage API')}
                         </div>
                         <div className="mt-3 text-2xl font-semibold">
-                            {stageSource === 'now-playing'
+                            {mineradioBridge.bridgeMode
+                                ? '等待 Mineradio 播放状态'
+                                : stageSource === 'now-playing'
                                 ? '等待本地 Now Playing 服务输入'
                                 : (t('options.stageSessionEmpty') || '等待外部输入')}
                         </div>
                         <div className="mt-2 text-sm opacity-70">
-                            {stageSource === 'now-playing'
+                            {mineradioBridge.bridgeMode
+                                ? '请在 Mineradio 中播放歌曲，Folia 舞台会接收当前歌曲、歌词和 DIY 效果配置'
+                                : stageSource === 'now-playing'
                                 ? (nowPlayingConnectionStatus === 'error'
                                     ? '未能连接到 ws://localhost:9863/api/ws/lyric，请确认 now-playing 服务已在本机运行'
                                     : '请在本机启动 now-playing 服务，并确保播放器正在播放')
