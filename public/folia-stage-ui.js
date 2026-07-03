@@ -3,10 +3,16 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioFoliaStageUi = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function() {
-  var DEFAULT_STAGE_SRC = 'folia-stage/index.html';
+  var DEFAULT_STAGE_SRC = 'folia-stage/index.html?mineradioBridge=1';
   var LOAD_TIMEOUT_MS = 12000;
 
   function noop() {}
+
+  function stageSrcWithBridgeMode(src) {
+    src = String(src || DEFAULT_STAGE_SRC);
+    if (/[?&]mineradioBridge=1(?:&|$)/.test(src)) return src;
+    return src + (src.indexOf('?') >= 0 ? '&' : '?') + 'mineradioBridge=1';
+  }
 
   function init(context) {
     context = context || {};
@@ -20,7 +26,7 @@
     var body = doc.body;
     var showToast = typeof context.showToast === 'function' ? context.showToast : noop;
     var fetchImpl = context.fetch || (typeof fetch === 'function' ? fetch.bind(typeof window !== 'undefined' ? window : null) : null);
-    var source = context.source || DEFAULT_STAGE_SRC;
+    var source = stageSrcWithBridgeMode(context.source || DEFAULT_STAGE_SRC);
     var state = {
       open: false,
       loaded: false,
@@ -168,6 +174,7 @@
 
   return {
     DEFAULT_STAGE_SRC: DEFAULT_STAGE_SRC,
+    stageSrcWithBridgeMode: stageSrcWithBridgeMode,
     init: init,
   };
 });

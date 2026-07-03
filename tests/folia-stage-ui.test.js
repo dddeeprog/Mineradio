@@ -86,7 +86,7 @@ test('Folia stage registers iframe as a bridge target after load', async () => {
   ui.open();
   await nextTick();
   const frame = doc._nodes['folia-stage-frame'];
-  assert.equal(frame.src, 'folia-stage/index.html');
+  assert.equal(frame.src, 'folia-stage/index.html?mineradioBridge=1');
 
   frame.onload();
 
@@ -94,4 +94,30 @@ test('Folia stage registers iframe as a bridge target after load', async () => {
   assert.equal(doc._nodes['folia-stage-root'].classList.contains('ready'), true);
   assert.equal(registeredTarget, frame.contentWindow);
   assert.equal(pushedReason, 'folia-stage-load');
+});
+
+test('Folia stage requests bridge mode and does not reload for FX updates', async () => {
+  const doc = fakeDocument();
+  const bridge = {
+    registerTarget() {
+      return () => {};
+    },
+    push() {},
+  };
+  const ui = init({
+    document: doc,
+    bridge,
+    fetch: () => Promise.resolve({ ok: true }),
+  });
+
+  ui.open();
+  await nextTick();
+
+  const frame = doc._nodes['folia-stage-frame'];
+  assert.match(frame.src, /mineradioBridge=1/);
+  const firstSrc = frame.src;
+
+  bridge.push('folia-fx-state', { force: true });
+
+  assert.equal(frame.src, firstSrc);
 });

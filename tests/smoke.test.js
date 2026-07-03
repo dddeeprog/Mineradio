@@ -127,6 +127,10 @@ test('Folia DIY controls are wired into Mineradio visual panel', () => {
   assert.match(html, /function syncFoliaFxControls\(/);
   assert.match(html, /function updateFoliaFxFromControl\(/);
   assert.match(html, /pushFoliaPlaybackBridge\('folia-fx-state', \{ force: true \}\)/);
+  const applyFoliaFxPatch = html.match(/function applyFoliaFxPatch\([\s\S]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(applyFoliaFxPatch, /folia-stage-frame/);
+  assert.doesNotMatch(applyFoliaFxPatch, /\.src\s*=/);
+  assert.doesNotMatch(applyFoliaFxPatch, /toggleFoliaStage|closeFoliaStage/);
   assert.match(css, /\.folia-fx-card/);
 });
 
@@ -152,7 +156,8 @@ test('Folia stage entry loads as an isolated iframe visual layer', () => {
   assert.match(html, /#folia-stage-root/);
   assert.match(css, /#folia-stage-root\{[^}]*position:fixed/);
   assert.match(css, /\.folia-stage-toggle\.active/);
-  assert.match(stageUi, /DEFAULT_STAGE_SRC = 'folia-stage\/index\.html'/);
+  assert.match(stageUi, /DEFAULT_STAGE_SRC = 'folia-stage\/index\.html\?mineradioBridge=1'/);
+  assert.match(stageUi, /function stageSrcWithBridgeMode\(src\)/);
   assert.match(stageUi, /registerTarget\(frame\.contentWindow/);
   assert.match(stageUi, /Folia 舞台未构建/);
 });
