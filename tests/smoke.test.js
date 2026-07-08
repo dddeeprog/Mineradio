@@ -23,6 +23,10 @@ test('maintenance baseline scripts are wired', () => {
     scripts['verify:release'],
     'npm run check && npm run test && npm run audit:prod && npm run build:win:dir'
   );
+  assert.ok(
+    Array.isArray(pkg.build && pkg.build.files) && pkg.build.files.includes('server/**/*'),
+    'Windows packaged app must include server modules required by server.js'
+  );
 });
 
 test('complete weather route is registered in the local API server', () => {

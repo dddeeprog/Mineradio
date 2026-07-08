@@ -34,6 +34,7 @@
       "public/**/*",
       "build/**/*",
       "server.js",
+      "server/**/*",
       "dj-analyzer.js",
       "package.json",
       "!public/index.*.html",
