@@ -1929,6 +1929,18 @@ var desktopRuntimeState = {
   fullscreen: false
 };
 var renderPowerState = { mode: '', width: 0, height: 0, pixelRatio: 0 };
+var visualBudgetState = {
+  mode: 'active',
+  foliaSuspended: false,
+  commentBarrageReleased: false,
+  releaseCount: 0,
+  resumeCount: 0,
+  lastReleaseAt: 0,
+  lastResumeAt: 0,
+  lastReason: '',
+  lastDropped: 0,
+  lyricTextureKeep: 24
+};
 var backgroundCacheTrimTimer = 0;
 var runtimePerfState = {
   lastCacheTrimAt: 0,
@@ -1950,6 +1962,72 @@ function isLiveBackgroundKeepMode() {
 }
 function isBackgroundReleaseMode() {
   return currentPerformanceBackgroundMode() === 'release';
+}
+function visualBudgetNow() {
+  return (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+}
+function currentFoliaStageBudgetState() {
+  try {
+    if (typeof foliaStageUi !== 'undefined' && foliaStageUi && typeof foliaStageUi.getBudgetState === 'function') {
+      return foliaStageUi.getBudgetState() || {};
+    }
+  } catch (e) {}
+  return {};
+}
+function setFoliaStageBudgetSuspended(suspended, reason) {
+  var state = null;
+  try {
+    if (typeof foliaStageUiCall === 'function') state = foliaStageUiCall('setBudgetSuspended', [!!suspended, reason || 'visual-budget']);
+  } catch (e) {}
+  visualBudgetState.foliaSuspended = !!(suspended || (state && state.budgetSuspended));
+  return state;
+}
+function applyVisualReleaseBudget(reason, aggressive) {
+  if (!isDeepBackgroundMode() || !isBackgroundReleaseMode()) return false;
+  reason = reason || 'release';
+  var dropped = 0;
+  if (visualBudgetState.mode !== 'released') {
+    visualBudgetState.mode = 'released';
+    visualBudgetState.releaseCount += 1;
+    visualBudgetState.lastReleaseAt = visualBudgetNow();
+  }
+  visualBudgetState.lastReason = reason;
+  setFoliaStageBudgetSuspended(true, reason);
+  if (typeof clearCommentBarrage3D === 'function') {
+    try {
+      clearCommentBarrage3D(true);
+      visualBudgetState.commentBarrageReleased = true;
+    } catch (e) {}
+  }
+  if (typeof trimLyricTextureCache === 'function') {
+    visualBudgetState.lyricTextureKeep = aggressive ? 2 : 8;
+    try { dropped += trimLyricTextureCache(aggressive ? 2 : 8) || 0; } catch (e) {}
+  }
+  if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
+    try { renderer.renderLists.dispose(); } catch (e) {}
+  }
+  visualBudgetState.lastDropped = dropped;
+  return true;
+}
+function resumeVisualReleaseBudget(reason) {
+  if (visualBudgetState.mode === 'active' && !visualBudgetState.foliaSuspended) return false;
+  reason = reason || 'restore';
+  visualBudgetState.mode = 'active';
+  visualBudgetState.commentBarrageReleased = false;
+  visualBudgetState.foliaSuspended = false;
+  visualBudgetState.resumeCount += 1;
+  visualBudgetState.lastResumeAt = visualBudgetNow();
+  visualBudgetState.lastReason = reason;
+  setFoliaStageBudgetSuspended(false, reason);
+  if (typeof pushFoliaPlaybackBridge === 'function') {
+    try { pushFoliaPlaybackBridge('visual-budget-resume', { force: true }); } catch (e) {}
+  }
+  return true;
+}
+function syncVisualBudgetForPowerMode(reason) {
+  if (isDeepBackgroundMode() && isBackgroundReleaseMode()) return applyVisualReleaseBudget(reason || 'power-mode', true);
+  if (!isDeepBackgroundMode()) return resumeVisualReleaseBudget(reason || 'foreground');
+  return false;
 }
 function isHiddenForBackgroundOptimization() {
   return !!(document.hidden && !isLiveBackgroundKeepMode());
@@ -2140,6 +2218,17 @@ function collectRuntimePerfSnapshot(now) {
       interactionBoost: (typeof isRenderInteractionActive === 'function') ? isRenderInteractionActive() : false,
       interactionReason: (typeof renderInteractionReason !== 'undefined') ? renderInteractionReason : ''
     } : null,
+    visualBudget: {
+      mode: visualBudgetState.mode,
+      foliaSuspended: visualBudgetState.foliaSuspended,
+      folia: currentFoliaStageBudgetState(),
+      commentBarrageReleased: visualBudgetState.commentBarrageReleased,
+      lyricTextureKeep: visualBudgetState.lyricTextureKeep,
+      releaseCount: visualBudgetState.releaseCount,
+      resumeCount: visualBudgetState.resumeCount,
+      lastReason: visualBudgetState.lastReason,
+      lastDropped: visualBudgetState.lastDropped
+    },
     deepSleep: isDeepBackgroundMode()
   };
 }
@@ -2163,6 +2252,7 @@ function trimRuntimeCaches(reason, aggressive) {
   if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
     try { renderer.renderLists.dispose(); } catch (e) {}
   }
+  if (aggressive && isBackgroundReleaseMode()) applyVisualReleaseBudget(reason || 'runtime-cache-trim', true);
   runtimePerfState.lastCacheTrimAt = performance.now();
   runtimePerfState.cacheTrimCount += 1;
   runtimePerfState.lastCacheTrimReason = reason || (aggressive ? 'deep' : 'active');
@@ -2196,7 +2286,10 @@ function applyRendererPowerMode() {
   var height = deep ? 4 : Math.max(1, innerHeight);
   var pixelRatio = getRenderPixelRatio();
   var mode = deep ? 'sleep' : 'active';
-  if (renderPowerState.mode === mode && renderPowerState.width === width && renderPowerState.height === height && Math.abs(renderPowerState.pixelRatio - pixelRatio) < 0.001) return;
+  if (renderPowerState.mode === mode && renderPowerState.width === width && renderPowerState.height === height && Math.abs(renderPowerState.pixelRatio - pixelRatio) < 0.001) {
+    syncVisualBudgetForPowerMode(mode === 'sleep' ? 'renderer-power-sleep' : 'renderer-power-active');
+    return;
+  }
   renderPowerState = { mode: mode, width: width, height: height, pixelRatio: pixelRatio };
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(width, height, false);
@@ -2205,6 +2298,7 @@ function applyRendererPowerMode() {
     if (renderer.renderLists && renderer.renderLists.dispose) renderer.renderLists.dispose();
     scheduleBackgroundCacheTrim();
   }
+  syncVisualBudgetForPowerMode(deep ? 'renderer-power-sleep' : 'renderer-power-active');
 }
 function updateDesktopRuntimeState(state) {
   state = state || {};
@@ -8835,6 +8929,7 @@ function forceLoadingSettled(reason) {
 }
 function recoverVisualsAfterBackground(reason) {
   applyRendererPowerMode();
+  resumeVisualReleaseBudget(reason || 'restore');
   if (typeof scheduleMainRendererViewportRefresh === 'function') scheduleMainRendererViewportRefresh(reason || 'restore');
   if (audio && audio.src && !audio.paused && ((uniforms.uLoading.value || 0) > 0.015 || loadingTween || loadingHideTimer)) {
     forceLoadingSettled(reason || 'restore');

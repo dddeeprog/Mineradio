@@ -30,6 +30,8 @@
     var state = {
       open: false,
       loaded: false,
+      budgetSuspended: false,
+      budgetResumeOpen: false,
       token: 0,
       timer: null,
       detachBridge: null,
@@ -60,6 +62,7 @@
       root.classList.toggle('loading', extra === 'loading');
       root.classList.toggle('ready', extra === 'ready');
       root.classList.toggle('error', extra === 'error');
+      root.classList.toggle('budget-suspended', state.budgetSuspended);
       root.setAttribute('aria-hidden', open ? 'false' : 'true');
       if (body) body.classList.toggle('folia-stage-open', !!open);
       syncButton();
@@ -69,6 +72,8 @@
       state.token++;
       state.open = false;
       state.loaded = false;
+      state.budgetSuspended = false;
+      state.budgetResumeOpen = false;
       clearLoadTimer();
       detachBridge();
       setClasses(false);
@@ -111,6 +116,11 @@
       if (state.open) return;
       state.open = true;
       state.loaded = false;
+      if (state.budgetSuspended) {
+        state.budgetResumeOpen = true;
+        setClasses(true, 'loading');
+        return;
+      }
       var token = ++state.token;
       setClasses(true, 'loading');
       stageAvailable().then(function(ok) {
@@ -136,6 +146,45 @@
     function toggle() {
       if (state.open) close('toggle');
       else open();
+    }
+
+    function getBudgetState() {
+      return {
+        open: !!state.open,
+        loaded: !!state.loaded,
+        budgetSuspended: !!state.budgetSuspended,
+        budgetResumeOpen: !!state.budgetResumeOpen
+      };
+    }
+
+    function setBudgetSuspended(suspended, reason) {
+      suspended = !!suspended;
+      if (state.budgetSuspended === suspended) return getBudgetState();
+      if (suspended) {
+        state.budgetResumeOpen = state.open;
+        state.budgetSuspended = true;
+        state.loaded = false;
+        state.token++;
+        clearLoadTimer();
+        detachBridge();
+        if (frame) {
+          try { frame.removeAttribute('src'); } catch (e) {}
+        }
+        setClasses(state.open, state.open ? 'loading' : undefined);
+        if (bridge && typeof bridge.push === 'function') bridge.push('folia-stage-budget-suspend-' + (reason || 'release'), { force: true });
+        return getBudgetState();
+      }
+      var shouldResumeOpen = state.budgetResumeOpen || state.open;
+      state.budgetSuspended = false;
+      state.budgetResumeOpen = false;
+      if (bridge && typeof bridge.push === 'function') bridge.push('folia-stage-budget-resume-' + (reason || 'restore'), { force: true });
+      if (shouldResumeOpen) {
+        state.open = false;
+        open();
+      } else {
+        setClasses(false);
+      }
+      return getBudgetState();
     }
 
     if (button && !button._mineradioFoliaStageBound) {
@@ -166,8 +215,10 @@
     syncButton();
     return {
       close: close,
+      getBudgetState: getBudgetState,
       isOpen: function() { return state.open; },
       open: open,
+      setBudgetSuspended: setBudgetSuspended,
       toggle: toggle,
     };
   }

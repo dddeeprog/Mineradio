@@ -468,6 +468,26 @@ test('media resource caches are visible in runtime snapshots and trimmed in back
   assert.match(html, /memoryCacheTools\.trimMapCache/);
 });
 
+test('visual release budget suspends Folia and drops low priority 3D resources', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const stageUi = fs.readFileSync(path.join(repoRoot, 'public', 'folia-stage-ui.js'), 'utf8');
+
+  assert.match(stageUi, /budgetSuspended/);
+  assert.match(stageUi, /function setBudgetSuspended\(suspended, reason\)/);
+  assert.match(stageUi, /state\.budgetResumeOpen = state\.open/);
+  assert.match(stageUi, /frame\.removeAttribute\('src'\)/);
+  assert.match(stageUi, /setBudgetSuspended: setBudgetSuspended/);
+  assert.match(html, /var visualBudgetState = \{/);
+  assert.match(html, /function applyVisualReleaseBudget\(reason, aggressive\)/);
+  assert.match(html, /function resumeVisualReleaseBudget\(reason\)/);
+  assert.match(html, /setFoliaStageBudgetSuspended\(true, reason\)/);
+  assert.match(html, /clearCommentBarrage3D\(true\)/);
+  assert.match(html, /trimLyricTextureCache\(aggressive \? 2 : 8\)/);
+  assert.match(html, /visualBudget: \{/);
+  assert.match(html, /applyVisualReleaseBudget\(reason \|\| 'runtime-cache-trim', true\)/);
+  assert.match(html, /resumeVisualReleaseBudget\(reason \|\| 'restore'\)/);
+});
+
 test('local library import avoids retaining duplicate full scan and song arrays', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
