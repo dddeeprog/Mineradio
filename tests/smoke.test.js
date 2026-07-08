@@ -412,6 +412,25 @@ test('hotkey helper exposes startup storage keys used by the entry script', () =
   assert.deepEqual(Array.from(context.LOCAL_BEAT_COMBOS), ['', 'downbeat', 'push', 'drop', 'rebound', 'accent']);
 });
 
+test('listen session finalization does not recursively start a new session', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /function updateListenStatsTick\(force,\s*opts\)/);
+  assert.match(html, /if \(!listenSession \|\| listenSession\.key !== key\) \{\s*if \(opts\.noAutoBegin\) return;/);
+  assert.match(html, /updateListenStatsTick\(true,\s*\{ noAutoBegin: true \}\)/);
+});
+
+test('bottom playback controls default to auto hide and schedule startup collapse', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /var CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY = 'mineradio-controls-auto-hide-defaulted-v2';/);
+  assert.match(html, /function readControlsAutoHidePreference\(\)/);
+  assert.match(html, /localStorage\.setItem\(CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY,\s*'1'\)/);
+  assert.match(html, /if \(raw == null \|\| raw === '0'\) \{\s*localStorage\.setItem\(CONTROLS_AUTO_HIDE_STORE_KEY,\s*'1'\);/);
+  assert.match(html, /var controlsAutoHide = readControlsAutoHidePreference\(\);/);
+  assert.match(html, /if \(controlsAutoHide && bar && bar\.classList\.contains\('visible'\) && !controlsHovering\) scheduleControlsHide\(520\);/);
+});
+
 test('comment barrage is rendered as Three.js floating text instead of DOM marquee', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const renderer = fs.readFileSync(path.join(repoRoot, 'public', 'comment-barrage-3d.js'), 'utf8');

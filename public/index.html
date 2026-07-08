@@ -1107,6 +1107,7 @@ var LOCAL_LIBRARY_STATE_STORE_KEY = 'mineradio-local-library-state-v1';
 var USER_CAPSULE_AUTO_HIDE_STORE_KEY = 'mineradio-user-capsule-auto-hide-v1';
 var FX_FAB_AUTO_HIDE_STORE_KEY = 'mineradio-fx-fab-auto-hide-v1';
 var CONTROLS_AUTO_HIDE_STORE_KEY = 'mineradio-controls-auto-hide-v1';
+var CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY = 'mineradio-controls-auto-hide-defaulted-v2';
 var FREE_CAMERA_STORE_KEY = 'mineradio-free-camera-v1';
 var PERSISTENT_UI_STATE_KEYS = [
   'apex-player-volume',
@@ -1323,6 +1324,23 @@ function readBooleanPreference(key, fallback) {
     return raw === '1';
   } catch (e) {
     return !!fallback;
+  }
+}
+function readControlsAutoHidePreference() {
+  try {
+    var migrated = localStorage.getItem(CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY) === '1';
+    var raw = localStorage.getItem(CONTROLS_AUTO_HIDE_STORE_KEY);
+    if (!migrated) {
+      localStorage.setItem(CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY, '1');
+      if (raw == null || raw === '0') {
+        localStorage.setItem(CONTROLS_AUTO_HIDE_STORE_KEY, '1');
+        return true;
+      }
+    }
+    if (raw == null) return true;
+    return raw === '1';
+  } catch (e) {
+    return true;
   }
 }
 function saveBooleanPreference(key, on) {
@@ -1848,7 +1866,7 @@ var startupVisualPreviewActive = false;
 var fx = Object.assign({}, fxDefaults, readSavedLyricLayout());
 normalizeDevelopmentLockedFxState();
 var presetTransition = { active:false, start:-10, duration:0.92, from:0, to:0 };
-var controlsAutoHide = readBooleanPreference(CONTROLS_AUTO_HIDE_STORE_KEY, false);
+var controlsAutoHide = readControlsAutoHidePreference();
 var controlsHovering = false;
 var controlsHideTimer = null;
 var controlsHandleDimTimer = null;
@@ -3883,12 +3901,14 @@ function toggleControlsAutoHide() {
 
 function applyControlsAutoHidePreference() {
   var btn = document.getElementById('controls-hide-btn');
+  var bar = document.getElementById('bottom-bar');
   if (btn) btn.classList.toggle('active', !!controlsAutoHide);
   if (!controlsAutoHide && controlsHideTimer) {
     clearTimeout(controlsHideTimer);
     controlsHideTimer = null;
   }
   setControlsHidden(false);
+  if (controlsAutoHide && bar && bar.classList.contains('visible') && !controlsHovering) scheduleControlsHide(520);
 }
 
 (function initControlsAutoHide() {
@@ -15569,12 +15589,16 @@ function beginListenSession(song, context) {
     maxProgress: 0,
   };
 }
-function updateListenStatsTick(force) {
+function updateListenStatsTick(force, opts) {
+  opts = opts || {};
   if (!audio || !audio.duration || audio.paused) return;
   var song = currentCoverSong();
   if (!song) return;
   var key = queueItemKey(song);
-  if (!listenSession || listenSession.key !== key) beginListenSession(song, activeRadioContext);
+  if (!listenSession || listenSession.key !== key) {
+    if (opts.noAutoBegin) return;
+    beginListenSession(song, activeRadioContext);
+  }
   if (!listenSession) return;
   var now = Date.now();
   var audioTime = isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -15589,7 +15613,7 @@ function updateListenStatsTick(force) {
 }
 function finalizeListenSession(completed) {
   if (!listenSession) return;
-  updateListenStatsTick(true);
+  updateListenStatsTick(true, { noAutoBegin: true });
   var session = listenSession;
   listenSession = null;
   var effective = completed || session.listenMs >= 45000 || session.maxProgress >= 0.5 || (!audio || !audio.duration ? session.listenMs >= 30000 : false);
