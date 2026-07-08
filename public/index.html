@@ -35,6 +35,7 @@
 <script src="visual-cover-state.js"></script>
 <script src="local-media-assets.js"></script>
 <script src="local-library.js"></script>
+<script src="local-beat-cache.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -1106,6 +1107,7 @@ var customLyricMap = readCustomLyricMap();
 var customLyricPrefs = readCustomLyricPrefs();
 var localBeatMapCache = readLocalBeatMapCache();
 var localBeatMapPrefs = readLocalBeatPrefs();
+var localBeatCacheTools = window.MineradioLocalBeatCache || {};
 var playbackQuality = readPlaybackQualityPreference();
 var qqPlaybackQualityCeiling = '';
 var coverCropState = null, coverCropBound = false;
@@ -9180,14 +9182,33 @@ function scheduleBeatAnalysis(songId, audioUrl, token, song) {
       }).catch(function(err){
         console.warn('scheduled beat analysis failed:', err);
         hideBeatChip();
+        if (song && getSongLocalBeatKey(song)) showToast('本地节奏分析失败');
       });
     };
     scheduleAnalysisTask(startAnalysis, beatAnalysisConfig.idleTimeout);
   }, beatAnalysisConfig.delayMs);
 }
 
+function getSongLocalBeatKey(song) {
+  var key = localBeatCacheTools && typeof localBeatCacheTools.localBeatSongKey === 'function'
+    ? localBeatCacheTools.localBeatSongKey(song)
+    : (song && song.localKey ? String(song.localKey) : '');
+  if (song && key && !song.localKey) song.localKey = key;
+  return key || '';
+}
+
+function normalizeLocalBeatMode(mode) {
+  return localBeatCacheTools && typeof localBeatCacheTools.normalizeMode === 'function'
+    ? localBeatCacheTools.normalizeMode(mode)
+    : (mode === 'dj' ? 'dj' : 'mr');
+}
+
 function beatMapSongKey(song) {
   if (!song) return '';
+  if (localBeatCacheTools && typeof localBeatCacheTools.playbackBeatMapKey === 'function') {
+    var localPlaybackKey = localBeatCacheTools.playbackBeatMapKey(song);
+    if (localPlaybackKey) return localPlaybackKey;
+  }
   if (song.type === 'local' && song.localKey) return 'local:' + song.localKey;
   if (songProviderKey(song) === 'qq') return 'qq:' + (song.mid || song.songmid || song.id || (song.name + '|' + song.artist));
   if (song.id != null && song.id !== '') return 'song:' + song.id;
@@ -9196,7 +9217,10 @@ function beatMapSongKey(song) {
 
 function localBeatDiskKey(localKey, mode) {
   if (!localKey) return '';
-  return 'local:' + localKey + ':' + (mode === 'dj' ? 'dj' : 'mr');
+  if (localBeatCacheTools && typeof localBeatCacheTools.localBeatDiskKey === 'function') {
+    return localBeatCacheTools.localBeatDiskKey(localKey, mode);
+  }
+  return 'local:' + localKey + ':' + normalizeLocalBeatMode(mode);
 }
 
 function updateBeatDiskCacheStatus(data) {
@@ -11100,17 +11124,26 @@ function saveLocalBeatMapCache() {
   return false;
 }
 function getLocalBeatEntry(localKey, mode) {
+  if (localBeatCacheTools && typeof localBeatCacheTools.getLocalBeatMapEntry === 'function') {
+    return localBeatCacheTools.getLocalBeatMapEntry(localBeatMapCache, localKey, mode);
+  }
   var entry = localKey && localBeatMapCache ? localBeatMapCache[localKey] : null;
+  mode = normalizeLocalBeatMode(mode);
   return entry && entry[mode] ? entry[mode] : null;
 }
 function storeLocalBeatEntry(localKey, mode, map, song, opts) {
   if (!localKey || !map) return;
   opts = opts || {};
-  var entry = localBeatMapCache[localKey] || {};
-  entry[mode] = map;
-  entry.updatedAt = Date.now();
-  localBeatMapCache[localKey] = entry;
-  localBeatMapPrefs[localKey] = mode;
+  mode = normalizeLocalBeatMode(mode);
+  if (localBeatCacheTools && typeof localBeatCacheTools.storeLocalBeatMapEntry === 'function') {
+    localBeatCacheTools.storeLocalBeatMapEntry(localBeatMapCache, localBeatMapPrefs, localKey, mode, map);
+  } else {
+    var entry = localBeatMapCache[localKey] || {};
+    entry[mode] = map;
+    entry.updatedAt = Date.now();
+    localBeatMapCache[localKey] = entry;
+    localBeatMapPrefs[localKey] = mode;
+  }
   saveLocalBeatPrefs();
   saveLocalBeatMapCache();
   if (!opts.skipDisk) writeBeatDiskCache(localBeatDiskKey(localKey, mode), map, song || { type:'local', localKey:localKey }, mode);
@@ -11128,14 +11161,15 @@ function localBeatVisualCount(map) {
 }
 function setLocalBeatPreference(localKey, mode) {
   if (!localKey) return;
-  localBeatMapPrefs[localKey] = mode === 'dj' ? 'dj' : 'mr';
+  localBeatMapPrefs[localKey] = normalizeLocalBeatMode(mode);
   saveLocalBeatPrefs();
 }
 function applyLocalBeatMap(song, mode, map, fromCache) {
-  if (!song || !song.localKey || !map) return false;
-  mode = mode === 'dj' ? 'dj' : 'mr';
+  var localKey = getSongLocalBeatKey(song);
+  if (!song || !localKey || !map) return false;
+  mode = normalizeLocalBeatMode(mode);
   song.localBeatMode = mode;
-  setLocalBeatPreference(song.localKey, mode);
+  setLocalBeatPreference(localKey, mode);
   if (mode === 'dj') {
     setDjModeActive(true, song);
     currentBeatMap = null;
@@ -11148,7 +11182,7 @@ function applyLocalBeatMap(song, mode, map, fromCache) {
   } else {
     setDjModeActive(false, song);
     currentBeatMap = map;
-    beatMapCache['local:' + song.localKey] = map;
+    beatMapCache[beatMapSongKey(song)] = map;
     applyCinemaProfileFromBeatMap(map);
     syncBeatMapPlaybackCursor(audio ? audio.currentTime : 0, true);
   }
@@ -11158,30 +11192,47 @@ function applyLocalBeatMap(song, mode, map, fromCache) {
   return true;
 }
 function prepareLocalBeatAnalysis(song, audioUrl) {
-  if (!song || !song.localKey || !audioUrl) return;
-  var preferred = localBeatMapPrefs[song.localKey] === 'dj' ? 'dj' : 'mr';
-  var cached = getLocalBeatEntry(song.localKey, preferred) ||
-    getLocalBeatEntry(song.localKey, preferred === 'dj' ? 'mr' : 'dj');
-  if (cached) {
-    applyLocalBeatMap(song, cached === getLocalBeatEntry(song.localKey, 'dj') ? 'dj' : 'mr', cached, true);
+  var localKey = getSongLocalBeatKey(song);
+  if (!song || !localKey || !audioUrl) return;
+  var preferred = localBeatCacheTools && typeof localBeatCacheTools.preferredLocalBeatMode === 'function'
+    ? localBeatCacheTools.preferredLocalBeatMode(localBeatMapPrefs, localKey)
+    : (localBeatMapPrefs[localKey] === 'dj' ? 'dj' : 'mr');
+  var cachedHit = localBeatCacheTools && typeof localBeatCacheTools.pickCachedLocalBeatMap === 'function'
+    ? localBeatCacheTools.pickCachedLocalBeatMap(localBeatMapCache, localBeatMapPrefs, song, preferred)
+    : null;
+  if (!cachedHit) {
+    var fallbackCached = getLocalBeatEntry(localKey, preferred) ||
+      getLocalBeatEntry(localKey, preferred === 'dj' ? 'mr' : 'dj');
+    if (fallbackCached) cachedHit = {
+      localKey: localKey,
+      mode: fallbackCached === getLocalBeatEntry(localKey, 'dj') ? 'dj' : 'mr',
+      map: fallbackCached
+    };
+  }
+  if (cachedHit && cachedHit.map) {
+    applyLocalBeatMap(song, cachedHit.mode, cachedHit.map, true);
     return;
   }
   var diskToken = trackSwitchToken;
   (async function(){
     var firstMode = preferred;
     var secondMode = preferred === 'dj' ? 'mr' : 'dj';
-    var firstMap = await readBeatDiskCache(localBeatDiskKey(song.localKey, firstMode));
+    var firstMap = await readBeatDiskCache(localBeatDiskKey(localKey, firstMode));
     var mode = firstMap ? firstMode : secondMode;
-    var map = firstMap || await readBeatDiskCache(localBeatDiskKey(song.localKey, secondMode));
-    if (diskToken !== trackSwitchToken || !currentLocalSong || currentLocalSong.localKey !== song.localKey) return;
+    var map = firstMap || await readBeatDiskCache(localBeatDiskKey(localKey, secondMode));
+    if (diskToken !== trackSwitchToken || !currentLocalSong || getSongLocalBeatKey(currentLocalSong) !== localKey) return;
     if (map) {
-      storeLocalBeatEntry(song.localKey, mode, map, song, { skipDisk:true });
+      storeLocalBeatEntry(localKey, mode, map, song, { skipDisk:true });
       applyLocalBeatMap(song, mode, map, true);
       return;
     }
-    openLocalBeatModal(song, audioUrl);
-  })().catch(function(){
-    if (diskToken === trackSwitchToken && currentLocalSong && currentLocalSong.localKey === song.localKey) openLocalBeatModal(song, audioUrl);
+    if (diskToken !== trackSwitchToken || !currentLocalSong || getSongLocalBeatKey(currentLocalSong) !== localKey) return;
+    scheduleBeatAnalysis(beatMapSongKey(song), audioUrl, beatMapToken, song);
+  })().catch(function(err){
+    console.warn('[LocalBeatPrepare]', err);
+    if (diskToken === trackSwitchToken && currentLocalSong && getSongLocalBeatKey(currentLocalSong) === localKey) {
+      scheduleBeatAnalysis(beatMapSongKey(song), audioUrl, beatMapToken, song);
+    }
   });
 }
 function openLocalBeatModal(song, audioUrl) {
@@ -11328,7 +11379,9 @@ function smoothBeatMapHandoff(songId, map, token, song) {
     hideBeatChip();
     notifyDesktopLyricsBeatMapReady();
     showToast('节奏分析完成: ' + (map.visualBeatCount || (map.cameraBeats && map.cameraBeats.length) || 0) + ' 个视觉主拍');
-    writeBeatDiskCache(songId, map, song, 'mr');
+    var localKey = getSongLocalBeatKey(song);
+    if (localKey) storeLocalBeatEntry(localKey, 'mr', map, song);
+    else writeBeatDiskCache(songId, map, song, 'mr');
     scheduleQueueBeatPrefetch(currentIdx, 1000);
   };
   scheduleVisualApply(apply, wait, 460);
@@ -19903,9 +19956,6 @@ async function playQueueAt(idx, opts) {
       cancelDjBeatAnalysisTimer();
       resetDjBeatMapState();
       setDjModeActive(false);
-      setTimeout(function(){
-        if (token === trackSwitchToken && playQueue[idx] === song) prepareLocalBeatAnalysis(song, localUrl);
-      }, 520);
       markPlayPhase('local-audio-start');
       var localStarted = await playAudio();
       if (!localStarted) {
@@ -19917,6 +19967,7 @@ async function playQueueAt(idx, opts) {
       forcePlaybackControlsInteractive();
       markPlayPhase('local-session-begin');
       safePlaybackStep('local-listen-session-begin', function(){ beginListenSession(song, playbackContext); });
+      if (token === trackSwitchToken && playQueue[idx] === song) prepareLocalBeatAnalysis(song, localUrl);
       safeRenderQueuePanel('local-play-queue-at', { scrollCurrent: miniQueueOpen });
       scheduleShelfRebuild('local-play-queue-at', true);
       safePlaybackStep('local-shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
@@ -21818,11 +21869,11 @@ async function handleFiles(files) {
     document.getElementById('trial-banner').classList.remove('show');
     audio.load();
     playAudio().then(function(ok){
-      if (ok && currentLocalSong && currentLocalSong.localUrl === url) beginListenSession(currentLocalSong, null);
+      if (ok && currentLocalSong && currentLocalSong.localUrl === url) {
+        beginListenSession(currentLocalSong, null);
+        prepareLocalBeatAnalysis(currentLocalSong, url);
+      }
     });
-    setTimeout(function(){
-      if (currentLocalSong && currentLocalSong.localUrl === url) prepareLocalBeatAnalysis(currentLocalSong, url);
-    }, 520);
     var localCover = getCustomCoverForSong(currentLocalSong);
     var localCoverOpts = { trackToken: token, deferHeavy: firstVisualPlay, delay: firstVisualPlay ? 60 : 0, timeout: firstVisualPlay ? 300 : 180 };
     applyLocalResolvedCover(localMedia, localImport, imgFile, localCover, localCoverOpts, url);
