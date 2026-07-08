@@ -19,6 +19,20 @@ test('main ipc channels reject overlay and remote senders', () => {
   assert.equal(isAllowedIpcSender('mineradio-restart-app', 'https://example.com/', 34567), false);
 });
 
+test('desktop shell ipc channels are main-window only', () => {
+  for (const channel of [
+    'mineradio-tray-get-settings',
+    'mineradio-tray-set-close-to-tray',
+    'mineradio-startup-set-enabled',
+    'mineradio-ui-state-read-sync',
+    'mineradio-ui-state-write',
+  ]) {
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/', 34567), true);
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/desktop-lyrics.html', 34567), false);
+    assert.equal(isAllowedIpcSender(channel, 'https://example.com/', 34567), false);
+  }
+});
+
 test('overlay ipc channels reject main and remote senders', () => {
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/desktop-lyrics.html', 34567), true);
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/', 34567), false);

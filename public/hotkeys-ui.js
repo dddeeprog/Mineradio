@@ -41,7 +41,15 @@ function readHotkeySettings() {
   }
 }
 function saveHotkeySettings() {
-  try { localStorage.setItem(HOTKEY_SETTINGS_STORE_KEY, JSON.stringify(hotkeySettings || getHotkeyDefaults())); } catch (e) {}
+  var text = JSON.stringify(hotkeySettings || getHotkeyDefaults());
+  try { localStorage.setItem(HOTKEY_SETTINGS_STORE_KEY, text); } catch (e) {}
+  try {
+    if (window.MineradioBackupUiState) {
+      var patch = {};
+      patch[HOTKEY_SETTINGS_STORE_KEY] = text;
+      window.MineradioBackupUiState(patch);
+    }
+  } catch (e) {}
 }
 function hotkeyActionMeta(actionKey) {
   for (var i = 0; i < HOTKEY_ACTIONS.length; i++) {

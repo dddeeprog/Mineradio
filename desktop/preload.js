@@ -1,5 +1,36 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+const PERSISTENT_UI_STATE_KEYS = [
+  'apex-player-volume',
+  'mineradio-custom-covers',
+  'mineradio-custom-lyrics-v1',
+  'mineradio-custom-lyric-prefs-v1',
+  'mineradio-lyric-layout-v1',
+  'mineradio-playback-quality-v1',
+  'mineradio-upload-tip-seen',
+  'mineradio-diy-player-mode-v1',
+  'mineradio-playlist-panel-pinned-v1',
+  'mineradio-user-capsule-auto-hide-v1',
+  'mineradio-fx-fab-auto-hide-v1',
+  'mineradio-controls-auto-hide-v1',
+  'mineradio-free-camera-v1',
+  'mineradio-hotkey-settings-v1',
+  'mineradio-visual-guide-seen-v2',
+];
+
+function restorePersistentUiState() {
+  try {
+    const values = ipcRenderer.sendSync('mineradio-ui-state-read-sync') || {};
+    PERSISTENT_UI_STATE_KEYS.forEach((key) => {
+      if (typeof values[key] !== 'string') return;
+      if (window.localStorage.getItem(key) != null) return;
+      window.localStorage.setItem(key, values[key]);
+    });
+  } catch (_e) {}
+}
+
+restorePersistentUiState();
+
 contextBridge.exposeInMainWorld('desktopWindow', {
   isDesktop: true,
   minimize: () => ipcRenderer.invoke('desktop-window-minimize'),
@@ -15,6 +46,10 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   openUpdateInstaller: (filePath) => ipcRenderer.invoke('mineradio-open-update-installer', filePath),
   restartApp: () => ipcRenderer.invoke('mineradio-restart-app'),
   configureGlobalHotkeys: (bindings) => ipcRenderer.invoke('mineradio-hotkeys-configure-global', bindings || []),
+  getTraySettings: () => ipcRenderer.invoke('mineradio-tray-get-settings'),
+  setCloseToTray: (enabled) => ipcRenderer.invoke('mineradio-tray-set-close-to-tray', !!enabled),
+  setStartupEnabled: (enabled) => ipcRenderer.invoke('mineradio-startup-set-enabled', !!enabled),
+  backupUiState: (patch) => ipcRenderer.invoke('mineradio-ui-state-write', patch || {}),
   exportJsonFile: (payload) => ipcRenderer.invoke('mineradio-export-json-file', payload || {}),
   importJsonFile: () => ipcRenderer.invoke('mineradio-import-json-file'),
   chooseLocalMusicFolder: () => ipcRenderer.invoke('mineradio-local-music-choose-folder'),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu } = require('electron');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
@@ -17,6 +17,16 @@ const {
   LOCAL_FILE_PROTOCOL,
   LOCAL_LIBRARY_MIME,
 } = require('./local-assets');
+const {
+  filterPersistentUiStatePatch,
+  mergeDesktopShellSettings,
+  normalizeDesktopShellSettings,
+  normalizePersistentUiState,
+} = require('./shell-state');
+const {
+  desktopLyricsStateSignature,
+  normalizeDesktopLyricsOpacity,
+} = require('./overlay-state');
 
 let mainWindow = null;
 let localServer = null;
@@ -27,6 +37,8 @@ let desktopLyricsUserBounds = null;
 let desktopLyricsProgrammaticMove = false;
 let desktopLyricsPointerCapture = false;
 let desktopLyricsMouseIgnored = null;
+let desktopLyricsLastStateSignature = '';
+let desktopLyricsLastOpacity = null;
 let desktopLyricsMousePoller = null;
 let desktopLyricsMousePollerBuffer = '';
 let desktopLyricsHotBounds = null;
@@ -36,6 +48,9 @@ let wallpaperState = {};
 let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
+let tray = null;
+let closeToTrayEnabled = true;
+let appQuitting = false;
 const registeredGlobalHotkeys = new Map();
 
 const WINDOWED_ASPECT = 16 / 9;
@@ -50,6 +65,8 @@ const NETEASE_LOGIN_PARTITION = 'persist:mineradio-netease-login';
 const NETEASE_LOGIN_URL = 'https://music.163.com/#/login';
 const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
 const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
+const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
+const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
@@ -382,6 +399,121 @@ function focusMainWindow() {
   mainWindow.focus();
   sendWindowState(mainWindow);
   return true;
+}
+
+function desktopShellSettingsPath() {
+  return path.join(app.getPath('userData'), DESKTOP_SHELL_SETTINGS_FILE);
+}
+
+function readDesktopShellSettings() {
+  try {
+    const file = desktopShellSettingsPath();
+    if (!fs.existsSync(file)) return normalizeDesktopShellSettings({});
+    return normalizeDesktopShellSettings(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (_e) {
+    return normalizeDesktopShellSettings({});
+  }
+}
+
+function writeDesktopShellSettings(patch) {
+  const file = desktopShellSettingsPath();
+  const next = mergeDesktopShellSettings(readDesktopShellSettings(), patch);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function applySavedDesktopShellSettings() {
+  closeToTrayEnabled = readDesktopShellSettings().closeToTray;
+}
+
+function desktopUiStatePath() {
+  return path.join(app.getPath('userData'), DESKTOP_UI_STATE_FILE);
+}
+
+function readDesktopUiState() {
+  try {
+    const file = desktopUiStatePath();
+    if (!fs.existsSync(file)) return normalizePersistentUiState({});
+    return normalizePersistentUiState(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (_e) {
+    return normalizePersistentUiState({});
+  }
+}
+
+function writeDesktopUiStatePatch(patch) {
+  const filtered = filterPersistentUiStatePatch(patch);
+  const current = readDesktopUiState();
+  const values = { ...current.values };
+  for (const [key, value] of Object.entries(filtered)) {
+    if (value == null) delete values[key];
+    else values[key] = value;
+  }
+  const next = normalizePersistentUiState({ values, updatedAt: Date.now() });
+  const file = desktopUiStatePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function isStartupEnabled() {
+  if (process.platform !== 'win32') return false;
+  try {
+    return !!app.getLoginItemSettings().openAtLogin;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function setStartupEnabled(enabled) {
+  if (process.platform !== 'win32') return { ok: false, enabled: false, unsupported: true };
+  app.setLoginItemSettings({ openAtLogin: !!enabled, path: process.execPath, args: [] });
+  return { ok: true, enabled: isStartupEnabled() };
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示 Mineradio', click: focusMainWindow },
+    {
+      label: '关闭按钮最小化到托盘',
+      type: 'checkbox',
+      checked: closeToTrayEnabled,
+      click: (item) => {
+        closeToTrayEnabled = !!item.checked;
+        writeDesktopShellSettings({ closeToTray: closeToTrayEnabled });
+        refreshTrayMenu();
+      },
+    },
+    {
+      label: '开机自动启动',
+      type: 'checkbox',
+      checked: isStartupEnabled(),
+      click: (item) => {
+        const result = setStartupEnabled(item.checked);
+        if (!result.ok) item.checked = false;
+        refreshTrayMenu();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '退出 Mineradio',
+      click: () => {
+        appQuitting = true;
+        app.quit();
+      },
+    },
+  ]));
+}
+
+function createTray() {
+  if (tray || process.platform !== 'win32') return;
+  const icon = fs.existsSync(APP_ICON_ICO) ? APP_ICON_ICO : process.execPath;
+  tray = new Tray(icon);
+  tray.setToolTip(APP_NAME);
+  tray.on('click', focusMainWindow);
+  tray.on('double-click', focusMainWindow);
+  refreshTrayMenu();
 }
 
 function getUpdateDownloadDir() {
@@ -1012,13 +1144,22 @@ function positionDesktopLyricsWindow(payload = desktopLyricsState, options = {})
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
   const shouldUseManualBounds = desktopLyricsUserBounds && !options.force;
   setDesktopLyricsBounds(shouldUseManualBounds ? desktopLyricsUserBounds : desktopLyricsDefaultBounds(payload));
-  if (typeof desktopLyricsWindow.setOpacity === 'function') {
-    desktopLyricsWindow.setOpacity(clampNumber(payload.opacity, 0.28, 1, 0.92));
-  }
+  setDesktopLyricsOpacity(payload.opacity);
 }
 
-function sendDesktopLyricsState() {
+function setDesktopLyricsOpacity(value) {
+  if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed() || typeof desktopLyricsWindow.setOpacity !== 'function') return;
+  const nextOpacity = normalizeDesktopLyricsOpacity(value);
+  if (desktopLyricsLastOpacity != null && Math.abs(desktopLyricsLastOpacity - nextOpacity) <= 0.001) return;
+  desktopLyricsLastOpacity = nextOpacity;
+  desktopLyricsWindow.setOpacity(nextOpacity);
+}
+
+function sendDesktopLyricsState(force = false) {
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
+  const signature = desktopLyricsStateSignature(desktopLyricsState);
+  if (!force && signature === desktopLyricsLastStateSignature) return;
+  desktopLyricsLastStateSignature = signature;
   desktopLyricsWindow.webContents.send('mineradio-desktop-lyrics-state', desktopLyricsState);
 }
 
@@ -1036,7 +1177,7 @@ function createDesktopLyricsWindow(payload = {}) {
     if (yChanged) {
       positionDesktopLyricsWindow(desktopLyricsState, { force: yChanged });
     } else if (opacityChanged && typeof desktopLyricsWindow.setOpacity === 'function') {
-      desktopLyricsWindow.setOpacity(clampNumber(desktopLyricsState.opacity, 0.28, 1, 0.92));
+      setDesktopLyricsOpacity(desktopLyricsState.opacity);
     }
     applyDesktopLyricsMouseBehavior();
     sendDesktopLyricsState();
@@ -1076,12 +1217,14 @@ function createDesktopLyricsWindow(payload = {}) {
   desktopLyricsWindow.once('ready-to-show', () => {
     if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
     desktopLyricsWindow.showInactive();
-    sendDesktopLyricsState();
+    sendDesktopLyricsState(true);
   });
-  desktopLyricsWindow.webContents.once('did-finish-load', sendDesktopLyricsState);
+  desktopLyricsWindow.webContents.once('did-finish-load', () => sendDesktopLyricsState(true));
   desktopLyricsWindow.on('closed', () => {
     desktopLyricsWindow = null;
     desktopLyricsMouseIgnored = null;
+    desktopLyricsLastStateSignature = '';
+    desktopLyricsLastOpacity = null;
   });
   desktopLyricsWindow.on('moved', rememberDesktopLyricsBounds);
   desktopLyricsWindow.loadURL(overlayUrl('desktop-lyrics.html')).catch((e) => console.warn('Desktop lyrics load failed:', e.message));
@@ -1092,6 +1235,8 @@ function closeDesktopLyricsWindow() {
   desktopLyricsState = { ...desktopLyricsState, enabled: false };
   desktopLyricsPointerCapture = false;
   desktopLyricsMouseIgnored = null;
+  desktopLyricsLastStateSignature = '';
+  desktopLyricsLastOpacity = null;
   desktopLyricsHotBounds = null;
   stopDesktopLyricsMousePoller();
   if (desktopLyricsWindow && !desktopLyricsWindow.isDestroyed()) {
@@ -1249,6 +1394,37 @@ handleIpc('desktop-window-close', (event) => {
 
 handleIpc('mineradio-hotkeys-configure-global', (_event, bindings) => {
   return configureMineradioGlobalHotkeys(bindings);
+});
+
+handleIpc('mineradio-tray-get-settings', () => {
+  const startup = isStartupEnabled();
+  return { ok: true, closeToTray: closeToTrayEnabled, startup, startupEnabled: startup };
+});
+
+handleIpc('mineradio-tray-set-close-to-tray', (_event, enabled) => {
+  closeToTrayEnabled = !!enabled;
+  writeDesktopShellSettings({ closeToTray: closeToTrayEnabled });
+  refreshTrayMenu();
+  return { ok: true, closeToTray: closeToTrayEnabled };
+});
+
+handleIpc('mineradio-startup-set-enabled', (_event, enabled) => {
+  const result = setStartupEnabled(!!enabled);
+  refreshTrayMenu();
+  return result;
+});
+
+ipcMain.on('mineradio-ui-state-read-sync', (event) => {
+  try {
+    assertAllowedIpcSender(event, 'mineradio-ui-state-read-sync', mainServerPort);
+    event.returnValue = readDesktopUiState().values || {};
+  } catch (_e) {
+    event.returnValue = {};
+  }
+});
+
+handleIpc('mineradio-ui-state-write', (_event, patch) => {
+  return { ok: true, ...writeDesktopUiStatePatch(patch) };
 });
 
 handleIpc('mineradio-export-json-file', async (event, payload = {}) => {
@@ -1577,6 +1753,12 @@ async function createWindow() {
   mainWindow.on('blur', () => sendWindowState(mainWindow));
   mainWindow.on('move', () => scheduleWindowStateSend(mainWindow));
   mainWindow.on('resize', () => scheduleWindowStateSend(mainWindow));
+  mainWindow.on('close', (event) => {
+    if (appQuitting || !closeToTrayEnabled || process.platform !== 'win32') return;
+    event.preventDefault();
+    mainWindow.hide();
+    sendWindowState(mainWindow);
+  });
   mainWindow.on('closed', () => {
     if (mainWindowStateTimer) {
       clearTimeout(mainWindowStateTimer);
@@ -1619,6 +1801,8 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     registerLocalFileProtocol();
+    applySavedDesktopShellSettings();
+    createTray();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
       positionWallpaperWindow();
@@ -1639,6 +1823,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on('before-quit', () => {
+    appQuitting = true;
     unregisterMineradioGlobalHotkeys();
     closeOverlayWindows();
     if (localServer && localServer.close) localServer.close();
