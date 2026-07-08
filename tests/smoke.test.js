@@ -15,7 +15,9 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-visuals\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
-  assert.equal(scripts.test, 'node --test tests/*.test.js');
+  assert.match(scripts.test, /^node --test\b/);
+  assert.match(scripts.test, /tests\/\*\.test\.js/);
+  assert.match(scripts.test, /desktop\/\*\.test\.js/);
   assert.equal(scripts['verify:artifacts'], 'node build/verify-release-artifacts.js');
   assert.equal(
     scripts['verify:release'],

@@ -1,14 +1,22 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol } = require('electron');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
+const { Readable } = require('stream');
 const {
   isAllowedAppUrl,
   isAllowedLoginUrl,
   isSafeExternalUrl,
 } = require('./navigation-guard');
 const { assertAllowedIpcSender } = require('./ipc-auth');
+const {
+  createLocalAssetsManager,
+  localFilePathFromProxyUrl,
+  parseLocalFileRangeHeader,
+  LOCAL_FILE_PROTOCOL,
+  LOCAL_LIBRARY_MIME,
+} = require('./local-assets');
 
 let mainWindow = null;
 let localServer = null;
@@ -60,6 +68,16 @@ for (const [name, value] of CHROMIUM_PERFORMANCE_SWITCHES) {
   if (value == null) app.commandLine.appendSwitch(name);
   else app.commandLine.appendSwitch(name, value);
 }
+protocol.registerSchemesAsPrivileged([{
+  scheme: LOCAL_FILE_PROTOCOL,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    stream: true,
+    corsEnabled: true,
+  },
+}]);
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 const QQ_LOGIN_COOKIE_PRIORITY = [
@@ -95,6 +113,8 @@ const NETEASE_LOGIN_COOKIE_PRIORITY = [
   'WNMCID',
   'JSESSIONID-WYYY',
 ];
+const localAssetsManager = createLocalAssetsManager();
+let localFileProtocolRegistered = false;
 
 function findOpenPort(startPort) {
   return new Promise((resolve, reject) => {
@@ -287,6 +307,72 @@ function handleIpc(channel, handler) {
     assertAllowedIpcSender(event, channel, mainServerPort);
     return handler(event, ...args);
   });
+}
+
+function localFileContentType(filePath) {
+  return LOCAL_LIBRARY_MIME[path.extname(String(filePath || '')).toLowerCase()] || 'application/octet-stream';
+}
+
+function localFileErrorResponse(error) {
+  const message = String(error && error.message || error || 'LOCAL_FILE_FAILED');
+  if (/LOCAL_FILE_URL/.test(message)) return new Response('Invalid local file url', { status: 400 });
+  if (/LOCAL_FILE_NOT_AUTHORIZED/.test(message)) return new Response('Local file not authorized', { status: 403 });
+  if (/LOCAL_FILE_NOT_FOUND/.test(message)) return new Response('Local file not found', { status: 404 });
+  console.warn('Local file protocol failed:', message);
+  return new Response('Local file failed', { status: 500 });
+}
+
+async function handleLocalFileProtocolRequest(request) {
+  try {
+    const filePath = localFilePathFromProxyUrl(request.url);
+    const target = localAssetsManager.resolveAuthorizedLocalFile(filePath);
+    const stat = await fs.promises.stat(target);
+    if (!stat.isFile()) return new Response('Local file not found', { status: 404 });
+
+    const range = parseLocalFileRangeHeader(request.headers.get('range') || '', stat.size);
+    const baseHeaders = {
+      'Accept-Ranges': 'bytes',
+      'Content-Type': localFileContentType(target),
+    };
+    if (!range) {
+      return new Response('Range not satisfiable', {
+        status: 416,
+        headers: {
+          ...baseHeaders,
+          'Content-Range': `bytes */${stat.size}`,
+        },
+      });
+    }
+
+    if (stat.size <= 0 || range.end < range.start) {
+      return new Response('', {
+        status: 200,
+        headers: {
+          ...baseHeaders,
+          'Content-Length': '0',
+        },
+      });
+    }
+
+    const headers = {
+      ...baseHeaders,
+      'Content-Length': String(range.end - range.start + 1),
+    };
+    if (range.partial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${stat.size}`;
+    const fileStream = fs.createReadStream(target, { start: range.start, end: range.end });
+    return new Response(Readable.toWeb(fileStream), {
+      status: range.partial ? 206 : 200,
+      headers,
+    });
+  } catch (error) {
+    return localFileErrorResponse(error);
+  }
+}
+
+function registerLocalFileProtocol() {
+  if (localFileProtocolRegistered) return;
+  protocol.handle(LOCAL_FILE_PROTOCOL, handleLocalFileProtocolRequest);
+  localFileProtocolRegistered = true;
 }
 
 function focusMainWindow() {
@@ -1200,6 +1286,54 @@ handleIpc('mineradio-import-json-file', async (event) => {
   }
 });
 
+handleIpc('mineradio-local-music-choose-folder', async (event) => {
+  try {
+    const owner = getSenderWindow(event);
+    const result = await dialog.showOpenDialog(owner, {
+      title: '选择本地音乐文件夹',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) return { ok: false, canceled: true };
+    return await localAssetsManager.scanLocalMusicFolder(result.filePaths[0]);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_CHOOSE_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-music-scan-folder', async (_event, folderPath, options) => {
+  try {
+    if (!folderPath) return { ok: false, error: 'LOCAL_LIBRARY_PATH_EMPTY' };
+    return await localAssetsManager.scanLocalMusicFolder(folderPath, options || {});
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_SCAN_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-music-refresh-entries', async (_event, folderPath, snapshotOrFiles) => {
+  try {
+    if (!folderPath) return { ok: false, error: 'LOCAL_LIBRARY_PATH_EMPTY' };
+    return await localAssetsManager.refreshLocalMusicFileEntries(folderPath, snapshotOrFiles);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_REFRESH_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-file-read-range', async (_event, filePath, start, end) => {
+  try {
+    return await localAssetsManager.readAuthorizedLocalFileRange(filePath, start, end);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_FILE_READ_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-file-read-data-url', async (_event, filePath) => {
+  try {
+    return await localAssetsManager.readAuthorizedLocalFileDataUrl(filePath);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_FILE_READ_FAILED' };
+  }
+});
+
 handleIpc('netease-music-open-login', async (event) => {
   return openNeteaseMusicLoginWindow(getSenderWindow(event));
 });
@@ -1484,6 +1618,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    registerLocalFileProtocol();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
       positionWallpaperWindow();
