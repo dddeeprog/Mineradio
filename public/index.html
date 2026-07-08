@@ -8151,7 +8151,8 @@ function buildLyricMesh(text) {
     mask:mask, textMesh:textMesh, readability:readability, glow:glow, sparks:sparks, sun:sun,
     textMat:textMat, readabilityMat:readabilityMat, glowMat:glowMat, sparkMat:pmat, sunMat:sunMat,
     basePositions:ppos.slice ? ppos.slice(0) : new Float32Array(ppos),
-    textWorldW:textWorldW, textWorldH:textWorldH, worldW:worldW, worldH:worldH
+    textWorldW:textWorldW, textWorldH:textWorldH, worldW:worldW, worldH:worldH,
+    baseFeather:textMat.uniforms.uFeather.value
   };
   updateLyricMeshProgress(group, 0);
   return group;
@@ -8171,9 +8172,37 @@ function buildNativeStageLyricLine(line, index) {
   return nativeLine;
 }
 
+function foliaNativeLyricVisualsApi() {
+  return window.MineradioFoliaNativeLyricVisuals || null;
+}
+
+function currentNativeLyricAudioFrame() {
+  return {
+    energy: Math.max(0, Math.min(2, Number(audioEnergy || 0))),
+    beatPulse: Math.max(0, Math.min(2, Number(stageLyrics && stageLyrics.beatGlow || beatPulse || 0))),
+    beatOnset: !!(stageLyrics && stageLyrics.beatGlow > 0.75),
+  };
+}
+
+function resolveNativeStageLyricFrame(mesh, progress, now) {
+  var api = foliaNativeLyricVisualsApi();
+  var data = mesh && mesh.userData || {};
+  var line = data.nativeLyricLine || null;
+  if (!api || typeof api.resolveNativeLyricVisualFrame !== 'function' || !line || !foliaFx || foliaFx.nativeLyricEffect === 'off') return null;
+  return api.resolveNativeLyricVisualFrame({
+    effect: foliaFx.nativeLyricEffect || 'hybrid',
+    now: now,
+    line: line,
+    progress: progress,
+    audio: currentNativeLyricAudioFrame(),
+    fx: foliaFx,
+  });
+}
+
 function updateLyricMeshProgress(mesh, progress) {
   if (!mesh || !mesh.userData || !mesh.userData.lyric) return;
   progress = Math.max(0, Math.min(1, progress || 0));
+  mesh.userData.nativeVisualFrame = resolveNativeStageLyricFrame(mesh, progress, audio && isFinite(audio.currentTime) ? audio.currentTime : 0);
   var d = mesh.userData.lyric;
   d.textMat.uniforms.uProgress.value = progress;
   mesh.userData.lastLyricProgress = progress;
@@ -8444,6 +8473,10 @@ function updateStageLyrics3D(dt) {
     }
     var opacity = 0;
     if (isCurrent) {
+      var nativeFrame = mesh.userData.nativeVisualFrame || null;
+      var nativeGlow = nativeFrame ? nativeFrame.glow : 0;
+      var nativeSweep = nativeFrame ? nativeFrame.sweepStrength : 0;
+      var nativeParticles = nativeFrame ? nativeFrame.particleStrength : 0;
       var shelfDetailLyricDim = shelfDetailLyricProfile.bloom;
       var lyricOpacityTarget = shelfDetailLyricProfile.opacity;
       var currentOpacity = data.textMat ? data.textMat.uniforms.uOpacity.value : 0;
@@ -8457,18 +8490,27 @@ function updateStageLyrics3D(dt) {
       }
       if (data.textMat && data.textMat.uniforms.uSolar) {
         var solarTarget = stageLyrics.highBloom * shelfDetailLyricDim;
+        solarTarget += nativeGlow * 0.28;
         var solarEase = shelfDetailOpen && data.textMat.uniforms.uSolar.value > solarTarget ? 0.26 : 0.12;
         data.textMat.uniforms.uSolar.value += (solarTarget - data.textMat.uniforms.uSolar.value) * solarEase;
+      }
+      if (data.textMat && data.textMat.uniforms) {
+        var baseFeather = Number.isFinite(data.baseFeather) ? data.baseFeather : (lyricsHasNativeKaraoke ? 0.030 : 0.055);
+        var featherTarget = nativeSweep > 0 ? Math.max(baseFeather, 0.06 + nativeSweep * 0.04) : baseFeather;
+        data.textMat.uniforms.uFeather.value += (featherTarget - data.textMat.uniforms.uFeather.value) * 0.18;
+        if (data.textMat.uniforms.uSolar) data.textMat.uniforms.uSolar.value = Math.max(data.textMat.uniforms.uSolar.value, nativeGlow * 0.22);
       }
       var solar = stageLyrics.highBloom * shelfDetailLyricDim;
       var warmth = Math.max(0, Math.min(1, solar * 1.10));
       if (data.glowMat) {
         var glowTarget = lyricGlowStrength > 0 ? Math.min(shelfDetailLyricProfile.glowCap, (0.075 + solar * 0.34 + stageLyrics.beatGlow * 0.16 * shelfDetailLyricDim) * Math.min(3.0, glowDrive)) : 0;
+        glowTarget += nativeGlow * 0.22;
         data.glowMat.opacity += (glowTarget - data.glowMat.opacity) * (glowTarget > data.glowMat.opacity ? 0.095 : (shelfDetailOpen ? 0.20 : 0.055));
         data.glowMat.color.copy(lyricThreeColor(stageLyrics.palette.glowColor || stageLyrics.palette.secondary, '#9cffdf', 0.36)).lerp(lyricSunHotColor, warmth);
       }
       if (data.sparkMat) {
         var sparkTarget = lyricGlowStrength > 0 && fx.lyricGlowParticles && !shelfDetailOpen ? Math.min(0.42, (0.10 + solar * 0.14 + stageLyrics.beatGlow * 0.10) * Math.min(1.6, glowDrive)) : 0;
+        sparkTarget += nativeParticles * 0.16;
         var sparkOpacity = getLyricSparkOpacity(data);
         sparkOpacity += (sparkTarget - sparkOpacity) * (sparkTarget > sparkOpacity ? 0.13 : (shelfDetailOpen ? 0.22 : 0.075));
         setLyricSparkOpacity(data, sparkOpacity);

@@ -163,6 +163,16 @@ test('3D lyric renderer consumes native Folia lyric timing model', () => {
   assert.match(html, /buildGraphemeTimeline/);
 });
 
+test('3D lyric renderer applies native Folia visual frame values', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /foliaNativeLyricVisualsApi/);
+  assert.match(html, /resolveNativeStageLyricFrame/);
+  assert.match(html, /nativeVisualFrame/);
+  assert.match(html, /sweepStrength/);
+  assert.match(html, /particleStrength/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 
