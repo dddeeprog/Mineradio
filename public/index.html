@@ -18,6 +18,8 @@
 <script src="playback-session-state.js"></script>
 <script src="folia-theme-state.js"></script>
 <script src="folia-fx-state.js"></script>
+<script src="folia-native-lyric-state.js"></script>
+<script src="folia-native-lyric-visuals.js"></script>
 <script src="folia-bridge-state.js"></script>
 <script src="folia-stage-ui.js"></script>
 <script src="folia-lyric-match-state.js"></script>
@@ -407,6 +409,14 @@ try {
           <button type="button" data-folia-fx="visualMode" data-value="cappella" onclick="updateFoliaFxFromControl('visualMode','cappella')">Cappella</button>
           <button type="button" data-folia-fx="visualMode" data-value="partita" onclick="updateFoliaFxFromControl('visualMode','partita')">Partita</button>
           <button type="button" data-folia-fx="visualMode" data-value="minimal" onclick="updateFoliaFxFromControl('visualMode','minimal')">极简</button>
+        </div>
+        <div class="fx-section-label">原生 3D 歌词</div>
+        <div class="fx-seg" id="folia-fx-native-lyric-effect">
+          <button type="button" data-folia-fx="nativeLyricEffect" data-value="hybrid" onclick="updateFoliaFxFromControl('nativeLyricEffect','hybrid')">3D融合</button>
+          <button type="button" data-folia-fx="nativeLyricEffect" data-value="monet-sweep" onclick="updateFoliaFxFromControl('nativeLyricEffect','monet-sweep')">扫光</button>
+          <button type="button" data-folia-fx="nativeLyricEffect" data-value="claddagh-orbit" onclick="updateFoliaFxFromControl('nativeLyricEffect','claddagh-orbit')">回环</button>
+          <button type="button" data-folia-fx="nativeLyricEffect" data-value="classic" onclick="updateFoliaFxFromControl('nativeLyricEffect','classic')">流光</button>
+          <button type="button" data-folia-fx="nativeLyricEffect" data-value="off" onclick="updateFoliaFxFromControl('nativeLyricEffect','off')">关闭</button>
         </div>
         <label>歌词大小<input id="folia-fx-lyric-scale" type="range" min="0.65" max="1.8" step="0.01" oninput="updateFoliaFxFromControl('lyricScale', this.value)"></label>
         <label>逐字高亮<input id="folia-fx-word-highlight" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('wordHighlight', this.value)"></label>

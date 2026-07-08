@@ -145,6 +145,15 @@ test('Folia DIY controls are wired into Mineradio visual panel', () => {
   assert.match(css, /\.folia-fx-card/);
 });
 
+test('native Folia lyric fusion controls are wired into the 3D lyric panel', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /folia-native-lyric-state\.js/);
+  assert.match(html, /folia-native-lyric-visuals\.js/);
+  assert.match(html, /id="folia-fx-native-lyric-effect"/);
+  assert.match(html, /nativeLyricEffect/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 

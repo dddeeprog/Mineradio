@@ -46,3 +46,11 @@ test('builds bridge payload without private or invalid fields', () => {
   assert.equal(payload.performanceMode, 'battery');
   assert.equal(payload.extra, undefined);
 });
+
+test('normalizes native lyric effect mode for Mineradio 3D lyrics', () => {
+  const fx = normalizeFoliaFx({ nativeLyricEffect: 'claddagh-orbit' });
+  assert.equal(fx.nativeLyricEffect, 'claddagh-orbit');
+
+  const fallback = normalizeFoliaFx({ nativeLyricEffect: 'unknown' });
+  assert.equal(fallback.nativeLyricEffect, 'hybrid');
+});
