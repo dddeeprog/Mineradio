@@ -154,6 +154,15 @@ test('native Folia lyric fusion controls are wired into the 3D lyric panel', () 
   assert.match(html, /nativeLyricEffect/);
 });
 
+test('3D lyric renderer consumes native Folia lyric timing model', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /buildNativeStageLyricLine/);
+  assert.match(html, /MineradioFoliaNativeLyricState/);
+  assert.match(html, /nativeLyricLine/);
+  assert.match(html, /buildGraphemeTimeline/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 

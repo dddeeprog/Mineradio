@@ -8157,6 +8157,20 @@ function buildLyricMesh(text) {
   return group;
 }
 
+function foliaNativeLyricStateApi() {
+  return window.MineradioFoliaNativeLyricState || null;
+}
+
+function buildNativeStageLyricLine(line, index) {
+  var api = foliaNativeLyricStateApi();
+  if (!api || typeof api.buildNativeLyricLine !== 'function') return null;
+  var nativeLine = api.buildNativeLyricLine(line || {}, index || 0);
+  if (nativeLine && typeof api.buildGraphemeTimeline === 'function') {
+    nativeLine.graphemeTimeline = api.buildGraphemeTimeline(nativeLine);
+  }
+  return nativeLine;
+}
+
 function updateLyricMeshProgress(mesh, progress) {
   if (!mesh || !mesh.userData || !mesh.userData.lyric) return;
   progress = Math.max(0, Math.min(1, progress || 0));
@@ -8179,6 +8193,9 @@ function showStageLine(text, redrawOnly) {
   }
   stageLyrics.currentText = text;
   var mesh = buildLyricMesh(text);
+  var sourceLines = typeof lyricsLines !== 'undefined' && Array.isArray(lyricsLines) ? lyricsLines : null;
+  var sourceLine = stageLyrics.currentIdx >= 0 && sourceLines ? sourceLines[stageLyrics.currentIdx] : null;
+  mesh.userData.nativeLyricLine = sourceLine ? buildNativeStageLyricLine(sourceLine, stageLyrics.currentIdx) : null;
   stageLyrics.group.add(mesh);
   stageLyrics.current = mesh;
 }
@@ -8605,6 +8622,9 @@ function tickLyricsParticles() {
   if (stageLyrics.current) {
     var curLine = lyricsLines[newIdx] || { t:t };
     var nextLine = lyricsLines[newIdx + 1];
+    if (stageLyrics.current.userData && !stageLyrics.current.userData.nativeLyricLine) {
+      stageLyrics.current.userData.nativeLyricLine = buildNativeStageLyricLine(curLine, newIdx);
+    }
     var progress = getLyricLineProgress(curLine, nextLine, t);
     updateLyricMeshProgress(stageLyrics.current, progress);
   }
