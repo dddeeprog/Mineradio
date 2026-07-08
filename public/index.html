@@ -1263,6 +1263,14 @@ var QUEUE_PANEL_RENDER_LIMIT = 180;
 var MINI_QUEUE_RENDER_LIMIT = 96;
 var queuePanelRenderStart = null;
 var miniQueueRenderStart = null;
+var SEARCH_RESULT_RENDER_LIMIT = 18;
+var SEARCH_RESULT_BATCH_SIZE = 18;
+var searchResultRenderLimit = SEARCH_RESULT_RENDER_LIMIT;
+var PODCAST_PANEL_RENDER_LIMIT = 24;
+var PODCAST_PANEL_BATCH_SIZE = 24;
+var podcastPanelRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
+var podcastPanelChildRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
+var podcastPanelChildState = { key: '', title: '', items: [] };
 var PLAYLIST_PANEL_BATCH_SIZE = 28;
 var playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
 var playlistPanelLazyBound = false;
@@ -18976,7 +18984,36 @@ function searchThumbHtml(src) {
     ? '<img src="' + coverUrlWithSize(src, 80) + '" alt="" loading="lazy" onerror="this.style.opacity=0.2">'
     : '<div style="width:40px;height:40px;border-radius:6px;background:rgba(255,255,255,0.06);flex-shrink:0"></div>';
 }
-function renderPodcastRadios(items, label) {
+function resetSearchResultRenderLimit() {
+  searchResultRenderLimit = SEARCH_RESULT_RENDER_LIMIT;
+}
+function listRenderItems(items, limit) {
+  if (memoryCacheTools && typeof memoryCacheTools.listRenderSlice === 'function') {
+    return memoryCacheTools.listRenderSlice(items, { maxItems: limit, requestedStart: 0 });
+  }
+  items = Array.isArray(items) ? items : [];
+  var max = Math.min(items.length, Math.max(0, Number(limit) || items.length));
+  var out = [];
+  for (var i = 0; i < max; i++) out.push({ item: items[i], index: i });
+  return {
+    window: { start: 0, end: max - 1, count: max, before: 0, after: Math.max(0, items.length - max), total: items.length },
+    items: out
+  };
+}
+function searchLoadMoreHtml(shown, total) {
+  return total > shown
+    ? '<button type="button" class="fx-mini-btn ghost search-load-more" data-search-load-more="1">加载更多 ' + shown + '/' + total + '</button>'
+    : '';
+}
+function growSearchResultRenderLimit() {
+  searchResultRenderLimit += SEARCH_RESULT_BATCH_SIZE;
+  if (searchMode === 'podcast' && podcastPrograms.length) renderPodcastPrograms({ preserveLimit: true });
+  else if (searchMode === 'podcast') renderPodcastRadios(podcastResults, '', { preserveLimit: true });
+  else renderSongSearchResults(playlist, { preserveLimit: true });
+}
+function renderPodcastRadios(items, label, opts) {
+  opts = opts || {};
+  if (!opts.preserveLimit) resetSearchResultRenderLimit();
   podcastResults = items || [];
   podcastPrograms = [];
   playlist = [];
@@ -18985,7 +19022,10 @@ function renderPodcastRadios(items, label) {
     $results.classList.add('show');
     return;
   }
-  $results.innerHTML = podcastResults.map(function(p, i){
+  var rendered = listRenderItems(podcastResults, searchResultRenderLimit);
+  $results.innerHTML = rendered.items.map(function(row){
+    var p = row.item;
+    var i = row.index;
     return '<div class="search-result">' +
       '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0" onclick="openPodcastPrograms(' + i + ')">' +
         searchThumbHtml(p.cover) +
@@ -18996,7 +19036,7 @@ function renderPodcastRadios(items, label) {
       '</div>' +
       '<button class="add-btn" title="Open" onclick="event.stopPropagation();openPodcastPrograms(' + i + ')">›</button>' +
     '</div>';
-  }).join('');
+  }).join('') + searchLoadMoreHtml(rendered.window.count, rendered.window.total);
   $results.classList.add('show');
   if (window.gsap) animateListItems($results, '.search-result', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
 }
@@ -19025,6 +19065,7 @@ async function doPodcastSearch(q) {
 }
 async function openPodcastPrograms(i) {
   var radio = podcastResults[i]; if (!radio) return;
+  resetSearchResultRenderLimit();
   var requestSeq = ++searchRequestSeq;
   podcastCurrentRadio = radio;
   $results.innerHTML = '<div class="search-empty">Loading episodes...</div>';
@@ -19041,7 +19082,9 @@ async function openPodcastPrograms(i) {
     if (requestSeq === searchRequestSeq) $results.innerHTML = '<div class="search-empty">Episodes load failed</div>';
   }
 }
-function renderPodcastPrograms() {
+function renderPodcastPrograms(opts) {
+  opts = opts || {};
+  if (!opts.preserveLimit) resetSearchResultRenderLimit();
   var radio = podcastCurrentRadio || {};
   if (!podcastPrograms.length) {
     $results.innerHTML = '<div class="podcast-result-head"><button class="podcast-back-btn" onclick="event.stopPropagation();renderPodcastRadios(podcastResults)">‹</button><div class="search-result-info"><div class="search-result-title">' + escHtml(radio.name || 'Podcast') + '</div><div class="search-result-meta">No playable episodes</div></div></div>';
@@ -19053,8 +19096,11 @@ function renderPodcastPrograms() {
       '<button class="podcast-back-btn" onclick="event.stopPropagation();renderPodcastRadios(podcastResults)">‹</button>' +
       searchThumbHtml(radio.cover) +
       '<div class="search-result-info"><div class="search-result-title">' + escHtml(radio.name || 'Podcast') + '<span class="tag-podcast">Podcast</span></div><div class="search-result-meta">' + escHtml(radio.djName || (podcastPrograms.length + ' episodes')) + '</div></div>' +
-    '</div>' +
-    podcastPrograms.map(function(p, i){
+    '</div>';
+  var rendered = listRenderItems(podcastPrograms, searchResultRenderLimit);
+  $results.innerHTML += rendered.items.map(function(row){
+      var p = row.item;
+      var i = row.index;
       return '<div class="search-result">' +
         '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0" onclick="playPodcastProgram(' + i + ')">' +
           searchThumbHtml(p.cover) +
@@ -19065,7 +19111,7 @@ function renderPodcastPrograms() {
         '</div>' +
         '<button class="add-btn" title="下一首播放" onclick="event.stopPropagation();queuePodcastProgram(' + i + ')">+</button>' +
       '</div>';
-    }).join('');
+    }).join('') + searchLoadMoreHtml(rendered.window.count, rendered.window.total);
   $results.classList.add('show');
   if (window.gsap) animateListItems($results, '.search-result', { x: 0, y: 6, stagger: 0.010, duration: 0.18, limit: 18 });
 }
@@ -19121,6 +19167,13 @@ $input.addEventListener('keydown', function(e){
   }
 });
 $results.addEventListener('click', function(e){
+  var searchLoadMore = e.target && e.target.closest ? e.target.closest('[data-search-load-more]') : null;
+  if (searchLoadMore) {
+    e.preventDefault();
+    e.stopPropagation();
+    growSearchResultRenderLimit();
+    return;
+  }
   var clearBtn = e.target && e.target.closest ? e.target.closest('[data-clear-history]') : null;
   if (clearBtn) {
     e.preventDefault();
@@ -19303,8 +19356,13 @@ async function fetchMusicSearchResults(q, mode) {
   return mergeSongSearchResults(neteaseSongs, qqSongs, 18, q);
 }
 function renderSongSearchResults(songs) {
+  var opts = arguments.length > 1 && arguments[1] ? arguments[1] : {};
+  if (!opts.preserveLimit) resetSearchResultRenderLimit();
   playlist = songs || [];
-  $results.innerHTML = playlist.map(function(s, i){
+  var rendered = listRenderItems(playlist, searchResultRenderLimit);
+  $results.innerHTML = rendered.items.map(function(row){
+    var s = row.item;
+    var i = row.index;
     var vipTag = (s.fee === 1) ? '<span class="tag-vip">VIP</span>' : '';
     var sourceTag = songSourceTagHtml(s);
     var sourceClass = songProviderKey(s) + '-source';
@@ -19324,7 +19382,7 @@ function renderSongSearchResults(songs) {
       '<button class="song-action-btn" title="收藏到歌单" onclick="event.stopPropagation();collectSearchResult(' + i + ')">' + playlistPlusIconSvg() + '</button>' +
       '<button class="add-btn" title="下一首播放" onclick="event.stopPropagation();queueSearchResult(' + i + ')">+</button>' +
     '</div>';
-  }).join('');
+  }).join('') + searchLoadMoreHtml(rendered.window.count, rendered.window.total);
   $results.classList.add('show');
   syncLikeStatusForSongs(playlist);
   if (window.gsap) animateListItems($results, '.search-result', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
@@ -21503,6 +21561,8 @@ function renderMyPodcastCollections(opts) {
   opts = opts || {};
   var $pod = document.getElementById('podcast-list');
   if (!$pod) return;
+  if (opts.reset) podcastPanelRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
+  podcastPanelChildState = { key: '', title: '', items: [] };
   if (!loginStatus.loggedIn) {
     $pod.innerHTML = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.28);font-size:11.5px">登录后显示我的播客</div>';
     return;
@@ -21512,7 +21572,10 @@ function renderMyPodcastCollections(opts) {
     $pod.innerHTML = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.28);font-size:11.5px">暂无播客数据</div>';
     return;
   }
-  $pod.innerHTML = items.map(function(pc){
+  podcastPanelRenderLimit = Math.max(PODCAST_PANEL_RENDER_LIMIT, Math.min(items.length, podcastPanelRenderLimit || PODCAST_PANEL_RENDER_LIMIT));
+  var rendered = listRenderItems(items, podcastPanelRenderLimit);
+  $pod.innerHTML = rendered.items.map(function(row){
+    var pc = row.item;
     var thumb = pc.cover ? coverUrlWithSize(pc.cover, 88) : '';
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:44px;height:44px;border-radius:8px;background:rgba(0,245,212,.07);flex-shrink:0"></div>';
     return '<div class="pl-card podcast-card" data-podcast-key="' + escHtml(pc.key || '') + '" data-podcast-title="' + escHtml(pc.title || '') + '">' +
@@ -21520,6 +21583,9 @@ function renderMyPodcastCollections(opts) {
       '<div style="flex:1;min-width:0"><div class="pl-name">' + escHtml(pc.title || '') + '</div><div class="pl-sub">' + (pc.count || 0) + ' 项 · ' + escHtml(pc.sub || '') + '</div></div>' +
     '</div>';
   }).join('');
+  if (items.length > rendered.window.count) {
+    $pod.insertAdjacentHTML('beforeend', '<button type="button" class="fx-mini-btn ghost podcast-load-more" data-podcast-load-more="collections">加载更多 ' + rendered.window.count + '/' + items.length + '</button>');
+  }
   if (opts.animate) animateVisiblePanelList($pod, '.pl-card', document.getElementById('playlist-panel'));
 }
 document.getElementById('pl-list').addEventListener('click', function(e){
@@ -21574,6 +21640,20 @@ document.getElementById('pl-list').addEventListener('click', function(e){
 var podcastListEl = document.getElementById('podcast-list');
 if (podcastListEl) {
   podcastListEl.addEventListener('click', function(e){
+    var podcastLoadMore = e.target && e.target.closest ? e.target.closest('[data-podcast-load-more]') : null;
+    if (podcastLoadMore) {
+      e.preventDefault();
+      e.stopPropagation();
+      var kind = podcastLoadMore.getAttribute('data-podcast-load-more') || 'collections';
+      if (kind === 'children') {
+        podcastPanelChildRenderLimit += PODCAST_PANEL_BATCH_SIZE;
+        renderMyPodcastRadioItems(podcastPanelChildState.key, podcastPanelChildState.title, podcastPanelChildState.items, { preserveLimit: true });
+      } else {
+        podcastPanelRenderLimit += PODCAST_PANEL_BATCH_SIZE;
+        renderMyPodcastCollections({ animate: true });
+      }
+      return;
+    }
     if (e.target && e.target.closest && e.target.closest('[data-podcast-back]')) {
       renderMyPodcastCollections({ animate: true });
       return;
@@ -21588,16 +21668,23 @@ if (podcastListEl) {
     openMyPodcastCollection(card.getAttribute('data-podcast-key'), card.getAttribute('data-podcast-title') || '');
   });
 }
-function renderMyPodcastRadioItems(key, title, items) {
+function renderMyPodcastRadioItems(key, title, items, opts) {
+  opts = opts || {};
   var $pod = document.getElementById('podcast-list');
   if (!$pod) return;
+  items = items || [];
+  if (!opts.preserveLimit) podcastPanelChildRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
+  podcastPanelChildState = { key: key || '', title: title || '', items: items };
   if (!items.length) {
     $pod.innerHTML = '<div class="podcast-inline-head"><div class="pl-section-label">' + escHtml(title || '我的播客') + '</div><button class="fx-mini-btn ghost" data-podcast-back="1" style="height:24px;padding:0 9px;font-size:10.5px">返回</button></div>' +
       '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.28);font-size:11.5px">暂无内容</div>';
     return;
   }
+  podcastPanelChildRenderLimit = Math.max(PODCAST_PANEL_RENDER_LIMIT, Math.min(items.length, podcastPanelChildRenderLimit || PODCAST_PANEL_RENDER_LIMIT));
+  var rendered = listRenderItems(items, podcastPanelChildRenderLimit);
   $pod.innerHTML = '<div class="podcast-inline-head"><div class="pl-section-label">' + escHtml(title || '我的播客') + '</div><button class="fx-mini-btn ghost" data-podcast-back="1" style="height:24px;padding:0 9px;font-size:10.5px">返回</button></div>' +
-    items.map(function(r){
+    rendered.items.map(function(row){
+      var r = row.item;
       var thumb = r.cover ? coverUrlWithSize(r.cover, 88) : '';
       var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:44px;height:44px;border-radius:8px;background:rgba(0,245,212,.07);flex-shrink:0"></div>';
       return '<div class="pl-card podcast-card podcast-child" data-podcast-radio-id="' + escHtml(String(r.id || r.radioId || '')) + '" data-podcast-title="' + escHtml(r.name || '') + '">' +
@@ -21605,6 +21692,9 @@ function renderMyPodcastRadioItems(key, title, items) {
         '<div style="flex:1;min-width:0"><div class="pl-name">' + escHtml(r.name || '') + '</div><div class="pl-sub">' + escHtml((r.djName || r.artist || 'Podcast') + (r.programCount ? (' · ' + r.programCount + ' 集') : '')) + '</div></div>' +
       '</div>';
     }).join('');
+  if (items.length > rendered.window.count) {
+    $pod.insertAdjacentHTML('beforeend', '<button type="button" class="fx-mini-btn ghost podcast-load-more" data-podcast-load-more="children">加载更多 ' + rendered.window.count + '/' + items.length + '</button>');
+  }
   animateVisiblePanelList($pod, '.pl-card', document.getElementById('playlist-panel'));
 }
 async function openMyPodcastCollection(key, title) {

@@ -133,8 +133,44 @@
     };
   }
 
+  function listRenderWindow(total, options) {
+    options = options || {};
+    total = normalizeKeep(total, 0);
+    if (!total) {
+      return { start: 0, end: -1, count: 0, before: 0, after: 0, total: 0 };
+    }
+    var maxItems = normalizeKeep(options.maxItems, total);
+    if (!maxItems || maxItems > total) maxItems = total;
+    var maxStart = Math.max(0, total - maxItems);
+    var requestedStart = Number(options.requestedStart);
+    var start = isFinite(requestedStart) ? Math.floor(requestedStart) : 0;
+    start = Math.max(0, Math.min(maxStart, start));
+    var end = Math.min(total - 1, start + maxItems - 1);
+    var count = end >= start ? end - start + 1 : 0;
+    return {
+      start: start,
+      end: end,
+      count: count,
+      before: start,
+      after: Math.max(0, total - end - 1),
+      total: total
+    };
+  }
+
+  function listRenderSlice(items, options) {
+    items = Array.isArray(items) ? items : [];
+    var win = listRenderWindow(items.length, options || {});
+    var out = [];
+    for (var i = win.start; i <= win.end; i++) {
+      out.push({ item: items[i], index: i });
+    }
+    return { window: win, items: out };
+  }
+
   return {
     cacheCount: cacheCount,
+    listRenderSlice: listRenderSlice,
+    listRenderWindow: listRenderWindow,
     queueRenderWindow: queueRenderWindow,
     trimMapCache: trimMapCache,
     trimObjectCache: trimObjectCache

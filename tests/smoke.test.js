@@ -443,6 +443,22 @@ test('large queue panels render bounded windows instead of mapping the full play
   assert.doesNotMatch(html, /\$ql\.innerHTML = playQueue\.map\(function\(song, i\)/);
 });
 
+test('search and podcast result panels render bounded batches with load more controls', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /var SEARCH_RESULT_RENDER_LIMIT = 18;/);
+  assert.match(html, /var SEARCH_RESULT_BATCH_SIZE = 18;/);
+  assert.match(html, /var PODCAST_PANEL_RENDER_LIMIT = 24;/);
+  assert.match(html, /function listRenderItems\(items, limit\)/);
+  assert.match(html, /data-search-load-more="1"/);
+  assert.match(html, /data-podcast-load-more="collections"/);
+  assert.match(html, /data-podcast-load-more="children"/);
+  assert.doesNotMatch(html, /\$results\.innerHTML = podcastResults\.map\(function\(p, i\)/);
+  assert.doesNotMatch(html, /\$results\.innerHTML = playlist\.map\(function\(s, i\)/);
+  assert.doesNotMatch(html, /podcastPrograms\.map\(function\(p, i\)/);
+  assert.doesNotMatch(html, /\$pod\.innerHTML = items\.map\(function\(pc\)/);
+});
+
 test('media resource caches are visible in runtime snapshots and trimmed in background', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 

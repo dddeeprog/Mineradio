@@ -3,6 +3,8 @@ const test = require('node:test');
 
 const {
   cacheCount,
+  listRenderSlice,
+  listRenderWindow,
   queueRenderWindow,
   trimMapCache,
   trimObjectCache,
@@ -98,5 +100,31 @@ test('queueRenderWindow centers current item and honors manual paging', () => {
     before: 720,
     after: 160,
     total: 1000,
+  });
+});
+
+test('listRenderSlice returns a bounded slice with original indices', () => {
+  assert.deepEqual(listRenderWindow(0, { maxItems: 10 }), {
+    start: 0,
+    end: -1,
+    count: 0,
+    before: 0,
+    after: 0,
+    total: 0,
+  });
+
+  assert.deepEqual(listRenderSlice(['a', 'b', 'c', 'd', 'e'], { maxItems: 2, requestedStart: 2 }), {
+    window: {
+      start: 2,
+      end: 3,
+      count: 2,
+      before: 2,
+      after: 1,
+      total: 5,
+    },
+    items: [
+      { item: 'c', index: 2 },
+      { item: 'd', index: 3 },
+    ],
   });
 });
