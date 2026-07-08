@@ -36,6 +36,7 @@
 <script src="local-media-assets.js"></script>
 <script src="local-library.js"></script>
 <script src="local-beat-cache.js"></script>
+<script src="source-navigation.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -133,6 +134,12 @@ try {
       这里支持上传歌曲，也可以给当前曲目换自定义封面。
     </div>
   </div>
+</div>
+
+<div id="source-nav" aria-label="来源导航">
+  <button id="source-nav-online" class="source-nav-btn active" type="button" onclick="openSourceNavigation('online')" title="打开在线搜索">在线</button>
+  <button id="source-nav-playlists" class="source-nav-btn" type="button" onclick="openSourceNavigation('playlists')" title="打开在线歌单库">歌单</button>
+  <button id="source-nav-local" class="source-nav-btn" type="button" onclick="openSourceNavigation('local')" title="导入本地音乐库">本地<span id="source-nav-local-badge" class="source-nav-badge" aria-hidden="true"></span></button>
 </div>
 
 <!-- 空场 Home -->
@@ -1108,6 +1115,7 @@ var customLyricPrefs = readCustomLyricPrefs();
 var localBeatMapCache = readLocalBeatMapCache();
 var localBeatMapPrefs = readLocalBeatPrefs();
 var localBeatCacheTools = window.MineradioLocalBeatCache || {};
+var sourceNavTools = window.MineradioSourceNavigation || {};
 var playbackQuality = readPlaybackQualityPreference();
 var qqPlaybackQualityCeiling = '';
 var coverCropState = null, coverCropBound = false;
@@ -16497,6 +16505,73 @@ function runHomeSearch(query, mode) {
   else if (searchMode === 'podcast') loadPodcastHot();
   else renderSearchHistory();
 }
+function openOnlineEntry(mode, query) {
+  runHomeSearch(query || '', mode || 'song');
+  syncSearchAreaResultState();
+  syncSourceNavigationState();
+}
+function sourceNavigationLocalCount() {
+  var snapshot = typeof readLocalLibrarySnapshot === 'function' ? readLocalLibrarySnapshot() : null;
+  return Math.max(0, Number(snapshot && snapshot.fileCount) || 0);
+}
+function sourceNavigationCurrentSource() {
+  var song = currentLocalSong || (currentIdx >= 0 && playQueue ? playQueue[currentIdx] : null);
+  if (song && (song.type === 'local' || song.source === 'local-library' || song.localKey || song.localUrl || song.localFilePath)) return 'local';
+  return 'online';
+}
+function sourceNavigationSnapshot() {
+  var searchArea = document.getElementById('search-area');
+  var playlistPanel = document.getElementById('playlist-panel');
+  return {
+    searchOpen: !!(searchArea && searchArea.classList.contains('peek')),
+    playlistOpen: !!(playlistPanel && (playlistPanel.classList.contains('peek') || playlistPanel.classList.contains('show'))),
+    currentSource: sourceNavigationCurrentSource(),
+    localCount: sourceNavigationLocalCount()
+  };
+}
+function syncSourceNavigationState() {
+  var nav = document.getElementById('source-nav');
+  if (!nav) return;
+  var snapshot = sourceNavigationSnapshot();
+  var items = sourceNavTools && typeof sourceNavTools.sourceNavItems === 'function'
+    ? sourceNavTools.sourceNavItems(snapshot)
+    : [
+      { key:'online', label:'在线', title:'打开在线搜索' },
+      { key:'playlists', label:'歌单', title:'打开在线歌单库' },
+      { key:'local', label:'本地', title:'导入本地音乐库', badge: snapshot.localCount ? String(snapshot.localCount) : '' }
+    ];
+  var active = sourceNavTools && typeof sourceNavTools.activeSourceNavTarget === 'function'
+    ? sourceNavTools.activeSourceNavTarget(snapshot)
+    : (snapshot.searchOpen ? 'online' : (snapshot.playlistOpen ? 'playlists' : snapshot.currentSource));
+  items.forEach(function(item){
+    var btn = document.getElementById('source-nav-' + item.key);
+    if (!btn) return;
+    btn.classList.toggle('active', item.key === active);
+    btn.title = item.title || item.label || '';
+    btn.setAttribute('aria-label', item.title || item.label || '');
+    var badge = item.key === 'local' ? document.getElementById('source-nav-local-badge') : null;
+    if (badge) {
+      badge.textContent = item.badge || '';
+      btn.classList.toggle('has-badge', !!item.badge);
+    }
+  });
+}
+function openSourceNavigation(target) {
+  target = sourceNavTools && typeof sourceNavTools.normalizeSourceNavTarget === 'function'
+    ? sourceNavTools.normalizeSourceNavTarget(target)
+    : (target === 'playlists' || target === 'local' ? target : 'online');
+  if (target === 'playlists') {
+    homeSuppressed = false;
+    setHomeControlsLocked(false);
+    openPlaylistPanelTab('playlists', true);
+    refreshUserPlaylists(true);
+  } else if (target === 'local') {
+    openHomeLocalImport();
+  } else {
+    openOnlineEntry('song');
+  }
+  setTimeout(syncSourceNavigationState, 0);
+}
 function skipLoginAndFocusSearch() {
   closeLoginModal();
   setTimeout(function(){ runHomeSearch(''); }, 180);
@@ -16506,6 +16581,10 @@ function openHomeLocalImport() {
   homeSuppressed = false;
   setHomeControlsLocked(false);
   updateEmptyHomeVisibility();
+  if (canUseLocalLibraryImport()) {
+    openLocalLibraryImport();
+    return;
+  }
   var input = document.getElementById('file-input');
   if (input) input.click();
 }
@@ -19832,6 +19911,7 @@ async function playQueueAt(idx, opts) {
   safePlaybackStep('dj-mode', function(){ setDjModeActive(podcastDjMode, song); });
   safePlaybackStep('visual-switch', switchPlaybackVisualToEmily);
   currentLocalSong = null;
+  if (typeof syncSourceNavigationState === 'function') syncSourceNavigationState();
   safePlaybackStep('cover-button', updateCustomCoverButton);
   safePlaybackStep('like-buttons', function(){ updateLikeButtons(song); });
   safePlaybackStep('like-status', function(){ syncLikeStatusForSong(song); });
@@ -19886,6 +19966,7 @@ async function playQueueAt(idx, opts) {
       song.localUrl = localUrl;
       song.url = song.url || localUrl;
       currentLocalSong = song;
+      if (typeof syncSourceNavigationState === 'function') syncSourceNavigationState();
       safePlaybackStep('local-cover-button', updateCustomCoverButton);
       var localImport = await collectLocalImportAssets(localMedia, localRecord, localSongAssetFiles(song, localRecord));
       if (token !== trackSwitchToken) return;
@@ -19900,6 +19981,7 @@ async function playQueueAt(idx, opts) {
         playQueue[idx] = hydrateCustomCover(song);
         song = playQueue[idx];
         currentLocalSong = song;
+        if (typeof syncSourceNavigationState === 'function') syncSourceNavigationState();
         safePlaybackStep('local-track-ui', function(){
           document.getElementById('thumb-title').textContent = song.name;
           document.getElementById('thumb-artist').textContent = song.artist;
@@ -21590,6 +21672,7 @@ function updateLocalLibraryImportEntry() {
     : '本地库仅桌面端可用';
   btn.title = title;
   btn.setAttribute('aria-label', title);
+  if (typeof syncSourceNavigationState === 'function') syncSourceNavigationState();
 }
 function normalizeLocalAssetRecord(asset) {
   if (!asset || typeof asset !== 'string') return asset || null;
@@ -21837,6 +21920,7 @@ async function handleFiles(files) {
       localFilePath: audioFile.fullPath || audioFile.filePath || '',
       duration: 0
     });
+    if (typeof syncSourceNavigationState === 'function') syncSourceNavigationState();
     updateCustomCoverButton();
     document.getElementById('hint').classList.add('hidden');
     document.getElementById('thumb-title').textContent = localTitle;
@@ -26345,6 +26429,9 @@ function setPeek(el, on, key) {
       delete el.dataset.preserveTabOnOpen;
     }
     el.classList.add('peek');
+    if ((key === 'search' || key === 'pl') && typeof syncSourceNavigationState === 'function') {
+      setTimeout(syncSourceNavigationState, 0);
+    }
     requestAnimationFrame(invalidatePointerRectCache);
     if (key === 'pl' && !wasPeek) {
       scheduleUiWarmTask(function(){
@@ -26361,6 +26448,9 @@ function setPeek(el, on, key) {
     peekTimers[key] = setTimeout(function(){
       el.classList.remove('peek');
       invalidatePointerRectCache();
+      if ((key === 'search' || key === 'pl') && typeof syncSourceNavigationState === 'function') {
+        syncSourceNavigationState();
+      }
       if (key === 'fx') {
         var fabOff = document.getElementById('fx-fab');
         if (fabOff && !el.classList.contains('show')) fabOff.classList.remove('active');
