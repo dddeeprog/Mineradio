@@ -1,12 +1,19 @@
 (function(root) {
   'use strict';
 
+  var HOTKEY_SETTINGS_STORE_KEY = 'mineradio-hotkey-settings-v1';
+  var VISUAL_GUIDE_SEEN_STORE_KEY = 'mineradio-visual-guide-seen-v2';
+  var LOCAL_BEATMAP_STORE_KEY = 'mineradio-local-beatmaps-v1';
+  var LOCAL_BEAT_PREF_STORE_KEY = 'mineradio-local-beatmap-prefs-v1';
+  var LOCAL_BEAT_COMBOS = ['', 'downbeat', 'push', 'drop', 'rebound', 'accent'];
+
+  root.HOTKEY_SETTINGS_STORE_KEY = HOTKEY_SETTINGS_STORE_KEY;
+  root.VISUAL_GUIDE_SEEN_STORE_KEY = VISUAL_GUIDE_SEEN_STORE_KEY;
+  root.LOCAL_BEATMAP_STORE_KEY = LOCAL_BEATMAP_STORE_KEY;
+  root.LOCAL_BEAT_PREF_STORE_KEY = LOCAL_BEAT_PREF_STORE_KEY;
+  root.LOCAL_BEAT_COMBOS = LOCAL_BEAT_COMBOS;
+
   function createHotkeysUi() {
-var HOTKEY_SETTINGS_STORE_KEY = 'mineradio-hotkey-settings-v1';
-var VISUAL_GUIDE_SEEN_STORE_KEY = 'mineradio-visual-guide-seen-v2';
-var LOCAL_BEATMAP_STORE_KEY = 'mineradio-local-beatmaps-v1';
-var LOCAL_BEAT_PREF_STORE_KEY = 'mineradio-local-beatmap-prefs-v1';
-var LOCAL_BEAT_COMBOS = ['', 'downbeat', 'push', 'drop', 'rebound', 'accent'];
 var HOTKEY_ACTIONS = [
   { key:'togglePlay', label:'播放 / 暂停', category:'播放', local:'Space', global:'Ctrl+Alt+Space' },
   { key:'prevTrack', label:'上一首', category:'播放', local:'ArrowLeft', global:'Ctrl+Alt+ArrowLeft' },

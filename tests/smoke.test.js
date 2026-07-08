@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
 
@@ -394,6 +395,21 @@ test('update preview and hotkey controllers are externalized', () => {
   assert.doesNotMatch(html, /function startRealUpdateDownload\(/);
   assert.doesNotMatch(html, /function ensureHotkeyModal\(/);
   assert.doesNotMatch(html, /function renderHotkeySettings\(/);
+});
+
+test('hotkey helper exposes startup storage keys used by the entry script', () => {
+  const hotkeysUi = fs.readFileSync(path.join(repoRoot, 'public', 'hotkeys-ui.js'), 'utf8');
+  const context = { console };
+  context.window = context;
+
+  vm.createContext(context);
+  vm.runInContext(hotkeysUi, context);
+
+  assert.equal(context.HOTKEY_SETTINGS_STORE_KEY, 'mineradio-hotkey-settings-v1');
+  assert.equal(context.VISUAL_GUIDE_SEEN_STORE_KEY, 'mineradio-visual-guide-seen-v2');
+  assert.equal(context.LOCAL_BEATMAP_STORE_KEY, 'mineradio-local-beatmaps-v1');
+  assert.equal(context.LOCAL_BEAT_PREF_STORE_KEY, 'mineradio-local-beatmap-prefs-v1');
+  assert.deepEqual(Array.from(context.LOCAL_BEAT_COMBOS), ['', 'downbeat', 'push', 'drop', 'rebound', 'accent']);
 });
 
 test('comment barrage is rendered as Three.js floating text instead of DOM marquee', () => {
