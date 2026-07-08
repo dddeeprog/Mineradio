@@ -488,6 +488,31 @@ test('visual release budget suspends Folia and drops low priority 3D resources',
   assert.match(html, /resumeVisualReleaseBudget\(reason \|\| 'restore'\)/);
 });
 
+test('performance diagnostics modal exposes renderer heap cache and visual budget snapshot', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
+
+  assert.match(html, /id="performance-diagnostics-btn"/);
+  assert.match(html, /onclick="openPerformanceDiagnosticsModal\(\)"/);
+  assert.match(html, /id="performance-diagnostics-modal"/);
+  assert.match(html, /id="performance-diagnostics-summary"/);
+  assert.match(html, /id="performance-diagnostics-grid"/);
+  assert.match(html, /id="performance-diagnostics-raw"/);
+  assert.match(html, /function collectPerformanceDiagnosticRows\(snapshot\)/);
+  assert.match(html, /function renderPerformanceDiagnosticsSnapshot\(snapshot\)/);
+  assert.match(html, /function openPerformanceDiagnosticsModal\(\)/);
+  assert.match(html, /function copyPerformanceDiagnosticsSnapshot\(\)/);
+  assert.match(html, /window\.__mineradioPerfSnapshot\(\)/);
+  assert.match(html, /snapshot\.renderer/);
+  assert.match(html, /snapshot\.runtime && snapshot\.runtime\.heapMB/);
+  assert.match(html, /snapshot\.runtime && snapshot\.runtime\.cacheCounts/);
+  assert.match(html, /snapshot\.visualBudget/);
+  assert.match(html, /\['performance-diagnostics-modal', closePerformanceDiagnosticsModal\]/);
+  assert.match(css, /\.performance-diagnostics-modal/);
+  assert.match(css, /\.performance-diagnostics-grid/);
+  assert.match(css, /\.performance-diagnostics-raw/);
+});
+
 test('local library import avoids retaining duplicate full scan and song arrays', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 

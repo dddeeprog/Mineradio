@@ -590,6 +590,10 @@ try {
       <div class="fx-toggle-grid">
         <div class="fx-toggle" id="t-liveBackgroundKeep" onclick="toggleFx('liveBackgroundKeep')" title="开启后后台或最小化时保持视觉渲染，不进入低占用暂停"><span>直播后台保持</span><span class="dot"></span></div>
       </div>
+      <div class="performance-diagnostics-entry">
+        <button id="performance-diagnostics-btn" class="fx-mini-btn" type="button" onclick="openPerformanceDiagnosticsModal()">内存诊断</button>
+        <span id="performance-diagnostics-chip">Runtime Snapshot</span>
+      </div>
       <div class="fx-slider"><label>粒子尺寸</label><input id="fx-point" type="range" min="0.5" max="2.2" step="0.01"><output></output></div>
       <div class="fx-slider"><label>流速</label><input id="fx-speed" type="range" min="0.2" max="2.5" step="0.01"><output></output></div>
       <div class="fx-slider"><label>扭曲</label><input id="fx-twist" type="range" min="0" max="0.6" step="0.01"><output></output></div>
@@ -1017,6 +1021,21 @@ try {
         <button class="update-secondary-btn" type="button" onclick="closeUpdatePanel()">取消</button>
       </div>
       <div id="update-footnote" class="update-footnote">预览版只演示更新手感，不会真的下载安装。</div>
+    </div>
+  </div>
+</div>
+
+<div id="performance-diagnostics-modal" class="modal-mask">
+  <div class="modal performance-diagnostics-modal">
+    <h2>性能 / 内存诊断</h2>
+    <div id="performance-diagnostics-summary" class="performance-diagnostics-summary">等待快照</div>
+    <div id="performance-diagnostics-grid" class="performance-diagnostics-grid"></div>
+    <pre id="performance-diagnostics-raw" class="performance-diagnostics-raw"></pre>
+    <div id="performance-diagnostics-copy-state" class="performance-diagnostics-copy-state"></div>
+    <div class="btn-row performance-diagnostics-actions">
+      <button class="modal-btn" type="button" onclick="refreshPerformanceDiagnosticsSnapshot()">刷新</button>
+      <button class="modal-btn" type="button" onclick="copyPerformanceDiagnosticsSnapshot()">复制快照</button>
+      <button class="modal-btn primary" type="button" onclick="closePerformanceDiagnosticsModal()">关闭</button>
     </div>
   </div>
 </div>
@@ -2233,6 +2252,121 @@ function collectRuntimePerfSnapshot(now) {
   };
 }
 window.__mineradioPerfSnapshot = collectRuntimePerfSnapshot;
+var performanceDiagnosticsSnapshot = null;
+function performanceDiagnosticMetric(value, suffix) {
+  if (value == null || value === '') return '0' + (suffix || '');
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'number') return (isFinite(value) ? String(value) : '0') + (suffix || '');
+  return String(value) + (suffix || '');
+}
+function capturePerformanceDiagnosticsSnapshot() {
+  var snapshot = null;
+  try {
+    if (typeof window.__mineradioPerfSnapshot === 'function') snapshot = window.__mineradioPerfSnapshot();
+  } catch (e) {
+    snapshot = null;
+  }
+  snapshot = snapshot || collectRuntimePerfSnapshot();
+  if (snapshot && snapshot.runtime && performance && performance.memory) {
+    snapshot.runtime.heapMB = Math.round((performance.memory.usedJSHeapSize || 0) / 1048576);
+  }
+  return snapshot;
+}
+function collectPerformanceDiagnosticRows(snapshot) {
+  snapshot = snapshot || {};
+  var runtime = snapshot.runtime || {};
+  var caches = snapshot.runtime && snapshot.runtime.cacheCounts || {};
+  var rendererInfo = snapshot.renderer || {};
+  var viewport = snapshot.viewport || {};
+  var visualBudget = snapshot.visualBudget || {};
+  return [
+    ['JS Heap', performanceDiagnosticMetric(snapshot.runtime && snapshot.runtime.heapMB, ' MB')],
+    ['Renderer 纹理', performanceDiagnosticMetric(snapshot.renderer && snapshot.renderer.textures)],
+    ['Renderer 几何', performanceDiagnosticMetric(rendererInfo.geometries)],
+    ['Draw Calls', performanceDiagnosticMetric(rendererInfo.calls)],
+    ['渲染像素', viewport.renderPixels ? Math.round(viewport.renderPixels / 10000) + ' 万' : '0'],
+    ['目标 FPS', performanceDiagnosticMetric(viewport.targetFps)],
+    ['播放队列', performanceDiagnosticMetric(caches.queueSongs)],
+    ['本地库歌曲', performanceDiagnosticMetric(caches.localLibrarySongs)],
+    ['歌词贴图', performanceDiagnosticMetric(caches.lyricTextures)],
+    ['Folia 主题', performanceDiagnosticMetric(caches.foliaThemes)],
+    ['弹幕缓存', performanceDiagnosticMetric(caches.commentBarrage)],
+    ['本地节奏', performanceDiagnosticMetric(caches.localBeatMaps)],
+    ['视觉预算', performanceDiagnosticMetric(visualBudget.mode || 'active')],
+    ['Folia 暂停', performanceDiagnosticMetric(visualBudget.foliaSuspended)],
+    ['3D 弹幕释放', performanceDiagnosticMetric(visualBudget.commentBarrageReleased)],
+    ['释放次数', performanceDiagnosticMetric(visualBudget.releaseCount)]
+  ];
+}
+function renderPerformanceDiagnosticsSnapshot(snapshot) {
+  snapshot = snapshot || capturePerformanceDiagnosticsSnapshot();
+  performanceDiagnosticsSnapshot = snapshot;
+  var summary = document.getElementById('performance-diagnostics-summary');
+  var grid = document.getElementById('performance-diagnostics-grid');
+  var raw = document.getElementById('performance-diagnostics-raw');
+  var copyState = document.getElementById('performance-diagnostics-copy-state');
+  var runtime = snapshot.runtime || {};
+  var budget = snapshot.visualBudget || {};
+  if (summary) {
+    summary.textContent = 'Heap ' + performanceDiagnosticMetric(runtime.heapMB, ' MB') + ' · ' + (snapshot.deepSleep ? '深后台' : '前台') + ' · ' + (budget.mode || 'active');
+  }
+  if (grid) {
+    grid.textContent = '';
+    collectPerformanceDiagnosticRows(snapshot).forEach(function(row){
+      var cell = document.createElement('div');
+      cell.className = 'performance-diagnostics-cell';
+      var label = document.createElement('span');
+      label.textContent = row[0];
+      var value = document.createElement('b');
+      value.textContent = row[1];
+      cell.appendChild(label);
+      cell.appendChild(value);
+      grid.appendChild(cell);
+    });
+  }
+  if (raw) raw.textContent = JSON.stringify(snapshot, null, 2);
+  if (copyState) copyState.textContent = '';
+  return snapshot;
+}
+function refreshPerformanceDiagnosticsSnapshot() {
+  return renderPerformanceDiagnosticsSnapshot(capturePerformanceDiagnosticsSnapshot());
+}
+function openPerformanceDiagnosticsModal() {
+  refreshPerformanceDiagnosticsSnapshot();
+  openGsapModal(document.getElementById('performance-diagnostics-modal'));
+}
+function closePerformanceDiagnosticsModal() {
+  closeGsapModal(document.getElementById('performance-diagnostics-modal'));
+}
+function fallbackCopyPerformanceDiagnostics(text) {
+  var input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', 'readonly');
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+  input.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(input);
+}
+function copyPerformanceDiagnosticsSnapshot() {
+  var snapshot = performanceDiagnosticsSnapshot || refreshPerformanceDiagnosticsSnapshot();
+  var text = JSON.stringify(snapshot, null, 2);
+  var copyState = document.getElementById('performance-diagnostics-copy-state');
+  function done(ok) {
+    if (copyState) copyState.textContent = ok ? '已复制快照' : '复制失败';
+    if (typeof showToast === 'function') showToast(ok ? '性能快照已复制' : '性能快照复制失败');
+  }
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(text).then(function(){ done(true); }).catch(function(){
+      fallbackCopyPerformanceDiagnostics(text);
+      done(true);
+    });
+    return;
+  }
+  fallbackCopyPerformanceDiagnostics(text);
+  done(true);
+}
 function trimRuntimeCaches(reason, aggressive) {
   var protectedCovers = collectProtectedCoverUrls();
   var protectedBeats = collectProtectedBeatMapKeys();
@@ -24879,6 +25013,7 @@ function bindModalBackdropClose() {
     ['user-modal', closeUserModal],
     ['custom-lyric-modal', closeCustomLyricModal],
     ['folia-lyric-match-modal', closeFoliaLyricMatchModal],
+    ['performance-diagnostics-modal', closePerformanceDiagnosticsModal],
     ['update-modal', closeUpdatePanel]
   ].forEach(function(pair){
     var mask = document.getElementById(pair[0]);
@@ -26885,6 +27020,12 @@ document.addEventListener('keydown', function(e){
     if (trackDetailModal && trackDetailModal.classList.contains('show')) {
       e.preventDefault();
       closeTrackDetailModal();
+      return;
+    }
+    var performanceDiagnosticsModal = document.getElementById('performance-diagnostics-modal');
+    if (performanceDiagnosticsModal && performanceDiagnosticsModal.classList.contains('show')) {
+      e.preventDefault();
+      closePerformanceDiagnosticsModal();
       return;
     }
     if (miniQueueOpen) { closeMiniQueue(); return; }

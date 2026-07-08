@@ -998,6 +998,20 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .modal-btn:hover{background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.3)}
 .modal-btn.primary{background:rgba(244,210,138,0.14);border-color:rgba(244,210,138,0.50);color:var(--champagne)}
 .modal-btn.primary:hover{background:rgba(244,210,138,0.24)}
+.performance-diagnostics-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0 10px}
+.performance-diagnostics-entry .fx-mini-btn{min-width:82px}
+#performance-diagnostics-chip{min-width:0;font-size:10px;font-weight:760;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.38);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.performance-diagnostics-modal{width:min(760px,92vw);max-width:min(760px,92vw);padding:26px;text-align:left}
+.performance-diagnostics-modal h2{text-align:left;margin:0 0 14px}
+.performance-diagnostics-summary{min-height:34px;display:flex;align-items:center;padding:9px 11px;margin-bottom:12px;border-radius:8px;border:1px solid rgba(244,210,138,.18);background:rgba(244,210,138,.06);color:rgba(255,245,218,.86);font-size:12px;font-weight:760;letter-spacing:.02em}
+.performance-diagnostics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.performance-diagnostics-cell{min-width:0;min-height:54px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.04);display:flex;flex-direction:column;justify-content:space-between;gap:6px}
+.performance-diagnostics-cell span{font-size:10px;color:rgba(255,255,255,.42);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.performance-diagnostics-cell b{font-size:15px;color:rgba(255,255,255,.92);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.performance-diagnostics-raw{max-height:min(260px,34vh);margin:0;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,.075);background:rgba(0,0,0,.24);color:rgba(221,235,245,.80);font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace;font-size:10.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;overflow:auto}
+.performance-diagnostics-copy-state{min-height:17px;margin-top:8px;color:rgba(244,210,138,.72);font-size:11px;text-align:right}
+.performance-diagnostics-actions{justify-content:flex-end!important;flex-wrap:wrap}
+@media (max-width: 720px){.performance-diagnostics-modal{padding:22px}.performance-diagnostics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.performance-diagnostics-raw{max-height:28vh}.performance-diagnostics-entry{align-items:stretch;flex-direction:column}.performance-diagnostics-entry .fx-mini-btn{width:100%}}
 .cover-crop-modal{width:min(720px,92vw);max-width:min(720px,92vw);padding:28px;text-align:left}
 .cover-crop-modal h2{text-align:center;margin-bottom:22px}
 .cover-crop-layout{display:grid;grid-template-columns:minmax(260px,312px) 1fr;gap:24px;align-items:center}
