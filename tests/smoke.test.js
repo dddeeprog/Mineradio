@@ -56,6 +56,8 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="comment-barrage-3d\.js"><\/script>/);
   assert.match(html, /<script src="shelf-aux-ui\.js"><\/script>/);
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
+  assert.match(html, /<script src="local-media-assets\.js"><\/script>/);
+  assert.match(html, /<script src="local-library\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
 });
