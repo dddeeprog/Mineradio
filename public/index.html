@@ -8244,6 +8244,8 @@ function showStageLine(text, redrawOnly) {
   var sourceLines = typeof lyricsLines !== 'undefined' && Array.isArray(lyricsLines) ? lyricsLines : null;
   var sourceLine = stageLyrics.currentIdx >= 0 && sourceLines ? sourceLines[stageLyrics.currentIdx] : null;
   mesh.userData.nativeLyricLine = sourceLine ? buildNativeStageLyricLine(sourceLine, stageLyrics.currentIdx) : null;
+  mesh.userData.nativeLyricTranslation = mesh.userData.nativeLyricLine && mesh.userData.nativeLyricLine.translation || '';
+  mesh.userData.nativeLyricTranslationMode = foliaFx && foliaFx.translationMode || 'auto';
   stageLyrics.group.add(mesh);
   stageLyrics.current = mesh;
 }
@@ -8293,6 +8295,10 @@ function replaceCurrentLyricMeshStyle() {
   nextMesh.userData.state = oldUser.state || 'in';
   nextMesh.userData.floatSeed = Number.isFinite(oldUser.floatSeed) ? oldUser.floatSeed : nextMesh.userData.floatSeed;
   nextMesh.userData.lastLyricProgress = progress;
+  nextMesh.userData.nativeLyricLine = oldUser.nativeLyricLine || null;
+  nextMesh.userData.nativeLyricTranslation = oldUser.nativeLyricTranslation || '';
+  nextMesh.userData.nativeLyricTranslationMode = oldUser.nativeLyricTranslationMode || (foliaFx && foliaFx.translationMode || 'auto');
+  nextMesh.userData.nativeVisualFrame = oldUser.nativeVisualFrame || null;
   nextMesh.userData.skullMouthMeshLocked = !!oldUser.skullMouthMeshLocked;
   copyLyricRuntimeVisualState(oldMesh, nextMesh);
   stageLyrics.group.add(nextMesh);
@@ -8599,7 +8605,9 @@ function updateStageLyrics3D(dt) {
       }
       return true;
     }
-    opacity = (1 - a) * 0.72 * shelfDetailLyricProfile.outgoing;
+    var nativeFocus = foliaFx && isFinite(foliaFx.currentLineFocus) ? foliaFx.currentLineFocus : 0.75;
+    var outgoingDim = Math.max(0.28, 1 - nativeFocus * 0.55);
+    opacity = (1 - a) * 0.72 * shelfDetailLyricProfile.outgoing * outgoingDim;
     if (data.textMat) data.textMat.uniforms.uOpacity.value = opacity;
     if (data.readabilityMat) data.readabilityMat.opacity = opacity * (shelfDetailOpen ? shelfDetailLyricProfile.readability : 0.58);
     if (data.textMat && data.textMat.uniforms.uSolar) data.textMat.uniforms.uSolar.value *= shelfDetailOpen ? 0.72 : 0.86;
@@ -8692,7 +8700,10 @@ function tickLyricsParticles() {
     var curLine = lyricsLines[newIdx] || { t:t };
     var nextLine = lyricsLines[newIdx + 1];
     if (stageLyrics.current.userData && !stageLyrics.current.userData.nativeLyricLine) {
-      stageLyrics.current.userData.nativeLyricLine = buildNativeStageLyricLine(curLine, newIdx);
+      var nativeLine = buildNativeStageLyricLine(curLine, newIdx);
+      stageLyrics.current.userData.nativeLyricLine = nativeLine;
+      stageLyrics.current.userData.nativeLyricTranslation = nativeLine && nativeLine.translation || '';
+      stageLyrics.current.userData.nativeLyricTranslationMode = foliaFx && foliaFx.translationMode || 'auto';
     }
     var progress = getLyricLineProgress(curLine, nextLine, t);
     updateLyricMeshProgress(stageLyrics.current, progress);

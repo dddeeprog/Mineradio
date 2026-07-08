@@ -181,6 +181,15 @@ test('3D lyric renderer includes Claddagh-style orbit motion path', () => {
   assert.match(html, /orbitStrength/);
 });
 
+test('native Folia lyrics expose translation and current-line focus to 3D stage', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /nativeLyricTranslation/);
+  assert.match(html, /translationMode/);
+  assert.match(html, /currentLineFocus/);
+  assert.match(html, /stageLyrics\.current\.userData\.nativeLyricTranslation = nativeLine/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 
@@ -637,6 +646,8 @@ test('lyric style controls hot-swap the current mesh instead of replaying entry 
   assert.match(html, /function replaceCurrentLyricMeshStyle\(/);
   assert.match(html, /refreshCurrentLyricStyle\(\) \{/);
   assert.match(html, /replaceCurrentLyricMeshStyle\(\);/);
+  assert.match(html, /nextMesh\.userData\.nativeLyricLine = oldUser\.nativeLyricLine/);
+  assert.match(html, /nextMesh\.userData\.nativeLyricTranslation = oldUser\.nativeLyricTranslation/);
   assert.doesNotMatch(html, /showStageLine\(stageLyrics\.currentText, true\);/);
 });
 
