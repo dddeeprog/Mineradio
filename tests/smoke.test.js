@@ -173,6 +173,14 @@ test('3D lyric renderer applies native Folia visual frame values', () => {
   assert.match(html, /particleStrength/);
 });
 
+test('3D lyric renderer includes Claddagh-style orbit motion path', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /resolveNativeStageLyricOrbit/);
+  assert.match(html, /resolveCladdaghOrbit/);
+  assert.match(html, /orbitStrength/);
+});
+
 test('Folia lyric provider routes are registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 

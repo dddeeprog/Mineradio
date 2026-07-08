@@ -8199,6 +8199,25 @@ function resolveNativeStageLyricFrame(mesh, progress, now) {
   });
 }
 
+function resolveNativeStageLyricOrbit(mesh, progress) {
+  var api = foliaNativeLyricVisualsApi();
+  var data = mesh && mesh.userData || {};
+  var frame = data.nativeVisualFrame || null;
+  var line = data.nativeLyricLine || null;
+  if (!api || typeof api.resolveCladdaghOrbit !== 'function' || !frame || !line || frame.orbitStrength <= 0) return null;
+  return api.resolveCladdaghOrbit({
+    index: line.index || 0,
+    count: Math.max(1, lyricsLines && lyricsLines.length || 1),
+    progress: progress,
+    radiusX: 0.16,
+    radiusY: 0.07,
+    depth: 0.10,
+    focus: foliaFx && isFinite(foliaFx.currentLineFocus) ? foliaFx.currentLineFocus : 0.75,
+    audioPower: currentNativeLyricAudioFrame().beatPulse,
+    effectStrength: frame.orbitStrength,
+  });
+}
+
 function updateLyricMeshProgress(mesh, progress) {
   if (!mesh || !mesh.userData || !mesh.userData.lyric) return;
   progress = Math.max(0, Math.min(1, progress || 0));
@@ -8552,6 +8571,14 @@ function updateStageLyrics3D(dt) {
         mesh.position.y += ((0.18 + Math.sin(t * 0.55 + seed) * 0.055 + Math.sin(t * 1.35 + seed) * 0.014) - mesh.position.y) * 0.075;
         mesh.position.z += ((1.48 + Math.cos(t * 0.48 + seed) * 0.080) - mesh.position.z) * 0.080;
         mesh.rotation.z = Math.sin(t * 0.34 + seed) * 0.018;
+      }
+      var orbit = resolveNativeStageLyricOrbit(mesh, mesh.userData.lastLyricProgress || 0);
+      if (orbit) {
+        mesh.position.x += orbit.x;
+        mesh.position.y += orbit.y;
+        mesh.position.z += orbit.z;
+        mesh.scale.multiplyScalar(orbit.scale);
+        mesh.rotation.z += orbit.rotateZ * Math.PI / 180;
       }
       if (data.sparks && data.sparkMat) data.sparks.visible = fx.lyricGlowParticles || getLyricSparkOpacity(data) > 0.015;
       if (data.sparks && data.basePositions) {
