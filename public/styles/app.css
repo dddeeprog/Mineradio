@@ -473,6 +473,12 @@ body.empty-home-active.controls-visible #empty-home{bottom:128px}
 .icon-btn.active{color:var(--champagne);border-color:rgba(244,210,138,0.44);background:rgba(244,210,138,0.10)}
 #upload-btn{border-color:rgba(0,245,212,.24);background:rgba(255,255,255,.045);color:rgba(232,236,239,.78);box-shadow:0 10px 32px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.08)}
 #upload-btn:hover{border-color:rgba(0,245,212,.50);background:rgba(0,245,212,.075);color:#fff;box-shadow:0 16px 46px rgba(0,245,212,.08),inset 0 1px 0 rgba(255,255,255,.10)}
+#local-library-btn{display:none;position:relative;border-color:rgba(244,210,138,.22);background:rgba(255,255,255,.040);color:rgba(255,239,190,.78);box-shadow:0 10px 32px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.075)}
+body.desktop-shell #local-library-btn.local-library-ready{display:flex}
+#local-library-btn:hover{border-color:rgba(244,210,138,.52);background:rgba(244,210,138,.09);color:#fff7d5;box-shadow:0 16px 46px rgba(244,210,138,.075),inset 0 1px 0 rgba(255,255,255,.10)}
+#local-library-btn:disabled{opacity:.48;cursor:wait;transform:none}
+#local-library-btn .local-library-count{display:none;position:absolute;right:-5px;bottom:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;border:1px solid rgba(8,8,12,.72);background:rgba(244,210,138,.92);color:#12100a;font-size:9px;font-weight:800;line-height:16px;text-align:center;box-shadow:0 8px 18px rgba(0,0,0,.26)}
+#local-library-btn.has-local-library .local-library-count{display:block}
 #visual-guide-btn{font-size:18px;font-weight:780;line-height:1;color:rgba(255,255,255,.68);border-color:rgba(255,255,255,.10);background:rgba(255,255,255,.04)}
 #visual-guide-btn:hover{color:#fff;border-color:rgba(255,83,103,.40);background:rgba(255,83,103,.10);box-shadow:0 14px 38px rgba(255,83,103,.08)}
 #upload-actions{position:relative;display:flex;align-items:center;gap:8px;height:58px}
