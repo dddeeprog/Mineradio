@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   cacheCount,
   queueRenderWindow,
+  trimMapCache,
   trimObjectCache,
 } = require('../public/memory-cache-state');
 
@@ -49,6 +50,26 @@ test('cacheCount supports arrays maps sets and plain objects', () => {
   assert.equal(cacheCount(new Set(['a', 'b', 'c'])), 3);
   assert.equal(cacheCount({ a: 1, b: 2 }), 2);
   assert.equal(cacheCount(null), 0);
+});
+
+test('trimMapCache drops oldest map records and disposes values', () => {
+  const disposed = [];
+  const cache = new Map([
+    ['a', { texture: { dispose: () => disposed.push('a') } }],
+    ['b', { texture: { dispose: () => disposed.push('b') } }],
+    ['c', { texture: { dispose: () => disposed.push('c') } }],
+    ['d', { texture: { dispose: () => disposed.push('d') } }],
+  ]);
+
+  const result = trimMapCache(cache, {
+    keep: 2,
+    protectedKeys: { b: true },
+    dispose: (record) => record.texture.dispose(),
+  });
+
+  assert.deepEqual(result, { before: 4, after: 2, dropped: 2 });
+  assert.deepEqual(Array.from(cache.keys()), ['b', 'd']);
+  assert.deepEqual(disposed, ['a', 'c']);
 });
 
 test('queueRenderWindow centers current item and honors manual paging', () => {

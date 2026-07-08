@@ -69,6 +69,38 @@
     return { before: before, after: cacheCount(cache), dropped: dropped };
   }
 
+  function trimMapCache(cache, options) {
+    options = options || {};
+    if (!cache || typeof cache.keys !== 'function' || typeof cache.delete !== 'function') {
+      return { before: 0, after: 0, dropped: 0 };
+    }
+    var keys = Array.from(cache.keys());
+    var before = keys.length;
+    var keep = normalizeKeep(options.keep, before);
+    if (before <= keep) return { before: before, after: before, dropped: 0 };
+    var protectedKeys = toProtectedKeyMap(options.protectedKeys);
+    var skipRecord = typeof options.skipRecord === 'function' ? options.skipRecord : null;
+    var dispose = typeof options.dispose === 'function' ? options.dispose : null;
+    var dropBudget = before - keep;
+    var dropped = 0;
+    keys.some(function(key) {
+      if (dropped >= dropBudget) return true;
+      if (protectedKeys[String(key)]) return false;
+      var record = cache.get(key);
+      if (skipRecord && skipRecord(record, key)) {
+        dropBudget--;
+        return false;
+      }
+      if (dispose) {
+        try { dispose(record, key); } catch (e) {}
+      }
+      cache.delete(key);
+      dropped++;
+      return false;
+    });
+    return { before: before, after: cacheCount(cache), dropped: dropped };
+  }
+
   function queueRenderWindow(total, currentIndex, options) {
     options = options || {};
     total = normalizeKeep(total, 0);
@@ -104,6 +136,7 @@
   return {
     cacheCount: cacheCount,
     queueRenderWindow: queueRenderWindow,
+    trimMapCache: trimMapCache,
     trimObjectCache: trimObjectCache
   };
 });

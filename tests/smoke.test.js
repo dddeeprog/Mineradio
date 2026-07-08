@@ -443,6 +443,15 @@ test('large queue panels render bounded windows instead of mapping the full play
   assert.doesNotMatch(html, /\$ql\.innerHTML = playQueue\.map\(function\(song, i\)/);
 });
 
+test('media resource caches are visible in runtime snapshots and trimmed in background', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /function trimLyricTextureCache\(keep\)/);
+  assert.match(html, /lyricTextures: cacheCount\(lyricTextureCache\)/);
+  assert.match(html, /trimLyricTextureCache\(aggressive \? 6 : 24\)/);
+  assert.match(html, /memoryCacheTools\.trimMapCache/);
+});
+
 test('local library import avoids retaining duplicate full scan and song arrays', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 

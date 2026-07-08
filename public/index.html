@@ -2095,6 +2095,7 @@ function collectRuntimePerfSnapshot(now) {
     djBeatMaps: cacheCount(djBeatMapCache),
     commentBarrage: cacheCount(commentBarrageCache),
     foliaThemes: cacheCount(foliaThemeCache),
+    lyricTextures: cacheCount(lyricTextureCache),
     localBeatMaps: cacheCount(localBeatMapCache),
     localLibrarySongs: localLibraryState && Array.isArray(localLibraryState.songs) ? localLibraryState.songs.length : 0,
     localLibraryScanFiles: localLibraryState && localLibraryState.lastScan && Array.isArray(localLibraryState.lastScan.files) ? localLibraryState.lastScan.files.length : 0,
@@ -2149,6 +2150,7 @@ function trimRuntimeCaches(reason, aggressive) {
     return rec && rec.loading;
   });
   dropped += trimObjectCache(foliaThemeCache, aggressive ? 12 : 48);
+  dropped += trimLyricTextureCache(aggressive ? 6 : 24);
   dropped += trimObjectCache(localBeatMapCache, aggressive ? 16 : 80, protectedBeats);
   if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
     try { renderer.renderLists.dispose(); } catch (e) {}
@@ -7403,6 +7405,27 @@ function disposeCachedLyricTextureValue(value) {
 function clearLyricTextureCache() {
   lyricTextureCache.forEach(disposeCachedLyricTextureValue);
   lyricTextureCache.clear();
+}
+function trimLyricTextureCache(keep) {
+  if (!lyricTextureCache) return 0;
+  if (memoryCacheTools && typeof memoryCacheTools.trimMapCache === 'function') {
+    var result = memoryCacheTools.trimMapCache(lyricTextureCache, {
+      keep: keep,
+      dispose: disposeCachedLyricTextureValue
+    });
+    return result && result.dropped ? result.dropped : 0;
+  }
+  var keys = Array.from(lyricTextureCache.keys());
+  var drop = Math.max(0, keys.length - Math.max(0, Number(keep) || 0));
+  var dropped = 0;
+  for (var i = 0; i < keys.length && drop > 0; i++) {
+    var key = keys[i];
+    disposeCachedLyricTextureValue(lyricTextureCache.get(key));
+    lyricTextureCache.delete(key);
+    drop--;
+    dropped++;
+  }
+  return dropped;
 }
 
 function makeLyricMask(text) {

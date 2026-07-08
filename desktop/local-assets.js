@@ -23,6 +23,8 @@ const LOCAL_LIBRARY_EXTS = new Set([...LOCAL_LIBRARY_AUDIO_EXTS, ...LOCAL_LIBRAR
 const DEFAULT_SCAN_VISIT_LIMIT = 60000;
 const DEFAULT_MAX_RANGE_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_DATA_URL_CACHE_ENTRIES = 24;
+const DEFAULT_MAX_DATA_URL_CACHE_BYTES = 96 * 1024 * 1024;
 
 function isPathInsideRoot(root, absPath) {
   const rel = path.relative(root, absPath);
@@ -72,6 +74,12 @@ function parseLocalFileRangeHeader(value, fileSize) {
   return { start: Math.floor(start), end: Math.min(size - 1, Math.floor(end)), partial: true };
 }
 
+function normalizeNonNegativeOption(value, fallback) {
+  const n = Number(value);
+  if (Number.isFinite(n)) return Math.max(0, n);
+  return fallback;
+}
+
 function createLocalAssetsManager(options) {
   options = options || {};
   const authorizedLocalMusicRoots = new Set();
@@ -79,6 +87,54 @@ function createLocalAssetsManager(options) {
   const scanVisitLimit = Math.max(1, Number(options.scanVisitLimit) || DEFAULT_SCAN_VISIT_LIMIT);
   const maxRangeBytes = Math.max(0, Number(options.maxRangeBytes) || DEFAULT_MAX_RANGE_BYTES);
   const maxImageBytes = Math.max(0, Number(options.maxImageBytes) || DEFAULT_MAX_IMAGE_BYTES);
+  const maxDataUrlCacheEntries = normalizeNonNegativeOption(options.maxDataUrlCacheEntries, DEFAULT_MAX_DATA_URL_CACHE_ENTRIES);
+  const maxDataUrlCacheBytes = normalizeNonNegativeOption(options.maxDataUrlCacheBytes, DEFAULT_MAX_DATA_URL_CACHE_BYTES);
+  const dataUrlCache = new Map();
+  let dataUrlCacheBytes = 0;
+
+  function dataUrlStatKey(stat) {
+    return `${stat.size}:${Math.round(Number(stat.mtimeMs) || 0)}`;
+  }
+
+  function dropDataUrlCacheRecord(key) {
+    const record = dataUrlCache.get(key);
+    if (!record) return false;
+    dataUrlCacheBytes = Math.max(0, dataUrlCacheBytes - (Number(record.bytes) || 0));
+    dataUrlCache.delete(key);
+    return true;
+  }
+
+  function trimDataUrlCache(entriesLimit, bytesLimit) {
+    const keepEntries = Math.max(0, Number(entriesLimit) || 0);
+    const keepBytes = Math.max(0, Number(bytesLimit) || 0);
+    let dropped = 0;
+    while (dataUrlCache.size > keepEntries || dataUrlCacheBytes > keepBytes) {
+      const oldest = dataUrlCache.keys().next();
+      if (oldest.done) break;
+      if (dropDataUrlCacheRecord(oldest.value)) dropped += 1;
+      else break;
+    }
+    return dropped;
+  }
+
+  function localAssetCacheStats() {
+    return {
+      dataUrlEntries: dataUrlCache.size,
+      dataUrlBytes: dataUrlCacheBytes,
+    };
+  }
+
+  function trimLocalAssetCaches(limits) {
+    limits = limits || {};
+    const dataUrlsDropped = trimDataUrlCache(
+      limits.maxDataUrlCacheEntries == null ? maxDataUrlCacheEntries : limits.maxDataUrlCacheEntries,
+      limits.maxDataUrlCacheBytes == null ? maxDataUrlCacheBytes : limits.maxDataUrlCacheBytes,
+    );
+    return {
+      dataUrlsDropped,
+      ...localAssetCacheStats(),
+    };
+  }
 
   function normalizeLocalMusicRoot(folderPath) {
     const resolved = path.resolve(String(folderPath || ''));
@@ -284,8 +340,26 @@ function createLocalAssetsManager(options) {
     const stat = await fs.promises.stat(target);
     if (!stat.isFile()) throw new Error('LOCAL_FILE_NOT_FOUND');
     if (stat.size > maxImageBytes) throw new Error('LOCAL_IMAGE_TOO_LARGE');
+    const statKey = dataUrlStatKey(stat);
+    const cached = dataUrlCache.get(target);
+    if (cached && cached.statKey === statKey) {
+      dataUrlCache.delete(target);
+      dataUrlCache.set(target, cached);
+      return { ok: true, dataUrl: cached.dataUrl, cached: true };
+    }
+    if (cached) dropDataUrlCacheRecord(target);
     const buffer = await fs.promises.readFile(target);
-    return { ok: true, dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
+    const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    if (maxDataUrlCacheEntries > 0 && maxDataUrlCacheBytes > 0 && stat.size <= maxDataUrlCacheBytes) {
+      dataUrlCache.set(target, {
+        dataUrl,
+        statKey,
+        bytes: stat.size,
+      });
+      dataUrlCacheBytes += stat.size;
+      trimDataUrlCache(maxDataUrlCacheEntries, maxDataUrlCacheBytes);
+    }
+    return { ok: true, dataUrl, cached: false };
   }
 
   return {
@@ -297,6 +371,8 @@ function createLocalAssetsManager(options) {
     refreshLocalMusicFileEntries,
     readAuthorizedLocalFileRange,
     readAuthorizedLocalFileDataUrl,
+    localAssetCacheStats,
+    trimLocalAssetCaches,
   };
 }
 

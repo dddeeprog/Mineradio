@@ -145,3 +145,46 @@ test('readAuthorizedLocalFileDataUrl allows bounded images only', async () => {
     cleanup(root);
   }
 });
+
+test('readAuthorizedLocalFileDataUrl reuses and trims bounded image data url cache', async () => {
+  const root = makeTempRoot();
+  try {
+    const a = path.join(root, 'a.jpg');
+    const b = path.join(root, 'b.jpg');
+    const c = path.join(root, 'c.jpg');
+    fs.writeFileSync(a, Buffer.from([1, 2]));
+    fs.writeFileSync(b, Buffer.from([3, 4]));
+    fs.writeFileSync(c, Buffer.from([5, 6]));
+
+    const manager = createLocalAssetsManager({
+      maxImageBytes: 4,
+      maxDataUrlCacheEntries: 2,
+      maxDataUrlCacheBytes: 4,
+    });
+    manager.rememberLocalMusicRoot(root);
+
+    const first = await manager.readAuthorizedLocalFileDataUrl(a);
+    const second = await manager.readAuthorizedLocalFileDataUrl(a);
+    assert.equal(first.cached, false);
+    assert.equal(second.cached, true);
+    assert.deepEqual(manager.localAssetCacheStats(), { dataUrlEntries: 1, dataUrlBytes: 2 });
+
+    await manager.readAuthorizedLocalFileDataUrl(b);
+    await manager.readAuthorizedLocalFileDataUrl(c);
+    assert.deepEqual(manager.localAssetCacheStats(), { dataUrlEntries: 2, dataUrlBytes: 4 });
+
+    const trimmed = manager.trimLocalAssetCaches({ maxDataUrlCacheEntries: 0, maxDataUrlCacheBytes: 0 });
+    assert.deepEqual(trimmed, { dataUrlsDropped: 2, dataUrlEntries: 0, dataUrlBytes: 0 });
+
+    const noCacheManager = createLocalAssetsManager({
+      maxImageBytes: 4,
+      maxDataUrlCacheEntries: 0,
+      maxDataUrlCacheBytes: 0,
+    });
+    noCacheManager.rememberLocalMusicRoot(root);
+    await noCacheManager.readAuthorizedLocalFileDataUrl(a);
+    assert.deepEqual(noCacheManager.localAssetCacheStats(), { dataUrlEntries: 0, dataUrlBytes: 0 });
+  } finally {
+    cleanup(root);
+  }
+});
