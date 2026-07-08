@@ -15,6 +15,7 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-visuals\.js/);
+  assert.match(scripts.check, /node --check public\/memory-cache-state\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.match(scripts.test, /^node --test\b/);
   assert.match(scripts.test, /tests\/\*\.test\.js/);
@@ -57,6 +58,7 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="home-weather-ui\.js"><\/script>/);
   assert.match(html, /<script src="update-preview-ui\.js"><\/script>/);
   assert.match(html, /<script src="hotkeys-ui\.js"><\/script>/);
+  assert.match(html, /<script src="memory-cache-state\.js"><\/script>/);
   assert.match(html, /<script src="comment-barrage-state\.js"><\/script>/);
   assert.match(html, /<script src="comment-barrage-3d\.js"><\/script>/);
   assert.match(html, /<script src="shelf-aux-ui\.js"><\/script>/);
@@ -429,6 +431,25 @@ test('bottom playback controls default to auto hide and schedule startup collaps
   assert.match(html, /if \(raw == null \|\| raw === '0'\) \{\s*localStorage\.setItem\(CONTROLS_AUTO_HIDE_STORE_KEY,\s*'1'\);/);
   assert.match(html, /var controlsAutoHide = readControlsAutoHidePreference\(\);/);
   assert.match(html, /if \(controlsAutoHide && bar && bar\.classList\.contains\('visible'\) && !controlsHovering\) scheduleControlsHide\(520\);/);
+});
+
+test('large queue panels render bounded windows instead of mapping the full play queue', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /var QUEUE_PANEL_RENDER_LIMIT = 180;/);
+  assert.match(html, /var MINI_QUEUE_RENDER_LIMIT = 96;/);
+  assert.match(html, /function queueRenderItemsForWindow\(kind, limit\)/);
+  assert.doesNotMatch(html, /\$list\.innerHTML = playQueue\.map\(function\(song, i\)/);
+  assert.doesNotMatch(html, /\$ql\.innerHTML = playQueue\.map\(function\(song, i\)/);
+});
+
+test('local library import avoids retaining duplicate full scan and song arrays', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.doesNotMatch(html, /localLibraryState\.songs = Array\.isArray\(songs\) \? songs\.slice\(\) : \[\];/);
+  assert.doesNotMatch(html, /localLibraryState\.lastScan = scanResult \|\| null;/);
+  assert.match(html, /localLibraryState\.songs = \[\];/);
+  assert.match(html, /localLibraryState\.lastScan = null;/);
 });
 
 test('comment barrage is rendered as Three.js floating text instead of DOM marquee', () => {

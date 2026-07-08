@@ -29,6 +29,7 @@
 <script src="home-weather-ui.js"></script>
 <script src="update-preview-ui.js"></script>
 <script src="hotkeys-ui.js"></script>
+<script src="memory-cache-state.js"></script>
 <script src="comment-barrage-state.js"></script>
 <script src="comment-barrage-3d.js"></script>
 <script src="shelf-aux-ui.js"></script>
@@ -1258,6 +1259,10 @@ installStartupLongTaskObserver();
 var queueViewTab = 'queue', playMode = 'loop', miniQueueOpen = false;
 var miniQueueRenderSeq = 0, queueRenderSeq = 0, playlistRenderSeq = 0;
 var queuePanelDirty = false;
+var QUEUE_PANEL_RENDER_LIMIT = 180;
+var MINI_QUEUE_RENDER_LIMIT = 96;
+var queuePanelRenderStart = null;
+var miniQueueRenderStart = null;
 var PLAYLIST_PANEL_BATCH_SIZE = 28;
 var playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
 var playlistPanelLazyBound = false;
@@ -1269,6 +1274,7 @@ var coverDepthCache = Object.create(null), coverDepthCacheKeys = [];
 var aiDepthLastRunAt = 0, aiDepthMinGapMs = 18000;
 var visualCoverHandoffTimer = null, visualCoverHandoffSeq = 0, pendingVisualCoverSource = null;
 var rendererPerformanceTools = window.MineradioPerformance || {};
+var memoryCacheTools = window.MineradioMemoryCacheState || {};
 var lyricLineFinder = rendererPerformanceTools.createLyricLineFinder
   ? rendererPerformanceTools.createLyricLineFinder()
   : {
@@ -1950,6 +1956,10 @@ function updateRenderPowerClasses() {
 function safeObjectKeys(obj) {
   try { return obj ? Object.keys(obj) : []; } catch (e) { return []; }
 }
+function cacheCount(cache) {
+  if (memoryCacheTools && typeof memoryCacheTools.cacheCount === 'function') return memoryCacheTools.cacheCount(cache);
+  return safeObjectKeys(cache).length;
+}
 function markProtectedKey(map, key) {
   if (key) map[String(key)] = true;
 }
@@ -1999,6 +2009,16 @@ function collectProtectedBeatMapKeys() {
   } catch (e) {}
   return keep;
 }
+function collectProtectedCommentKeys() {
+  var keep = Object.create(null);
+  try {
+    var api = window.MineradioCommentBarrageState;
+    var song = (typeof currentCoverSong === 'function') ? currentCoverSong() : null;
+    var key = api && typeof api.commentBarrageSongKey === 'function' ? api.commentBarrageSongKey(song) : '';
+    markProtectedKey(keep, key);
+  } catch (e) {}
+  return keep;
+}
 function collectProtectedCoverDepthIds() {
   var keep = Object.create(null);
   try {
@@ -2020,6 +2040,14 @@ function collectProtectedCoverDepthIds() {
   return keep;
 }
 function trimObjectCache(cache, keep, protectedKeys, skipRecord) {
+  if (memoryCacheTools && typeof memoryCacheTools.trimObjectCache === 'function') {
+    var result = memoryCacheTools.trimObjectCache(cache, {
+      keep: keep,
+      protectedKeys: protectedKeys,
+      skipRecord: skipRecord
+    });
+    return result && result.dropped ? result.dropped : 0;
+  }
   var keys = safeObjectKeys(cache);
   if (!cache || keys.length <= keep) return 0;
   var drop = keys.length - keep;
@@ -2061,10 +2089,17 @@ function trimCoverDepthCache(keep, protectedKeys) {
 function collectRuntimePerfSnapshot(now) {
   now = now || performance.now();
   runtimePerfState.cacheCounts = {
-    playlistCovers: safeObjectKeys(playlistCoverCache).length,
+    playlistCovers: cacheCount(playlistCoverCache),
     coverDepth: coverDepthCacheKeys ? coverDepthCacheKeys.length : 0,
-    beatMaps: safeObjectKeys(beatMapCache).length,
-    djBeatMaps: safeObjectKeys(djBeatMapCache).length
+    beatMaps: cacheCount(beatMapCache),
+    djBeatMaps: cacheCount(djBeatMapCache),
+    commentBarrage: cacheCount(commentBarrageCache),
+    foliaThemes: cacheCount(foliaThemeCache),
+    localBeatMaps: cacheCount(localBeatMapCache),
+    localLibrarySongs: localLibraryState && Array.isArray(localLibraryState.songs) ? localLibraryState.songs.length : 0,
+    localLibraryScanFiles: localLibraryState && localLibraryState.lastScan && Array.isArray(localLibraryState.lastScan.files) ? localLibraryState.lastScan.files.length : 0,
+    localLibraryScanAssets: localLibraryState && localLibraryState.lastScan && Array.isArray(localLibraryState.lastScan.assets) ? localLibraryState.lastScan.assets.length : 0,
+    queueSongs: playQueue.length
   };
   if (performance && performance.memory && now - runtimePerfState.lastHeapSampleAt > 12000) {
     runtimePerfState.lastHeapSampleAt = now;
@@ -2110,6 +2145,11 @@ function trimRuntimeCaches(reason, aggressive) {
   dropped += trimCoverDepthCache(aggressive ? 4 : 10, collectProtectedCoverDepthIds());
   dropped += trimObjectCache(beatMapCache, aggressive ? 12 : 36, protectedBeats);
   dropped += trimObjectCache(djBeatMapCache, aggressive ? 4 : 12, protectedBeats);
+  dropped += trimObjectCache(commentBarrageCache, aggressive ? 2 : 8, collectProtectedCommentKeys(), function(rec){
+    return rec && rec.loading;
+  });
+  dropped += trimObjectCache(foliaThemeCache, aggressive ? 12 : 48);
+  dropped += trimObjectCache(localBeatMapCache, aggressive ? 16 : 80, protectedBeats);
   if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
     try { renderer.renderLists.dispose(); } catch (e) {}
   }
@@ -19992,6 +20032,7 @@ async function playQueueAt(idx, opts) {
   homeForcedOpen = false;
   if (!opts.preserveHomeState) homeSuppressed = false;
   currentIdx = idx;
+  resetQueueRenderWindows();
   trackSwitchToken++;
   markPlayPhase('cancel-previous-track');
   cancelBeatAnalysisTimer();
@@ -21060,6 +21101,47 @@ function openPlaylistPanelTab(tab, preserve) {
   switchPlaylistTab(tab);
   setPeek(panel, true, 'pl');
 }
+function queueRenderItemsForWindow(kind, limit) {
+  var requestedStart = kind === 'mini' ? miniQueueRenderStart : queuePanelRenderStart;
+  var win = memoryCacheTools && typeof memoryCacheTools.queueRenderWindow === 'function'
+    ? memoryCacheTools.queueRenderWindow(playQueue.length, currentIdx, { maxItems: limit, requestedStart: requestedStart })
+    : { start: 0, end: Math.min(playQueue.length - 1, limit - 1), count: Math.min(playQueue.length, limit), before: 0, after: Math.max(0, playQueue.length - limit), total: playQueue.length };
+  var items = [];
+  for (var i = win.start; i <= win.end; i++) {
+    if (playQueue[i]) items.push({ song: playQueue[i], index: i });
+  }
+  return { window: win, items: items };
+}
+function queueWindowPagerHtml(kind, win) {
+  if (!win || win.total <= win.count) return '';
+  var prevDisabled = win.before <= 0 ? ' disabled' : '';
+  var nextDisabled = win.after <= 0 ? ' disabled' : '';
+  var label = '显示 ' + (win.start + 1) + '-' + (win.end + 1) + ' / ' + win.total;
+  return '<div class="queue-window-pager">' +
+    '<span>' + label + '</span>' +
+    '<button class="fx-mini-btn ghost" type="button" onclick="event.stopPropagation();shiftQueueRenderWindow(\'' + kind + '\', -1)"' + prevDisabled + '>上一段</button>' +
+    '<button class="fx-mini-btn ghost" type="button" onclick="event.stopPropagation();shiftQueueRenderWindow(\'' + kind + '\', 1)"' + nextDisabled + '>下一段</button>' +
+  '</div>';
+}
+function shiftQueueRenderWindow(kind, direction) {
+  var limit = kind === 'mini' ? MINI_QUEUE_RENDER_LIMIT : QUEUE_PANEL_RENDER_LIMIT;
+  var currentStart = kind === 'mini' ? miniQueueRenderStart : queuePanelRenderStart;
+  if (currentStart == null) currentStart = queueRenderItemsForWindow(kind, limit).window.start || 0;
+  var step = Math.max(1, Math.floor(limit * 0.75));
+  var maxStart = Math.max(0, playQueue.length - limit);
+  var nextStart = Math.max(0, Math.min(maxStart, currentStart + (direction < 0 ? -step : step)));
+  if (kind === 'mini') {
+    miniQueueRenderStart = nextStart;
+    renderMiniQueuePanel({ animate: true });
+  } else {
+    queuePanelRenderStart = nextStart;
+    renderQueuePanel({ animate: true });
+  }
+}
+function resetQueueRenderWindows() {
+  queuePanelRenderStart = null;
+  miniQueueRenderStart = null;
+}
 function renderMiniQueuePanel(opts) {
   opts = opts || {};
   var $list = document.getElementById('mini-queue-list');
@@ -21072,7 +21154,10 @@ function renderMiniQueuePanel(opts) {
     $list.innerHTML = '<div class="mini-queue-empty">队列为空，先搜索或打开歌单</div>';
     return;
   }
-  $list.innerHTML = playQueue.map(function(song, i){
+  var rendered = queueRenderItemsForWindow('mini', MINI_QUEUE_RENDER_LIMIT);
+  $list.innerHTML = queueWindowPagerHtml('mini', rendered.window) + rendered.items.map(function(item){
+    var song = item.song;
+    var i = item.index;
     var thumb = songCoverSrc(song, 60);
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div class="mini-queue-cover"></div>';
     return '<div class="mini-queue-item' + (i === currentIdx ? ' now' : '') + '" onclick="playQueueAt(' + i + ')">' +
@@ -21081,7 +21166,7 @@ function renderMiniQueuePanel(opts) {
       '<button class="mini-queue-remove mini-queue-next" onclick="event.stopPropagation();queueIndexNext(' + i + ')" title="下一首播放">下</button>' +
       '<button class="mini-queue-remove" onclick="event.stopPropagation();removeFromQueue(' + i + ')" title="移除">×</button>' +
     '</div>';
-  }).join('');
+  }).join('') + queueWindowPagerHtml('mini', rendered.window);
   if (opts.animate || opts.scrollCurrent) {
     requestAnimationFrame(function(){
       if (opts.animate) animateListItems($list, '.mini-queue-item', { x: 0, y: 6, stagger: 0.01, duration: 0.20, limit: 16 });
@@ -21106,7 +21191,10 @@ function renderQueuePanel(opts) {
     if (panel && (panel.classList.contains('show') || panel.classList.contains('peek')) && queueViewTab === 'queue') switchPlaylistTab('playlists');
     return;
   }
-  $ql.innerHTML = playQueue.map(function(song, i){
+  var rendered = queueRenderItemsForWindow('queue', QUEUE_PANEL_RENDER_LIMIT);
+  $ql.innerHTML = queueWindowPagerHtml('queue', rendered.window) + rendered.items.map(function(item){
+    var song = item.song;
+    var i = item.index;
     var thumb = songCoverSrc(song, 60);
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:38px;height:38px;border-radius:6px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
     return '<div class="queue-item' + (i === currentIdx ? ' now' : '') + '" onclick="playQueueAt(' + i + ')">' +
@@ -21119,7 +21207,7 @@ function renderQueuePanel(opts) {
         '<button onclick="event.stopPropagation();removeFromQueue(' + i + ')" title="移除">×</button>' +
       '</div>' +
     '</div>';
-  }).join('');
+  }).join('') + queueWindowPagerHtml('queue', rendered.window);
   if (opts.animate && seq === queueRenderSeq) animateVisiblePanelList($ql, '.queue-item', document.getElementById('playlist-panel'), '.queue-item.now');
   renderMiniQueuePanel({ scrollCurrent: miniQueueOpen });
 }
@@ -21746,7 +21834,7 @@ function writeLocalLibrarySnapshot(scanResult) {
     localStorage.setItem(LOCAL_LIBRARY_STATE_STORE_KEY, JSON.stringify(snapshot));
     localLibraryState.snapshot = snapshot;
     localLibraryState.folderPath = snapshot.folderPath || '';
-    localLibraryState.lastScan = scanResult || null;
+    localLibraryState.lastScan = null;
     return snapshot;
   } catch (e) {
     console.warn('[LocalLibraryState]', e);
@@ -21823,7 +21911,8 @@ function localLibraryRefreshMessage(songs, scanResult, diff, mode) {
 }
 function importLocalLibrarySongs(songs, scanResult, opts) {
   opts = opts || {};
-  localLibraryState.songs = Array.isArray(songs) ? songs.slice() : [];
+  // Large local folders can contain thousands of records; queue and snapshot state are enough here.
+  localLibraryState.songs = [];
   if (!songs || !songs.length) {
     showToast('这个文件夹里没有支持的音乐');
     return;

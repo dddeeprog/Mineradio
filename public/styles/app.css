@@ -761,6 +761,10 @@ body.home-controls-locked #bottom-bar{opacity:0!important;pointer-events:none!im
 .mini-queue-remove:hover{background:rgba(255,86,100,.78);color:#fff}
 .mini-queue-remove.mini-queue-next:hover{background:rgba(0,245,212,.16);color:#eafffb}
 .mini-queue-empty{padding:24px 8px;text-align:center;color:rgba(255,255,255,.35);font-size:11.5px}
+.queue-window-pager{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 2px;color:rgba(255,255,255,.42);font-size:10.5px;line-height:1.2}
+.queue-window-pager span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.queue-window-pager .fx-mini-btn{flex:0 0 auto;height:24px;min-width:52px;padding:0 8px;font-size:10.5px}
+.queue-window-pager .fx-mini-btn:disabled{opacity:.34;pointer-events:none}
 .mini-queue-skeleton{height:56px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:linear-gradient(90deg,rgba(255,255,255,.035),rgba(0,245,212,.085),rgba(255,255,255,.035));background-size:220% 100%;animation:queue-shimmer 1.05s linear infinite}
 .mini-queue-skeleton + .mini-queue-skeleton{margin-top:6px}
 @keyframes queue-shimmer{0%{background-position:120% 0}100%{background-position:-120% 0}}
