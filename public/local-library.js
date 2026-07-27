@@ -5,7 +5,9 @@
     root.MineradioLocalLibrary = factory();
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
-  var LYRIC_EXTS = { lrc: true, txt: true };
+  var LYRIC_EXTS = { lrc: true, ttml: true };
+  var lyricFileState = (typeof globalThis !== 'undefined' && globalThis.MineradioLocalLyricFileState) ||
+    (typeof require === 'function' ? require('./local-lyric-file-state') : null);
   var COVER_EXTS = { jpg: true, jpeg: true, png: true, webp: true };
   var COVER_BASENAME_PRIORITY = {
     cover: 1,
@@ -52,6 +54,7 @@
     var slash = filePath.lastIndexOf('/');
     var name = slash >= 0 ? filePath.slice(slash + 1) : filePath;
     return {
+      path: filePath,
       dir: (slash >= 0 ? filePath.slice(0, slash) : '').toLowerCase(),
       name: name,
       base: stripExt(name).toLowerCase(),
@@ -83,17 +86,31 @@
     var audio = recordParts(audioRecord);
     var result = {
       lyricFile: null,
+      lyricCandidates: [],
       coverFile: null,
     };
+    var legacyTxtFile = null;
     var bestCoverRank = Infinity;
     (Array.isArray(assets) ? assets : []).forEach(function(asset) {
       var info = recordParts(asset);
-      if (!info.name || info.dir !== audio.dir) return;
-      if (LYRIC_EXTS[info.ext] && !result.lyricFile && info.base === audio.base) {
-        result.lyricFile = asset;
+      if (!info.name) return;
+      var isExplicitSameDirectory = !!audio.dir && !!info.dir && info.dir === audio.dir;
+      if (isExplicitSameDirectory && LYRIC_EXTS[info.ext] && info.base === audio.base && lyricFileState) {
+        var candidate = lyricFileState.normalizeLocalLyricCandidate({
+          audioPath: audio.path,
+          lyricPath: info.path,
+          name: info.name,
+          enhanced: !!asset.enhanced,
+        });
+        if (candidate) result.lyricCandidates.push({ asset: asset, candidate: candidate });
+        return;
+      }
+      if (isExplicitSameDirectory && info.ext === 'txt' && info.base === audio.base && !legacyTxtFile) {
+        legacyTxtFile = asset;
         return;
       }
       if (!COVER_EXTS[info.ext]) return;
+      if (info.dir !== audio.dir) return;
       var rank = Infinity;
       if (info.base === audio.base) rank = 0;
       else if (Object.prototype.hasOwnProperty.call(COVER_BASENAME_PRIORITY, info.base)) rank = COVER_BASENAME_PRIORITY[info.base];
@@ -102,6 +119,14 @@
         result.coverFile = asset;
       }
     });
+    result.lyricCandidates.sort(function(left, right) {
+      var preferred = lyricFileState.selectPreferredLocalLyric([left.candidate, right.candidate]);
+      if (preferred === left.candidate && preferred !== right.candidate) return -1;
+      if (preferred === right.candidate && preferred !== left.candidate) return 1;
+      return String(left.candidate.lyricPath).localeCompare(String(right.candidate.lyricPath));
+    });
+    result.lyricCandidates = result.lyricCandidates.map(function(item) { return item.asset; });
+    result.lyricFile = result.lyricCandidates[0] || legacyTxtFile;
     return result;
   }
 
@@ -131,6 +156,7 @@
       localLibraryPathKey: localLibraryPathKey(record),
       localLibraryFileSignature: signature,
       localAdjacentLyricFile: adjacent.lyricFile || null,
+      localAdjacentLyricCandidates: adjacent.lyricCandidates || [],
       localAdjacentCoverFile: adjacent.coverFile || null,
     };
   }

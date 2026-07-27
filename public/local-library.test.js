@@ -92,6 +92,45 @@ test('buildLocalLibrarySongs attaches same-directory lyrics and cover assets', (
   assert.equal(result[1].localAdjacentCoverFile, betaCover);
 });
 
+test('buildLocalLibrarySongs orders same-stem TTML before LRC regardless of scan order', () => {
+  const audio = fileRecord('Track.flac', 'Album/Track.flac');
+  const plainLrc = fileRecord('Track.lrc', 'Album/Track.lrc', { type: 'text/plain' });
+  const ttml = fileRecord('Track.ttml', 'Album/Track.ttml', { type: 'application/ttml+xml' });
+  const [song] = localLibrary.buildLocalLibrarySongs({
+    ok: true,
+    files: [audio],
+    assets: [plainLrc, ttml],
+  });
+  assert.equal(song.localAdjacentLyricFile, ttml);
+  assert.deepEqual(song.localAdjacentLyricCandidates, [ttml, plainLrc]);
+});
+
+test('buildLocalLibrarySongs never treats bare-name records as same-directory lyric matches', () => {
+  const audio = fileRecord('Track.flac', 'Track.flac');
+  const ttml = fileRecord('Track.ttml', 'Track.ttml', { type: 'application/ttml+xml' });
+  const [song] = localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets: [ttml] });
+  assert.equal(song.localAdjacentLyricFile, null);
+  assert.deepEqual(song.localAdjacentLyricCandidates, []);
+});
+
+test('buildLocalLibrarySongs keeps legacy TXT only as a fallback outside lyricCandidates', () => {
+  const audio = fileRecord('Track.flac', 'Album/Track.flac');
+  const legacyTxt = fileRecord('Track.txt', 'Album/Track.txt', { type: 'text/plain' });
+  const lrc = fileRecord('Track.lrc', 'Album/Track.lrc', { type: 'text/plain' });
+  const [txtFallback] = localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets: [legacyTxt] });
+  const [preferredLrc] = localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets: [legacyTxt, lrc] });
+  assert.equal(txtFallback.localAdjacentLyricFile, legacyTxt);
+  assert.deepEqual(txtFallback.localAdjacentLyricCandidates, []);
+  assert.equal(preferredLrc.localAdjacentLyricFile, lrc);
+});
+
+test('buildLocalLibrarySongs retains the existing bare-name cover selection', () => {
+  const audio = fileRecord('Track.flac', 'Track.flac');
+  const cover = fileRecord('Track.jpg', 'Track.jpg', { type: 'image/jpeg' });
+  const [song] = localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets: [cover] });
+  assert.equal(song.localAdjacentCoverFile, cover);
+});
+
 test('buildLocalLibrarySongs returns an empty list for canceled or invalid scans', () => {
   assert.deepEqual(localLibrary.buildLocalLibrarySongs(null), []);
   assert.deepEqual(localLibrary.buildLocalLibrarySongs({ ok: false, files: [] }), []);

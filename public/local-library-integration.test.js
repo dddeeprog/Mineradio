@@ -32,6 +32,15 @@ test('local library import entry is wired into the desktop upload actions', () =
   assert.match(appCss, /body\.desktop-shell #local-library-btn\.local-library-ready/);
 });
 
+test('local lyric candidate state loads before local media and library helpers', () => {
+  const lyricStateIndex = indexHtml.indexOf('src="local-lyric-file-state.js"');
+  const mediaIndex = indexHtml.indexOf('src="local-media-assets.js"');
+  const libraryIndex = indexHtml.indexOf('src="local-library.js"');
+  assert.ok(lyricStateIndex >= 0, 'missing local lyric file state script');
+  assert.ok(lyricStateIndex < mediaIndex, 'local lyric state must load before local media assets');
+  assert.ok(lyricStateIndex < libraryIndex, 'local lyric state must load before local library');
+});
+
 test('local library state and import flow use desktop APIs and helper model', () => {
   assert.match(indexHtml, /LOCAL_LIBRARY_STATE_STORE_KEY = 'mineradio-local-library-state-v1'/);
   assert.match(indexHtml, /function canUseLocalLibraryImport\(/);

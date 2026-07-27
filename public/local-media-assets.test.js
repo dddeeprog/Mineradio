@@ -161,3 +161,37 @@ test('findAdjacentLocalAssets matches same-name lyrics and covers', () => {
   assert.equal(assets.lyricFile, lrc);
   assert.equal(assets.coverFile, cover);
 });
+
+test('findAdjacentLocalAssets ranks a same-directory TTML ahead of LRC regardless of input order', () => {
+  const audio = fakeFile('Album/Track.flac', Uint8Array.of(1), 'audio/flac');
+  const lrc = fakeFile('Album/Track.lrc', bytesFromString('[00:00]line'), 'text/plain');
+  const ttml = fakeFile('Album/Track.ttml', bytesFromString('<tt></tt>'), 'application/ttml+xml');
+  const assets = localMedia.findAdjacentLocalAssets(audio, [lrc, ttml]);
+  assert.equal(assets.lyricFile, ttml);
+  assert.deepEqual(assets.lyricCandidates, [ttml, lrc]);
+});
+
+test('findAdjacentLocalAssets does not infer same-directory matches from bare File names', () => {
+  const audio = fakeFile('Track.flac', Uint8Array.of(1), 'audio/flac');
+  const ttml = fakeFile('Track.ttml', bytesFromString('<tt></tt>'), 'application/ttml+xml');
+  const assets = localMedia.findAdjacentLocalAssets(audio, [ttml]);
+  assert.equal(assets.lyricFile, null);
+  assert.deepEqual(assets.lyricCandidates, []);
+});
+
+test('findAdjacentLocalAssets retains legacy TXT only as a fallback outside lyricCandidates', () => {
+  const audio = fakeFile('Album/Track.flac', Uint8Array.of(1), 'audio/flac');
+  const legacyTxt = fakeFile('Album/Track.txt', bytesFromString('line'), 'text/plain');
+  const lrc = fakeFile('Album/Track.lrc', bytesFromString('[00:00]line'), 'text/plain');
+  const txtFallback = localMedia.findAdjacentLocalAssets(audio, [legacyTxt]);
+  const preferredLrc = localMedia.findAdjacentLocalAssets(audio, [legacyTxt, lrc]);
+  assert.equal(txtFallback.lyricFile, legacyTxt);
+  assert.deepEqual(txtFallback.lyricCandidates, []);
+  assert.equal(preferredLrc.lyricFile, lrc);
+});
+
+test('findAdjacentLocalAssets retains bare-name cover selection for direct imports', () => {
+  const audio = fakeFile('Track.flac', Uint8Array.of(1), 'audio/flac');
+  const cover = fakeFile('Track.jpg', Uint8Array.of(1), 'image/jpeg');
+  assert.equal(localMedia.findAdjacentLocalAssets(audio, [cover]).coverFile, cover);
+});

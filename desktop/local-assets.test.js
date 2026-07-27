@@ -54,6 +54,7 @@ test('scanLocalMusicFolder returns sorted audio records and adjacent asset recor
     fs.writeFileSync(path.join(root, 'disc', 'a.mp3'), 'mp3');
     fs.writeFileSync(path.join(root, 'disc', 'cover.jpg'), 'jpg');
     fs.writeFileSync(path.join(root, 'disc', 'a.lrc'), '[00:00]hello');
+    fs.writeFileSync(path.join(root, 'disc', 'a.ttml'), '<tt></tt>');
     fs.writeFileSync(path.join(root, 'disc', 'ignore.doc'), 'doc');
 
     const manager = createLocalAssetsManager({
@@ -67,7 +68,8 @@ test('scanLocalMusicFolder returns sorted audio records and adjacent asset recor
     assert.equal(result.folderPath, path.resolve(root));
     assert.deepEqual(result.files.map((file) => file.name), ['a.mp3', 'b.flac']);
     assert.deepEqual(result.files.map((file) => file.url), ['local://a.mp3', 'local://b.flac']);
-    assert.deepEqual(result.assets.map((file) => file.name), ['a.lrc', 'cover.jpg']);
+    assert.deepEqual(result.assets.map((file) => file.name), ['a.lrc', 'a.ttml', 'cover.jpg']);
+    assert.equal(result.assets.find((file) => file.name === 'a.ttml').type, 'application/ttml+xml');
     assert.equal(result.files[0].relativePath.replace(/\\/g, '/'), `${path.basename(root)}/disc/a.mp3`);
     assert.ok(result.directories.some((dir) => dir.relativePath === 'disc'));
   } finally {

@@ -10,6 +10,7 @@ const LOCAL_LIBRARY_MIME = Object.freeze({
   '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4',
   '.lrc': 'text/plain',
+  '.ttml': 'application/ttml+xml',
   '.txt': 'text/plain',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -18,7 +19,7 @@ const LOCAL_LIBRARY_MIME = Object.freeze({
 });
 
 const LOCAL_LIBRARY_AUDIO_EXTS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a']);
-const LOCAL_LIBRARY_ASSET_EXTS = new Set(['.lrc', '.txt', '.jpg', '.jpeg', '.png', '.webp']);
+const LOCAL_LIBRARY_ASSET_EXTS = new Set(['.lrc', '.ttml', '.txt', '.jpg', '.jpeg', '.png', '.webp']);
 const LOCAL_LIBRARY_EXTS = new Set([...LOCAL_LIBRARY_AUDIO_EXTS, ...LOCAL_LIBRARY_ASSET_EXTS]);
 const DEFAULT_SCAN_VISIT_LIMIT = 60000;
 const DEFAULT_MAX_RANGE_BYTES = 64 * 1024 * 1024;
