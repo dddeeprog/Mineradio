@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   buildSameDirectoryLyricCandidates,
+  compareLocalLyricCandidates,
   normalizeLocalLyricCandidate,
   selectPreferredLocalLyric,
   normalizeParsedLocalLyrics,
@@ -60,6 +61,15 @@ test('selectPreferredLocalLyric is deterministic and ranks TTML over enhanced an
   assert.equal(selectPreferredLocalLyric([plain, enhanced, ttml]), ttml);
   assert.equal(selectPreferredLocalLyric([ttml, plain, enhanced]), ttml);
   assert.equal(selectPreferredLocalLyric([plain, enhanced]), enhanced);
+});
+
+test('same-priority candidates use lowercase then code-unit path ordering independent of input order', () => {
+  const upper = { format: 'lrc', enhanced: false, exists: true, lyricPath: 'Album/Track.LRC', name: 'Track.LRC' };
+  const lower = { format: 'lrc', enhanced: false, exists: true, lyricPath: 'album/track.lrc', name: 'track.lrc' };
+  assert.ok(compareLocalLyricCandidates(upper, lower) < 0);
+  assert.ok(compareLocalLyricCandidates(lower, upper) > 0);
+  assert.equal(selectPreferredLocalLyric([upper, lower]), upper);
+  assert.equal(selectPreferredLocalLyric([lower, upper]), upper);
 });
 
 test('normalizeParsedLocalLyrics normalizes Mineradio lines while retaining future word timing fields', () => {

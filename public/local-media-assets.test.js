@@ -171,6 +171,17 @@ test('findAdjacentLocalAssets ranks a same-directory TTML ahead of LRC regardles
   assert.deepEqual(assets.lyricCandidates, [ttml, lrc]);
 });
 
+test('findAdjacentLocalAssets stabilizes same-priority case-only lyric path conflicts', () => {
+  const audio = fakeFile('Album/Track.flac', Uint8Array.of(1), 'audio/flac');
+  const upper = fakeFile('Album/Track.LRC', bytesFromString('[00:00]upper'), 'text/plain');
+  const lower = fakeFile('album/track.lrc', bytesFromString('[00:00]lower'), 'text/plain');
+  function orderedPaths(files) {
+    return localMedia.findAdjacentLocalAssets(audio, files).lyricCandidates.map((file) => file.name);
+  }
+  assert.deepEqual(orderedPaths([upper, lower]), ['Album/Track.LRC', 'album/track.lrc']);
+  assert.deepEqual(orderedPaths([lower, upper]), ['Album/Track.LRC', 'album/track.lrc']);
+});
+
 test('findAdjacentLocalAssets does not infer same-directory matches from bare File names', () => {
   const audio = fakeFile('Track.flac', Uint8Array.of(1), 'audio/flac');
   const ttml = fakeFile('Track.ttml', bytesFromString('<tt></tt>'), 'application/ttml+xml');

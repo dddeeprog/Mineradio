@@ -103,15 +103,30 @@
     return format === 'lrc' ? 1 : 0;
   }
 
+  function candidatePath(candidate) {
+    return normalizedPath(candidate && (candidate.lyricPath || candidate.name) || '');
+  }
+
+  function compareCodeUnits(left, right) {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  }
+
+  function compareLocalLyricCandidates(left, right) {
+    var priority = lyricPriority(right) - lyricPriority(left);
+    if (priority) return priority;
+    var leftPath = candidatePath(left);
+    var rightPath = candidatePath(right);
+    var normalized = compareCodeUnits(leftPath.toLowerCase(), rightPath.toLowerCase());
+    if (normalized) return normalized;
+    return compareCodeUnits(leftPath, rightPath);
+  }
+
   function selectPreferredLocalLyric(candidates) {
     var list = (Array.isArray(candidates) ? candidates : []).filter(function(candidate) {
       return candidate && candidate.exists !== false && lyricPriority(candidate) > 0;
     });
-    list.sort(function(left, right) {
-      var priority = lyricPriority(right) - lyricPriority(left);
-      if (priority) return priority;
-      return String(left.lyricPath || left.name || '').toLowerCase().localeCompare(String(right.lyricPath || right.name || '').toLowerCase());
-    });
+    list.sort(compareLocalLyricCandidates);
     return list[0] || null;
   }
 
@@ -155,6 +170,7 @@
     buildSameDirectoryLyricCandidates: buildSameDirectoryLyricCandidates,
     isSafeSameDirectoryStem: isSafeSameDirectoryStem,
     normalizeLocalLyricCandidate: normalizeLocalLyricCandidate,
+    compareLocalLyricCandidates: compareLocalLyricCandidates,
     selectPreferredLocalLyric: selectPreferredLocalLyric,
     normalizeParsedLocalLyrics: normalizeParsedLocalLyrics,
   };

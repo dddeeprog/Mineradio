@@ -121,10 +121,7 @@
       }
     });
     result.lyricCandidates.sort(function(left, right) {
-      var preferred = lyricFileState.selectPreferredLocalLyric([left.candidate, right.candidate]);
-      if (preferred === left.candidate && preferred !== right.candidate) return -1;
-      if (preferred === right.candidate && preferred !== left.candidate) return 1;
-      return String(left.candidate.lyricPath).localeCompare(String(right.candidate.lyricPath));
+      return lyricFileState.compareLocalLyricCandidates(left.candidate, right.candidate);
     });
     result.lyricCandidates = result.lyricCandidates.map(function(item) { return item.asset; });
     result.lyricFile = result.lyricCandidates[0] || legacyTxtFile;

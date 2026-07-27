@@ -105,6 +105,18 @@ test('buildLocalLibrarySongs orders same-stem TTML before LRC regardless of scan
   assert.deepEqual(song.localAdjacentLyricCandidates, [ttml, plainLrc]);
 });
 
+test('buildLocalLibrarySongs stabilizes same-priority case-only lyric path conflicts', () => {
+  const audio = fileRecord('Track.flac', 'Album/Track.flac');
+  const upper = fileRecord('Track.LRC', 'Album/Track.LRC', { type: 'text/plain' });
+  const lower = fileRecord('track.lrc', 'album/track.lrc', { type: 'text/plain' });
+  function orderedPaths(assets) {
+    return localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets })[0]
+      .localAdjacentLyricCandidates.map((file) => file.relativePath);
+  }
+  assert.deepEqual(orderedPaths([upper, lower]), ['Album/Track.LRC', 'album/track.lrc']);
+  assert.deepEqual(orderedPaths([lower, upper]), ['Album/Track.LRC', 'album/track.lrc']);
+});
+
 test('buildLocalLibrarySongs never treats bare-name records as same-directory lyric matches', () => {
   const audio = fileRecord('Track.flac', 'Track.flac');
   const ttml = fileRecord('Track.ttml', 'Track.ttml', { type: 'application/ttml+xml' });
