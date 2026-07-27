@@ -58,6 +58,15 @@ test('vendor manifest records every vendored browser bundle', () => {
   assert.match(manifest, new RegExp(sha256('public/vendor/pretext-0.0.7.LICENSE')));
 });
 
+test('Pretext vendor license has an explicit LF checkout rule', () => {
+  const attributes = readText('.gitattributes');
+
+  assert.match(
+    attributes,
+    /^public\/vendor\/pretext-0\.0\.7\.LICENSE text eol=lf$/m,
+  );
+});
+
 test('release and security docs describe packaging hardening gates', () => {
   const release = readText('RELEASE.md');
   const security = readText('SECURITY.md');

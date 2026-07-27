@@ -7,4 +7,5 @@
 *.ico binary
 *.png binary
 *.min.js text eol=lf
+public/vendor/pretext-0.0.7.LICENSE text eol=lf
 third_party/folia-major/** -whitespace
