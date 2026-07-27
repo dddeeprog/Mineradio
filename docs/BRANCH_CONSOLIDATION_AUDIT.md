@@ -48,7 +48,7 @@
 | 能力 | 当前权威实现或目标位置 | 来源能力 | 结论 |
 | --- | --- | --- | --- |
 | 群唱 | `public/folia-native/` | Cappella | Task 6 已审计：旧舞台 22 条测试中 7 条当前已覆盖、15 条已被原生 Mineradio 设计取代、0 条真实缺口。以当前群唱合同和视觉行为为准，不整文件导入、不恢复图片头像；详见 Task 6 记录。 |
-| 同目录歌词 | 当前本地库 | 视觉参考 | 待迁移 TTML。需保留本地扫描边界并先补齐目标测试。 |
+| 同目录歌词 | 当前本地库与 `public/index.html` | 视觉参考 | Task 7 已迁移：仅通过现有授权根与受限文件读取加载同目录、同 stem 的 TTML/LRC 候选；候选按 TTML、增强 LRC、普通 LRC 固定排序。页面按顺序解析，空内容、读取失败或无有效行的 TTML 自动继续回退 LRC，最终才使用既有 FLAC 内嵌歌词流程；未恢复旧 `mineradioLocalLyrics` bridge。 |
 | 旧视觉预设 | `public/folia-native/config.js` | 视觉参考 | 待映射。只迁移确认缺失的配置键和值。 |
 | 在线入口 | 当前 `public/source-navigation.js` | merge-two | 当前实现等价，待审计。 |
 | 本地库 | 当前 `public/local-library.js` 与 `public/local-*.js` | merge-two | 当前实现等价，待审计。 |

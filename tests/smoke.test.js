@@ -61,10 +61,21 @@ test('playback session restore script is wired', () => {
   assert.match(html, /<script src="comment-barrage-3d\.js"><\/script>/);
   assert.match(html, /<script src="shelf-aux-ui\.js"><\/script>/);
   assert.match(html, /<script src="visual-cover-state\.js"><\/script>/);
+  assert.match(html, /<script src="local-lyric-file-state\.js"><\/script>/);
   assert.match(html, /<script src="local-media-assets\.js"><\/script>/);
   assert.match(html, /<script src="local-library\.js"><\/script>/);
   assert.match(html, /restoreLastPlaybackSession\(\);/);
   assert.match(html, /savePlaybackSessionDebounced\('timeupdate'\);/);
+});
+
+test('local lyric file inputs and the home stage distinguish TTML from LRC', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(html, /id="file-input"[^>]*accept="[^"]*\.ttml[^"]*\.lrc/);
+  assert.match(html, /lyricsTimingSource === 'local-ttml'/);
+  assert.match(html, /歌词源：同目录 TTML/);
+  assert.match(html, /lyricsTimingSource === 'local-lrc'/);
+  assert.match(html, /歌词源：同目录 LRC/);
 });
 
 test('Folia lyric matching UI is wired into lyric source controls', () => {

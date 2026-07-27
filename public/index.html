@@ -818,7 +818,7 @@ try {
 
 <div id="comment-barrage-layer" aria-hidden="true"></div>
 
-<input type="file" id="file-input" accept=".mp3,.flac,.wav,.ogg,.m4a,.jpg,.jpeg,.png,.webp" multiple style="display:none">
+<input type="file" id="file-input" accept=".mp3,.flac,.wav,.ogg,.m4a,.ttml,.lrc,.txt,.jpg,.jpeg,.png,.webp" multiple style="display:none">
 <input type="file" id="background-image-input" accept=".jpg,.jpeg,.png,.webp,.mp4,.webm,.mov,image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" style="display:none">
 <div id="drop-overlay"><div class="drop-text">拖放音乐或封面</div></div>
 <div id="free-camera-hint"><b>自由镜头</b> R 固定/退出 · WASD 移动 · 鼠标转向 · Shift 加速 · Space/Ctrl 升降 · Q/E 轻微旋转 · 滚轮景深 · K 回正</div>
@@ -16387,6 +16387,8 @@ function currentHomeStageLyricSourceLabel() {
   if (lyricSourceMode === 'custom') return '歌词源：自定义歌词';
   if (lyricSourceMode === 'folia' && foliaLyricCurrent) return '歌词源：' + (foliaLyricCurrent.label || 'Folia 多源歌词');
   if (lyricsTimingSource === 'fallback') return '歌词源：占位歌词';
+  if (lyricsTimingSource === 'local-ttml') return '歌词源：同目录 TTML';
+  if (lyricsTimingSource === 'local-lrc') return '歌词源：同目录 LRC';
   if (lyricsTimingSource === 'yrc-word') return '歌词源：网易云逐字歌词';
   if (lyricsTimingSource === 'folia-ttml') return '歌词源：Folia TTML';
   if (lyricsTimingSource === 'folia-word') return '歌词源：Folia 逐字歌词';
@@ -21150,11 +21152,11 @@ async function playQueueAt(idx, opts) {
         safeRenderQueuePanel('local-metadata-update', { scrollCurrent: miniQueueOpen });
         safeShelfRebuild('local-metadata-update');
       }
-      var parsedLocalLyricLines = localImport.lyricText ? parseCustomLyricText(localImport.lyricText) : [];
       safePlaybackStep('local-lyrics', function(){
-        var localLyricLines = withLyricFallback(parsedLocalLyricLines);
-        var localLyricSource = parsedLocalLyricLines.length ? localImport.lyricSource : 'fallback';
-        setOriginalLyricsState(localLyricLines, false, localLyricSource);
+        var localLyricState = localImport.lyricState || { lines: [], hasNativeKaraoke: false, timingSource: 'fallback' };
+        var localLyricLines = withLyricFallback(localLyricState.lines);
+        var localLyricSource = localLyricState.lines.length ? localLyricState.timingSource : 'fallback';
+        setOriginalLyricsState(localLyricLines, localLyricState.hasNativeKaraoke, localLyricSource);
         applyPreferredLyricsForCurrent(true);
       });
       safePlaybackStep('local-cover', function(){
@@ -22935,10 +22937,24 @@ function localSongFileRecord(song) {
 function localSongAssetFiles(song, audioRecord) {
   var out = [];
   if (audioRecord) out.push(audioRecord);
-  var lyricFile = normalizeLocalAssetRecord(song && song.localAdjacentLyricFile);
+  var lyricCandidates = localLyricCandidateFiles(song);
   var coverFile = normalizeLocalAssetRecord(song && song.localAdjacentCoverFile);
-  if (lyricFile) out.push(lyricFile);
+  lyricCandidates.forEach(function(lyricFile) { out.push(lyricFile); });
   if (coverFile) out.push(coverFile);
+  return out;
+}
+function localLyricCandidateFiles(song) {
+  var candidates = Array.isArray(song && song.localAdjacentLyricCandidates) ? song.localAdjacentLyricCandidates : [];
+  var legacy = normalizeLocalAssetRecord(song && song.localAdjacentLyricFile);
+  var out = [];
+  function add(file) {
+    file = normalizeLocalAssetRecord(file);
+    if (!file) return;
+    var identity = localImportFileIdentity(file);
+    if (!out.some(function(existing) { return localImportFileIdentity(existing) === identity; })) out.push(file);
+  }
+  candidates.forEach(add);
+  add(legacy);
   return out;
 }
 function localLibraryRefreshMessage(songs, scanResult, diff, mode) {
@@ -23035,12 +23051,32 @@ function localImportReadOptions(extra) {
 function localImportFileIdentity(file) {
   return String((file && (file.webkitRelativePath || file.relativePath || file.fullPath || file.filePath || file.name)) || '');
 }
+function parseLocalImportedLyricText(text, file) {
+  var raw = String(text || '').trim();
+  var api = window.MineradioLocalLyricFileState || null;
+  if (!raw || !api || typeof api.normalizeParsedLocalLyrics !== 'function') return null;
+  var name = String(file && file.name || '');
+  var isLegacyText = /\.txt$/i.test(name);
+  var isTtml = /\.ttml$/i.test(name) || (!isLegacyText && /^<tt[\s>]/i.test(raw));
+  var source = isTtml ? 'local-ttml' : (isLegacyText ? 'local-text' : 'local-lrc');
+  var lines = isTtml ? parseFoliaTtmlLyricText(raw) : parseCustomLyricText(raw);
+  lines = lines.map(function(line) {
+    return Object.assign({}, line, { source: source });
+  });
+  return api.normalizeParsedLocalLyrics({
+    lines: lines,
+    source: source,
+    timingSource: source,
+    sourceLabel: isTtml ? '同目录 TTML' : (isLegacyText ? '同目录 TXT' : '同目录 LRC')
+  });
+}
 async function collectLocalImportAssets(localMedia, audioFile, files) {
   var result = {
     metadata: {},
     adjacent: {},
     lyricText: '',
     lyricSource: 'fallback',
+    lyricState: null,
     embeddedCoverDataUrl: ''
   };
   if (!localMedia || !audioFile) return result;
@@ -23052,27 +23088,38 @@ async function collectLocalImportAssets(localMedia, audioFile, files) {
     try { result.metadata = await localMedia.extractLocalMetadata(audioFile, localImportReadOptions()); }
     catch (e) { console.warn('local metadata parse failed:', e); }
   }
-  var lyricText = '';
-  var lyricSource = '';
-  if (result.adjacent.lyricFile && typeof localMedia.readTextFile === 'function') {
-    try {
-      lyricText = await localMedia.readTextFile(result.adjacent.lyricFile, localImportReadOptions());
-      lyricSource = 'local-adjacent';
-    } catch (e) {
-      console.warn('local adjacent lyric read failed:', e);
+  var lyricCandidates = Array.isArray(result.adjacent.lyricCandidates) ? result.adjacent.lyricCandidates.slice() : [];
+  if (!lyricCandidates.length && result.adjacent.lyricFile) lyricCandidates.push(result.adjacent.lyricFile);
+  if (typeof localMedia.readTextFile === 'function') {
+    for (var lyricIndex = 0; lyricIndex < lyricCandidates.length; lyricIndex += 1) {
+      var lyricCandidate = lyricCandidates[lyricIndex];
+      try {
+        var lyricText = await localMedia.readTextFile(lyricCandidate, localImportReadOptions());
+        var parsedLyric = parseLocalImportedLyricText(lyricText, lyricCandidate);
+        if (!parsedLyric || !parsedLyric.lines.length) continue;
+        result.lyricText = lyricText;
+        result.lyricSource = parsedLyric.timingSource;
+        result.lyricState = parsedLyric;
+        break;
+      } catch (e) {
+        console.warn('local adjacent lyric read failed:', e);
+      }
     }
   }
-  if (!lyricText && /\.flac$/i.test((audioFile && audioFile.name) || '') && typeof localMedia.extractFlacEmbeddedLyricsText === 'function') {
+  if (!result.lyricState && /\.flac$/i.test((audioFile && audioFile.name) || '') && typeof localMedia.extractFlacEmbeddedLyricsText === 'function') {
     try {
-      lyricText = await localMedia.extractFlacEmbeddedLyricsText(audioFile, localImportReadOptions());
-      lyricSource = 'local-flac-embedded';
+      var embeddedLyricText = await localMedia.extractFlacEmbeddedLyricsText(audioFile, localImportReadOptions());
+      var embeddedLyricState = parseLocalImportedLyricText(embeddedLyricText, { name: String(audioFile.name || 'local') + '.lrc' });
+      if (embeddedLyricState && embeddedLyricState.lines.length) {
+        result.lyricText = embeddedLyricText;
+        result.lyricSource = 'local-flac-embedded';
+        result.lyricState = embeddedLyricState;
+        result.lyricState.timingSource = 'local-flac-embedded';
+        result.lyricState.sourceLabel = 'FLAC 内嵌歌词';
+      }
     } catch (e) {
       console.warn('local embedded lyric parse failed:', e);
     }
-  }
-  if (lyricText) {
-    result.lyricText = lyricText;
-    result.lyricSource = lyricSource || 'fallback';
   }
   if (typeof localMedia.extractEmbeddedCoverDataUrl === 'function') {
     try { result.embeddedCoverDataUrl = await localMedia.extractEmbeddedCoverDataUrl(audioFile, localImportReadOptions()); }
@@ -23184,10 +23231,10 @@ async function handleFiles(files) {
         if (lyricSourceMode === 'custom') applyCustomLyricState(currentLocalSong, true);
       }
     };
-    var parsedLocalLyricLines = localImport.lyricText ? parseCustomLyricText(localImport.lyricText) : [];
-    var localLyricLines = withLyricFallback(parsedLocalLyricLines);
-    var localLyricSource = parsedLocalLyricLines.length ? localImport.lyricSource : 'fallback';
-    setOriginalLyricsState(localLyricLines, false, localLyricSource);
+    var localLyricState = localImport.lyricState || { lines: [], hasNativeKaraoke: false, timingSource: 'fallback' };
+    var localLyricLines = withLyricFallback(localLyricState.lines);
+    var localLyricSource = localLyricState.lines.length ? localLyricState.timingSource : 'fallback';
+    setOriginalLyricsState(localLyricLines, localLyricState.hasNativeKaraoke, localLyricSource);
     applyPreferredLyricsForCurrent(true);
     document.getElementById('trial-banner').classList.remove('show');
     audio.load();
