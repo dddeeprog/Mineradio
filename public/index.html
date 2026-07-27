@@ -23057,7 +23057,7 @@ function parseLocalImportedLyricText(text, file) {
   if (!raw || !api || typeof api.normalizeParsedLocalLyrics !== 'function') return null;
   var name = String(file && file.name || '');
   var isLegacyText = /\.txt$/i.test(name);
-  var isTtml = /\.ttml$/i.test(name) || (!isLegacyText && /^<tt[\s>]/i.test(raw));
+  var isTtml = /\.ttml$/i.test(name) || (!isLegacyText && /^(?:<\?xml\b[^?]*\?>\s*)?<tt[\s>]/i.test(raw));
   var source = isTtml ? 'local-ttml' : (isLegacyText ? 'local-text' : 'local-lrc');
   var lines = isTtml ? parseFoliaTtmlLyricText(raw) : parseCustomLyricText(raw);
   lines = lines.map(function(line) {

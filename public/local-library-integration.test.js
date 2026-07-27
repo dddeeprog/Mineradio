@@ -71,8 +71,8 @@ test('local lyric imports parse TTML and LRC into one normalized lyric state', (
     parseFoliaTtmlLyricText() { return [{ text: 'TTML', source: 'folia-ttml' }]; },
     parseCustomLyricText() { return [{ text: 'LRC', source: 'custom-lrc' }]; },
   };
-  vm.runInNewContext(`${body}; this.ttmlState = parseLocalImportedLyricText('<tt></tt>', { name: 'song.ttml' }); this.lrcState = parseLocalImportedLyricText('[00:00]line', { name: 'song.lrc' }); this.textState = parseLocalImportedLyricText('[00:00]line', { name: 'song.txt' });`, context);
-  [[context.ttmlState, 'local-ttml', '同目录 TTML'], [context.lrcState, 'local-lrc', '同目录 LRC'], [context.textState, 'local-text', '同目录 TXT']].forEach(function(entry) {
+  vm.runInNewContext(`${body}; this.ttmlState = parseLocalImportedLyricText('<tt></tt>', { name: 'song.ttml' }); this.xmlTtmlState = parseLocalImportedLyricText('<?xml version="1.0"?>  <tt></tt>', { name: 'song.lrc' }); this.lrcState = parseLocalImportedLyricText('[00:00]line', { name: 'song.lrc' }); this.textState = parseLocalImportedLyricText('[00:00]line', { name: 'song.txt' });`, context);
+  [[context.ttmlState, 'local-ttml', '同目录 TTML'], [context.xmlTtmlState, 'local-ttml', '同目录 TTML'], [context.lrcState, 'local-lrc', '同目录 LRC'], [context.textState, 'local-text', '同目录 TXT']].forEach(function(entry) {
     assert.equal(entry[0].hasNativeKaraoke, false);
     assert.equal(entry[0].timingSource, entry[1]);
     assert.equal(entry[0].sourceLabel, entry[2]);
@@ -169,4 +169,36 @@ test('local library assets retain ordered lyric candidates and the importer fall
   assert.deepEqual(reads, ['song.ttml', 'song.lrc']);
   assert.equal(result.lyricState.timingSource, 'local-lrc');
   assert.equal(result.lyricState.lines[0].source, 'local-lrc');
+});
+
+test('valid local LRC avoids FLAC embedded lyric fallback', async () => {
+  const parser = extractFunction(indexHtml, 'function parseLocalImportedLyricText');
+  const importer = extractFunction(indexHtml, 'async function collectLocalImportAssets');
+  let embeddedReads = 0;
+  const lrc = { name: 'song.lrc' };
+  const context = {
+    console: { warn() {} },
+    window: {
+      MineradioLocalLyricFileState: {
+        normalizeParsedLocalLyrics(input) {
+          return { lines: input.lines, hasNativeKaraoke: false, timingSource: input.timingSource, sourceLabel: input.sourceLabel };
+        },
+      },
+    },
+    localImportReadOptions() { return {}; },
+    parseFoliaTtmlLyricText() { return []; },
+    parseCustomLyricText() { return [{ text: 'LRC', source: 'custom-lrc' }]; },
+  };
+  vm.runInNewContext(`${parser}; ${importer}; this.collect = collectLocalImportAssets;`, context);
+  const result = await context.collect({
+    findAdjacentLocalAssets() { return { lyricFile: lrc, lyricCandidates: [lrc] }; },
+    async extractLocalMetadata() { return {}; },
+    async readTextFile() { return '[00:00]LRC'; },
+    async extractFlacEmbeddedLyricsText() {
+      embeddedReads += 1;
+      return '[00:00]embedded';
+    },
+  }, { name: 'song.flac' }, []);
+  assert.equal(result.lyricState.timingSource, 'local-lrc');
+  assert.equal(embeddedReads, 0);
 });
