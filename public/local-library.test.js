@@ -124,6 +124,16 @@ test('buildLocalLibrarySongs keeps legacy TXT only as a fallback outside lyricCa
   assert.equal(preferredLrc.localAdjacentLyricFile, lrc);
 });
 
+test('buildLocalLibrarySongs rejects traversal-path TTML, LRC and legacy TXT candidates', () => {
+  const audio = fileRecord('Track.flac', 'Album/../Other/Track.flac');
+  const ttml = fileRecord('Track.ttml', 'Album/../Other/Track.ttml', { type: 'application/ttml+xml' });
+  const lrc = fileRecord('Track.lrc', 'Album/../Other/Track.lrc', { type: 'text/plain' });
+  const legacyTxt = fileRecord('Track.txt', 'Album/../Other/Track.txt', { type: 'text/plain' });
+  const [song] = localLibrary.buildLocalLibrarySongs({ ok: true, files: [audio], assets: [ttml, lrc, legacyTxt] });
+  assert.equal(song.localAdjacentLyricFile, null);
+  assert.deepEqual(song.localAdjacentLyricCandidates, []);
+});
+
 test('buildLocalLibrarySongs retains the existing bare-name cover selection', () => {
   const audio = fileRecord('Track.flac', 'Track.flac');
   const cover = fileRecord('Track.jpg', 'Track.jpg', { type: 'image/jpeg' });

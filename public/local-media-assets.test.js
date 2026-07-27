@@ -190,6 +190,16 @@ test('findAdjacentLocalAssets retains legacy TXT only as a fallback outside lyri
   assert.equal(preferredLrc.lyricFile, lrc);
 });
 
+test('findAdjacentLocalAssets rejects traversal-path TTML, LRC and legacy TXT candidates', () => {
+  const audio = fakeFile('Album/../Other/Track.flac', Uint8Array.of(1), 'audio/flac');
+  const ttml = fakeFile('Album/../Other/Track.ttml', bytesFromString('<tt></tt>'), 'application/ttml+xml');
+  const lrc = fakeFile('Album/../Other/Track.lrc', bytesFromString('[00:00]line'), 'text/plain');
+  const legacyTxt = fakeFile('Album/../Other/Track.txt', bytesFromString('line'), 'text/plain');
+  const assets = localMedia.findAdjacentLocalAssets(audio, [ttml, lrc, legacyTxt]);
+  assert.equal(assets.lyricFile, null);
+  assert.deepEqual(assets.lyricCandidates, []);
+});
+
 test('findAdjacentLocalAssets retains bare-name cover selection for direct imports', () => {
   const audio = fakeFile('Track.flac', Uint8Array.of(1), 'audio/flac');
   const cover = fakeFile('Track.jpg', Uint8Array.of(1), 'image/jpeg');

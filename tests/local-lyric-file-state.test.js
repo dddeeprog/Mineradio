@@ -16,6 +16,11 @@ test('buildSameDirectoryLyricCandidates returns TTML before LRC for an audio ste
   ]);
 });
 
+test('buildSameDirectoryLyricCandidates rejects audio paths with dot or traversal segments', () => {
+  assert.deepEqual(buildSameDirectoryLyricCandidates('D:/Music/Album/../Other/Track.flac'), []);
+  assert.deepEqual(buildSameDirectoryLyricCandidates('D:/Music/Other/./Track.flac'), []);
+});
+
 test('normalizeLocalLyricCandidate accepts only a same-directory TTML or LRC with the audio stem', () => {
   const accepted = normalizeLocalLyricCandidate({
     audioPath: 'D:/Music/Album/Track.flac',
@@ -32,6 +37,19 @@ test('normalizeLocalLyricCandidate accepts only a same-directory TTML or LRC wit
     { name: 'Track/../Track.lrc' },
   ].forEach((candidate) => {
     assert.equal(normalizeLocalLyricCandidate({ audioPath: 'D:/Music/Album/Track.flac', ...candidate }), null);
+  });
+});
+
+test('normalizeLocalLyricCandidate rejects dot and traversal segments in either full path', () => {
+  ['ttml', 'lrc'].forEach((format) => {
+    assert.equal(normalizeLocalLyricCandidate({
+      audioPath: `D:/Music/Album/../Other/Track.flac`,
+      lyricPath: `D:/Music/Album/../Other/Track.${format}`,
+    }), null);
+    assert.equal(normalizeLocalLyricCandidate({
+      audioPath: `D:/Music/Other/Track.flac`,
+      lyricPath: `D:/Music/Other/./Track.${format}`,
+    }), null);
   });
 });
 

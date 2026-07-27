@@ -491,7 +491,8 @@
         if (candidate) result.lyricCandidates.push({ file: file, candidate: candidate });
         return;
       }
-      if (isExplicitSameDirectory && info.ext === 'txt' && info.base === audio.base && !legacyTxtFile) {
+      if (isExplicitSameDirectory && info.ext === 'txt' && info.base === audio.base && lyricFileState &&
+        lyricFileState.isSafeSameDirectoryStem(audio.path, info.path) && !legacyTxtFile) {
         legacyTxtFile = file;
         return;
       }

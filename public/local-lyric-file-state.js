@@ -19,6 +19,12 @@
     return { path: path, dir: index >= 0 ? path.slice(0, index) : '', base: index >= 0 ? path.slice(index + 1) : path };
   }
 
+  function hasUnsafePathSegments(value) {
+    return normalizedPath(value).split('/').some(function(segment) {
+      return segment === '.' || segment === '..';
+    });
+  }
+
   function extensionOf(name) {
     var base = splitPath(name).base;
     var index = base.lastIndexOf('.');
@@ -35,6 +41,15 @@
     return !!left && String(left).toLowerCase() === String(right).toLowerCase();
   }
 
+  function isSafeSameDirectoryStem(audioPath, lyricPath) {
+    if (hasUnsafePathSegments(audioPath) || hasUnsafePathSegments(lyricPath)) return false;
+    var audio = splitPath(audioPath);
+    var lyric = splitPath(lyricPath);
+    return !!audio.dir && !!audio.base && !!lyric.base &&
+      sameDirectory(audio.dir, lyric.dir) &&
+      stemOf(audio.base).toLowerCase() === stemOf(lyric.base).toLowerCase();
+  }
+
   function safeCandidateName(value) {
     var name = stringValue(value);
     if (!name || name.indexOf('\0') >= 0 || /[\\/]/.test(name)) return '';
@@ -43,6 +58,7 @@
   }
 
   function buildSameDirectoryLyricCandidates(audioPath) {
+    if (hasUnsafePathSegments(audioPath)) return [];
     var audio = splitPath(audioPath);
     var stem = stemOf(audio.base);
     if (!audio.dir || !stem) return [];
@@ -54,6 +70,7 @@
 
   function normalizeLocalLyricCandidate(candidate) {
     candidate = candidate || {};
+    if (hasUnsafePathSegments(candidate.audioPath) || hasUnsafePathSegments(candidate.lyricPath)) return null;
     var audio = splitPath(candidate.audioPath);
     var audioStem = stemOf(audio.base);
     if (!audio.dir || !audio.base || !audioStem) return null;
@@ -67,7 +84,7 @@
     if (!name || !SUPPORTED_FORMATS[extensionOf(name)] || stemOf(name).toLowerCase() !== audioStem.toLowerCase()) return null;
     if (!lyricPath) lyricPath = audio.dir + '/' + name;
     var normalizedLyric = splitPath(lyricPath);
-    if (!sameDirectory(audio.dir, normalizedLyric.dir) || normalizedLyric.base.toLowerCase() !== name.toLowerCase()) return null;
+    if (!isSafeSameDirectoryStem(audio.path, normalizedLyric.path) || normalizedLyric.base.toLowerCase() !== name.toLowerCase()) return null;
     var format = extensionOf(name);
     return {
       audioPath: audio.path,
@@ -136,6 +153,7 @@
 
   return {
     buildSameDirectoryLyricCandidates: buildSameDirectoryLyricCandidates,
+    isSafeSameDirectoryStem: isSafeSameDirectoryStem,
     normalizeLocalLyricCandidate: normalizeLocalLyricCandidate,
     selectPreferredLocalLyric: selectPreferredLocalLyric,
     normalizeParsedLocalLyrics: normalizeParsedLocalLyrics,
