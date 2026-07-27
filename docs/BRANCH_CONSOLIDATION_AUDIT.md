@@ -25,7 +25,7 @@
 
 ## Bundle
 
-- 路径：`C:\Users\TomatoK\Documents\Playground\Mineradio-backups\Mineradio-pre-unify-2026-07-28.bundle`
+- 路径：外部归档目录中的 `Mineradio-pre-unify-2026-07-28.bundle`（归档根目录不随仓库提交）
 - SHA256：`CF494BF244F41572C0BBB56B802343AE71EBDFB71149E2546F87A73A4148F211`
 - `git bundle verify`：通过，bundle 记录完整历史。
 - 已核对 bundle 的 8 个 ref：
