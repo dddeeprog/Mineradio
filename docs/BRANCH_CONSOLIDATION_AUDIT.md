@@ -60,8 +60,8 @@
 
 ### 证据与合同
 
-- 已读取旧分支测试：`git show archive/pre-unify-cappella-20260728:tests/folia-native-stage-state.test.js`（14 条）和 `git show archive/pre-unify-cappella-20260728:tests/folia-native-stage-renderers.test.js`（8 条）。
-- 已执行 `git diff --no-index public/folia-native/cappella-state.js ..\\folia-cappella-native-stage\\public\\folia-native-stage-state.js`；退出码 `1` 为 `--no-index` 发现差异的预期结果，确认当前实现是独立的原生文档/DOM 渲染架构，而不是旧舞台文件的恢复。
+- 源行为/源码证据：`archive/pre-unify-cappella-20260728:tests/folia-native-stage-state.test.js`（14 条）、`archive/pre-unify-cappella-20260728:tests/folia-native-stage-renderers.test.js`（8 条）、`archive/pre-unify-cappella-20260728:public/folia-native-stage-state.js` 和 `archive/pre-unify-cappella-20260728:public/folia-native-stage-renderers.js`；当前对应文件为 `public/folia-native/cappella-state.js` 与 `public/folia-native/renderers/cappella.js`。
+- 可复现检查：用 `git show archive/pre-unify-cappella-20260728:<path>` 查看归档证据，并用 `git diff archive/pre-unify-cappella-20260728 -- public/folia-native/cappella-state.js public/folia-native/renderers/cappella.js` 对比当前对应文件；差异确认当前实现是独立的原生文档/DOM 渲染架构，而不是旧舞台文件的恢复。
 - `node --test tests/folia-native-cappella.test.js tests/folia-native-page-integration.test.js`：`22/22` 通过。
 - `node third_party/folia-major/node_modules/playwright/cli.js test --config=playwright.folia.config.js --grep "Cappella|群唱"`：首次因统一工作树缺少被忽略的 `third_party/folia-major/node_modules` 而报 `MODULE_NOT_FOUND`；执行 `npm run folia:install` 补齐锁定测试依赖后，以相同命令重跑，`1/1` 通过。
 - 补充定点见证通过：长曲目 `t: 1200` 保持秒单位并显示 `20:00`，标点/空格逐字保留，重复构建的消息键稳定。
