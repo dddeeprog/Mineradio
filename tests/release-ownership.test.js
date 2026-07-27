@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -14,6 +15,10 @@ function readJson(relativePath) {
 
 function readText(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+}
+
+function sha256(relativePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, relativePath))).digest('hex').toUpperCase();
 }
 
 test('release owner is consistent across package metadata and docs', () => {
@@ -40,6 +45,8 @@ test('vendor manifest records every vendored browser bundle', () => {
     'gsap.min.js',
     'music-tempo.LICENCE',
     'music-tempo.min.js',
+    'pretext-0.0.7.LICENSE',
+    'pretext-0.0.7.iife.min.js',
     'three.r128.min.js',
   ]) {
     assert.match(manifest, new RegExp(fileName.replace('.', '[.]')));
@@ -47,6 +54,8 @@ test('vendor manifest records every vendored browser bundle', () => {
 
   assert.match(manifest, /92BB9A96476F983D212A2BC4F54C889039C1696DD4461D40A736860938570FBB/);
   assert.match(manifest, /9274BBCEC8D96168626C732B5D31C775AA8CFB7EAA0599BEC0C175908A2C1CE2/);
+  assert.match(manifest, new RegExp(sha256('public/vendor/pretext-0.0.7.iife.min.js')));
+  assert.match(manifest, new RegExp(sha256('public/vendor/pretext-0.0.7.LICENSE')));
 });
 
 test('release and security docs describe packaging hardening gates', () => {

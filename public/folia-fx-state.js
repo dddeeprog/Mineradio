@@ -65,7 +65,7 @@
       romanizationMode: oneOf(input.romanizationMode, ['off', 'auto', 'always'], DEFAULT_FOLIA_FX.romanizationMode),
       entryMotion: clamp(input.entryMotion, 0, 1, DEFAULT_FOLIA_FX.entryMotion),
       visualMode: oneOf(input.visualMode, ['auto', 'cappella', 'partita', 'cover', 'minimal'], DEFAULT_FOLIA_FX.visualMode),
-      nativeLyricEffect: oneOf(input.nativeLyricEffect, ['off', 'classic', 'monet-sweep', 'claddagh-orbit', 'hybrid'], DEFAULT_FOLIA_FX.nativeLyricEffect),
+      nativeLyricEffect: oneOf(input.nativeLyricEffect, ['off', 'classic', 'monet-sweep', 'hybrid'], DEFAULT_FOLIA_FX.nativeLyricEffect),
       backgroundMode: oneOf(input.backgroundMode, ['theme', 'cover', 'transparent', 'dark'], DEFAULT_FOLIA_FX.backgroundMode),
       glow: clamp(input.glow, 0, 1, DEFAULT_FOLIA_FX.glow),
       blur: clamp(input.blur, 0, 1, DEFAULT_FOLIA_FX.blur),

@@ -1,12 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const lyricVisuals = require('../public/folia-native-lyric-visuals');
+
 const {
   resolveMonetSweep,
   resolveGlowEnvelope,
-  resolveCladdaghOrbit,
   resolveNativeLyricVisualFrame,
-} = require('../public/folia-native-lyric-visuals');
+} = lyricVisuals;
 
 test('resolves Monet-style sweep progress with soft edge', () => {
   const sweep = resolveMonetSweep({
@@ -33,24 +34,8 @@ test('keeps glow envelope finite through rise and tail', () => {
   assert.ok(tail <= 1);
 });
 
-test('places Claddagh orbit glyphs with finite pseudo-3D values', () => {
-  const orbit = resolveCladdaghOrbit({
-    index: 2,
-    count: 5,
-    progress: 0.5,
-    radiusX: 2.8,
-    radiusY: 0.9,
-    depth: 0.6,
-    focus: 0.8,
-    audioPower: 0.4,
-    effectStrength: 1,
-  });
-
-  assert.ok(Number.isFinite(orbit.x));
-  assert.ok(Number.isFinite(orbit.y));
-  assert.ok(Number.isFinite(orbit.z));
-  assert.ok(orbit.opacity >= 0 && orbit.opacity <= 1);
-  assert.ok(orbit.scale > 0);
+test('does not expose the retired Claddagh orbit visual API', () => {
+  assert.equal(lyricVisuals.resolveCladdaghOrbit, undefined);
 });
 
 test('combines frame values and applies performance reduction', () => {
@@ -72,5 +57,7 @@ test('combines frame values and applies performance reduction', () => {
   });
 
   assert.ok(quality.glow >= battery.glow);
-  assert.equal(battery.orbitStrength, 0);
+  assert.ok(quality.sweepStrength > battery.sweepStrength);
+  assert.equal('orbitStrength' in quality, false);
+  assert.equal('orbitStrength' in battery, false);
 });

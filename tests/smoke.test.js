@@ -46,8 +46,6 @@ test('playback session restore script is wired', () => {
 
   assert.match(html, /<script src="playback-session-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-fx-state\.js"><\/script>/);
-  assert.match(html, /<script src="folia-bridge-state\.js"><\/script>/);
-  assert.match(html, /<script src="folia-stage-ui\.js"><\/script>/);
   assert.match(html, /<script src="folia-lyric-match-state\.js"><\/script>/);
   assert.match(html, /<script src="folia-theme-state\.js"><\/script>/);
   assert.match(html, /<script src="weather-lively-graph\.js"><\/script>/);
@@ -84,26 +82,17 @@ test('Folia lyric matching UI is wired into lyric source controls', () => {
   assert.match(css, /\.folia-lyric-candidate/);
 });
 
-test('Folia playback bridge is wired without taking over playback', () => {
+test('native Folia routes and settings stay wired without the visual bridge', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
-  assert.match(pkg.scripts.check, /node --check public\/folia-bridge-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-fx-state\.js/);
-  assert.match(pkg.scripts.check, /node --check public\/folia-stage-ui\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-lyric-match-state\.js/);
   assert.match(pkg.scripts.check, /node --check public\/folia-theme-state\.js/);
   assert.match(pkg.scripts.check, /node --check server\/routes\/folia-lyrics\.js/);
   assert.match(pkg.scripts.check, /node --check server\/routes\/folia-theme\.js/);
-  assert.match(html, /window\.MineradioFoliaBridge = \{/);
-  assert.match(html, /registerFoliaBridgeTarget/);
-  assert.match(html, /pushFoliaPlaybackBridge\('track-switch', \{ force: true \}\)/);
-  assert.match(html, /pushFoliaPlaybackBridge\('lyrics-state', \{ force: true \}\)/);
-  assert.match(html, /pushFoliaPlaybackBridge\('playback-tick'\)/);
-  assert.match(html, /pushFoliaPlaybackBridge\('audio-frame'\)/);
-  assert.match(html, /foliaBridgeFxPayload/);
-  assert.match(html, /foliaFx: foliaBridgeFxPayload\(\)/);
-  assert.doesNotMatch(html, /MineradioFoliaBridge\.play\(/);
+  assert.match(html, /mineradio-native-lyric-visualizer-v1/);
+  assert.doesNotMatch(html, /MineradioFoliaBridge|pushFoliaPlaybackBridge/);
 });
 
 test('Folia AI theme generation is wired into DIY controls and local API', () => {
@@ -118,30 +107,21 @@ test('Folia AI theme generation is wired into DIY controls and local API', () =>
   assert.match(html, /saveFoliaThemeSettingsFromUi/);
   assert.match(html, /generateFoliaThemeForCurrentSong/);
   assert.match(html, /applyFoliaThemeResult/);
-  assert.match(html, /foliaBridgeThemePayload/);
+  assert.match(html, /foliaThemeCurrent/);
   assert.match(css, /\.folia-theme-card/);
   assert.match(css, /\.folia-theme-preview/);
 });
 
-test('Folia DIY controls are wired into Mineradio visual panel', () => {
+test('native Folia mode controls replace the legacy stage DIY panel', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
 
   assert.match(html, /id="folia-fx-card"/);
-  assert.match(html, /id="folia-fx-enabled"/);
-  assert.match(html, /id="folia-fx-visual-mode"/);
-  assert.match(html, /id="folia-fx-lyric-scale"/);
-  assert.match(html, /id="folia-fx-glow"/);
-  assert.match(html, /id="folia-fx-particle-amount"/);
-  assert.match(html, /id="folia-fx-beat-motion"/);
-  assert.match(html, /id="folia-fx-performance-mode"/);
-  assert.match(html, /function syncFoliaFxControls\(/);
-  assert.match(html, /function updateFoliaFxFromControl\(/);
-  assert.match(html, /pushFoliaPlaybackBridge\('folia-fx-state', \{ force: true \}\)/);
-  const applyFoliaFxPatch = html.match(/function applyFoliaFxPatch\([\s\S]*?\n\}/)?.[0] || '';
-  assert.doesNotMatch(applyFoliaFxPatch, /folia-stage-frame/);
-  assert.doesNotMatch(applyFoliaFxPatch, /\.src\s*=/);
-  assert.doesNotMatch(applyFoliaFxPatch, /toggleFoliaStage|closeFoliaStage/);
+  assert.match(html, /id="native-lyric-current-mode-name"/);
+  assert.match(html, /id="native-lyric-mode-controls"/);
+  assert.match(html, /function renderNativeLyricModeControls\(/);
+  assert.match(html, /function syncLegacyFoliaFxFromNativeConfig\(/);
+  assert.doesNotMatch(html, /folia-fx-legacy-controls/);
   assert.match(css, /\.folia-fx-card/);
 });
 
@@ -150,7 +130,7 @@ test('native Folia lyric fusion controls are wired into the 3D lyric panel', () 
 
   assert.match(html, /folia-native-lyric-state\.js/);
   assert.match(html, /folia-native-lyric-visuals\.js/);
-  assert.match(html, /id="folia-fx-native-lyric-effect"/);
+  assert.match(html, /modes\.mineradio3d\.effect/);
   assert.match(html, /nativeLyricEffect/);
 });
 
@@ -173,12 +153,13 @@ test('3D lyric renderer applies native Folia visual frame values', () => {
   assert.match(html, /particleStrength/);
 });
 
-test('3D lyric renderer includes Claddagh-style orbit motion path', () => {
+test('3D lyric renderer excludes the retired Claddagh orbit motion path', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
-  assert.match(html, /resolveNativeStageLyricOrbit/);
-  assert.match(html, /resolveCladdaghOrbit/);
-  assert.match(html, /orbitStrength/);
+  assert.doesNotMatch(html, /resolveNativeStageLyricOrbit/);
+  assert.doesNotMatch(html, /resolveCladdaghOrbit/);
+  assert.doesNotMatch(html, /orbitStrength/);
+  assert.doesNotMatch(html, /\['claddagh-orbit','回环'\]/);
 });
 
 test('native Folia lyrics expose translation and current-line focus to 3D stage', () => {
@@ -199,23 +180,17 @@ test('Folia lyric provider routes are registered in the local API server', () =>
   assert.match(server, /handleQQLyric/);
 });
 
-test('Folia stage entry loads as an isolated iframe visual layer', () => {
+test('native lyric stage replaces the isolated Folia iframe layer', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
-  const stageUi = fs.readFileSync(path.join(repoRoot, 'public', 'folia-stage-ui.js'), 'utf8');
+  const nativeCss = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'folia-native.css'), 'utf8');
 
-  assert.match(html, /id="folia-stage-btn"/);
-  assert.match(html, /id="folia-stage-root"/);
-  assert.match(html, /id="folia-stage-frame"/);
-  assert.match(html, /window\.MineradioFoliaStageUi\.init/);
-  assert.match(html, /bridge: window\.MineradioFoliaBridge/);
-  assert.match(html, /#folia-stage-root/);
-  assert.match(css, /#folia-stage-root\{[^}]*position:fixed/);
-  assert.match(css, /\.folia-stage-toggle\.active/);
-  assert.match(stageUi, /DEFAULT_STAGE_SRC = 'folia-stage\/index\.html\?mineradioBridge=1'/);
-  assert.match(stageUi, /function stageSrcWithBridgeMode\(src\)/);
-  assert.match(stageUi, /registerTarget\(frame\.contentWindow/);
-  assert.match(stageUi, /Folia 舞台未构建/);
+  assert.match(html, /id="native-lyric-root"/);
+  assert.match(html, /registerNativeLyricRenderer\('cappella'/);
+  assert.match(html, /registerNativeLyricRenderer\('fume'/);
+  assert.match(nativeCss, /#native-lyric-root/);
+  assert.doesNotMatch(html, /id="folia-stage-(?:root|frame|btn)"/);
+  assert.doesNotMatch(css, /#folia-stage-root/);
 });
 
 test('main stylesheet is loaded as an external asset', () => {
@@ -273,7 +248,7 @@ test('weather ambient sound can be enabled manually from Home', () => {
   assert.match(css, /\.home-weather-ambient-control/);
 });
 
-test('home left card is a music and Folia lyric stage entry', () => {
+test('home left card enters Mineradio native dynamic lyrics', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'public', 'styles', 'app.css'), 'utf8');
 
@@ -284,9 +259,8 @@ test('home left card is a music and Folia lyric stage entry', () => {
   assert.match(html, /id="home-stage-album"/);
   assert.match(html, /id="home-stage-lyric"/);
   assert.match(html, /id="home-stage-lyric-source"/);
-  assert.match(html, /id="home-stage-folia-btn"/);
-  assert.match(html, /onclick="toggleFoliaStage\(event\)"/);
   assert.match(html, /id="home-stage-dynamic-btn"/);
+  assert.match(html, /id="home-stage-dynamic-btn" class="home-stage-action primary"/);
   assert.match(html, /onclick="enterHomeDynamicLyrics\(event\)"/);
   assert.match(html, /id="home-stage-weather-pill"/);
   assert.match(html, /data-home-radio-start/);
@@ -513,19 +487,14 @@ test('media resource caches are visible in runtime snapshots and trimmed in back
   assert.match(html, /memoryCacheTools\.trimMapCache/);
 });
 
-test('visual release budget suspends Folia and drops low priority 3D resources', () => {
+test('visual release budget releases native lyrics and low priority 3D resources', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
-  const stageUi = fs.readFileSync(path.join(repoRoot, 'public', 'folia-stage-ui.js'), 'utf8');
 
-  assert.match(stageUi, /budgetSuspended/);
-  assert.match(stageUi, /function setBudgetSuspended\(suspended, reason\)/);
-  assert.match(stageUi, /state\.budgetResumeOpen = state\.open/);
-  assert.match(stageUi, /frame\.removeAttribute\('src'\)/);
-  assert.match(stageUi, /setBudgetSuspended: setBudgetSuspended/);
   assert.match(html, /var visualBudgetState = \{/);
   assert.match(html, /function applyVisualReleaseBudget\(reason, aggressive\)/);
   assert.match(html, /function resumeVisualReleaseBudget\(reason\)/);
-  assert.match(html, /setFoliaStageBudgetSuspended\(true, reason\)/);
+  assert.match(html, /nativeLyricRuntime\.release\(reason\)/);
+  assert.match(html, /nativeLyricRuntime\.resume\(\)/);
   assert.match(html, /clearCommentBarrage3D\(true\)/);
   assert.match(html, /trimLyricTextureCache\(aggressive \? 2 : 8\)/);
   assert.match(html, /visualBudget: \{/);

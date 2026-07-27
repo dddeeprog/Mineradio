@@ -9,6 +9,7 @@
 <script src="vendor/three.r128.min.js"></script>
 <script src="vendor/music-tempo.min.js"></script>
 <script src="vendor/gsap.min.js"></script>
+<script src="vendor/pretext-0.0.7.iife.min.js"></script>
 <script src="api-client.js"></script>
 <script src="storage.js"></script>
 <script src="actions.js"></script>
@@ -20,8 +21,18 @@
 <script src="folia-fx-state.js"></script>
 <script src="folia-native-lyric-state.js"></script>
 <script src="folia-native-lyric-visuals.js"></script>
-<script src="folia-bridge-state.js"></script>
-<script src="folia-stage-ui.js"></script>
+<script src="folia-native/config.js"></script>
+<script src="folia-native/state.js"></script>
+<script src="folia-native/layout.js"></script>
+<script src="folia-native/registry.js"></script>
+<script src="folia-native/runtime.js"></script>
+<script src="folia-native/three/performance-budget.js"></script>
+<script src="folia-native/three/glyph-atlas.js"></script>
+<script src="folia-native/three/material-pool.js"></script>
+<script src="folia-native/three/glyph-batch.js"></script>
+<script src="folia-native/three/block-plane.js"></script>
+<script src="folia-native/three/host.js"></script>
+<script src="folia-native/renderers/mineradio-3d.js"></script>
 <script src="folia-lyric-match-state.js"></script>
 <script src="weather-lively-graph.js"></script>
 <script src="weather-lively-state.js"></script>
@@ -49,6 +60,7 @@ try {
 </script>
 <link rel="stylesheet" href="styles/app.css">
 <link rel="stylesheet" href="styles/weather-lively.css">
+<link rel="stylesheet" href="styles/folia-native.css">
 </head>
 <body>
 <div id="desktop-window-shell">
@@ -67,7 +79,7 @@ try {
         <path class="update-arrow" d="M8.7 10.7 12 7.4l3.3 3.3"></path>
       </svg>
     </button>
-    <button id="diy-mode-btn" class="desktop-mode-btn" type="button" onclick="toggleDiyMode()" title="开启 DIY 玩家模式" aria-label="开启 DIY 玩家模式" aria-pressed="false">DIY</button>
+    <button id="diy-mode-btn" class="desktop-mode-btn" type="button" onclick="toggleDiyMode()" title="开启设置模式" aria-label="开启设置模式" aria-pressed="false">设置</button>
     <button class="desktop-window-btn" data-window-action="minimize" title="最小化" aria-label="最小化">
       <svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg>
     </button>
@@ -81,7 +93,7 @@ try {
   </div>
 </div>
 <div id="fullscreen-diy-zone" aria-hidden="true">
-  <button id="fullscreen-diy-btn" class="desktop-mode-btn" type="button" onclick="toggleDiyMode()" title="DIY" aria-label="DIY" aria-pressed="false">DIY</button>
+  <button id="fullscreen-diy-btn" class="desktop-mode-btn" type="button" onclick="toggleDiyMode()" title="设置" aria-label="设置" aria-pressed="false">设置</button>
 </div>
 <div id="custom-bg"><video id="custom-bg-video" muted loop playsinline preload="metadata"></video></div>
 <div id="album-bg"></div>
@@ -176,8 +188,7 @@ try {
           <span id="home-stage-weather-sub">正在整理天气</span>
         </div>
         <div class="home-stage-actions">
-          <button id="home-stage-folia-btn" class="home-stage-action primary" type="button" onclick="toggleFoliaStage(event)">Folia 歌词舞台</button>
-          <button id="home-stage-dynamic-btn" class="home-stage-action" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
+          <button id="home-stage-dynamic-btn" class="home-stage-action primary" type="button" onclick="enterHomeDynamicLyrics(event)">进入动态歌词</button>
           <button class="home-stage-action" type="button" onclick="openFoliaLyricMatchModal()">匹配歌词</button>
         </div>
         <div class="home-quick-row">
@@ -280,16 +291,27 @@ try {
   </button>
 </div>
 
-<button id="fx-fab" title="视觉控制台">
+<button id="fx-fab" title="设置">
   <svg width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M4 7h8"/><path d="M16 7h4"/><circle cx="14" cy="7" r="2"/><path d="M4 17h4"/><path d="M12 17h8"/><circle cx="10" cy="17" r="2"/></svg>
 </button>
-<button id="fx-fab-hide-btn" type="button" onclick="toggleFxFabAutoHide(event)" title="自动隐藏视觉控制台">‹</button>
+<button id="fx-fab-hide-btn" type="button" onclick="toggleFxFabAutoHide(event)" title="自动隐藏设置按钮">‹</button>
 <!-- 控制台 (右侧贴边自动显示, 无关闭按钮) -->
 <div id="fx-panel">
   <div class="fx-head">
-    <div><div class="fx-title">视觉控制台</div><div class="fx-sub">MINERADIO VISUALS · 鼠标移开自动隐藏</div></div>
+    <div><div class="fx-title">设置</div><div class="fx-sub">MINERADIO VISUALS · 鼠标移开自动隐藏</div></div>
   </div>
 
+  <div class="fx-section-label">歌词视觉</div>
+  <div class="native-lyric-mode-grid" id="native-lyric-mode-grid" role="group" aria-label="歌词视觉模式">
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="mineradio-3d" onclick="setNativeLyricMode('mineradio-3d')">Mineradio 3D</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="classic" onclick="setNativeLyricMode('classic')">流光</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="cadenza" onclick="setNativeLyricMode('cadenza')">心象</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="partita" onclick="setNativeLyricMode('partita')">云阶</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="tilt" onclick="setNativeLyricMode('tilt')">倾诉</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="monet" onclick="setNativeLyricMode('monet')">莫奈</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="cappella" onclick="setNativeLyricMode('cappella')">群唱</button>
+    <button class="native-lyric-mode-btn" type="button" data-native-lyric-mode="fume" onclick="setNativeLyricMode('fume')">浮名</button>
+  </div>
   <div class="fx-section-label">视觉预设</div>
   <div class="preset-grid" id="preset-grid"></div>
   <div class="fx-section-label">用户存档</div>
@@ -396,39 +418,17 @@ try {
         </div>
         <div id="folia-lyric-source-status" class="folia-lyric-source-status">当前：原歌词</div>
       </div>
-      <div class="fx-section-label">Folia 舞台效果</div>
+      <div class="fx-section-label">歌词模式参数</div>
       <div class="folia-fx-card" id="folia-fx-card">
         <div class="folia-fx-head">
-          <div><b>舞台 DIY</b><span id="folia-fx-status">实时推送到 Folia iframe</span></div>
-          <button class="fx-mini-btn ghost" type="button" onclick="resetFoliaFxSettings()">重置</button>
+          <div><b>原生歌词</b><span id="native-lyric-settings-status">Mineradio 3D</span></div>
+          <button class="fx-mini-btn ghost" type="button" onclick="resetNativeLyricSettings()">重置</button>
         </div>
-        <label class="fx-check"><input id="folia-fx-enabled" type="checkbox" onchange="updateFoliaFxFromControl('enabled', this.checked)">启用 Folia 舞台效果</label>
-        <div class="fx-section-label">舞台模式</div>
-        <div class="fx-seg" id="folia-fx-visual-mode">
-          <button type="button" data-folia-fx="visualMode" data-value="auto" onclick="updateFoliaFxFromControl('visualMode','auto')">自动</button>
-          <button type="button" data-folia-fx="visualMode" data-value="cappella" onclick="updateFoliaFxFromControl('visualMode','cappella')">Cappella</button>
-          <button type="button" data-folia-fx="visualMode" data-value="partita" onclick="updateFoliaFxFromControl('visualMode','partita')">Partita</button>
-          <button type="button" data-folia-fx="visualMode" data-value="minimal" onclick="updateFoliaFxFromControl('visualMode','minimal')">极简</button>
+        <div class="native-lyric-current-mode">
+          <b id="native-lyric-current-mode-name">Mineradio 3D</b>
+          <span id="native-lyric-current-mode-kind">Three.js</span>
         </div>
-        <div class="fx-section-label">原生 3D 歌词</div>
-        <div class="fx-seg" id="folia-fx-native-lyric-effect">
-          <button type="button" data-folia-fx="nativeLyricEffect" data-value="hybrid" onclick="updateFoliaFxFromControl('nativeLyricEffect','hybrid')">3D融合</button>
-          <button type="button" data-folia-fx="nativeLyricEffect" data-value="monet-sweep" onclick="updateFoliaFxFromControl('nativeLyricEffect','monet-sweep')">扫光</button>
-          <button type="button" data-folia-fx="nativeLyricEffect" data-value="claddagh-orbit" onclick="updateFoliaFxFromControl('nativeLyricEffect','claddagh-orbit')">回环</button>
-          <button type="button" data-folia-fx="nativeLyricEffect" data-value="classic" onclick="updateFoliaFxFromControl('nativeLyricEffect','classic')">流光</button>
-          <button type="button" data-folia-fx="nativeLyricEffect" data-value="off" onclick="updateFoliaFxFromControl('nativeLyricEffect','off')">关闭</button>
-        </div>
-        <label>歌词大小<input id="folia-fx-lyric-scale" type="range" min="0.65" max="1.8" step="0.01" oninput="updateFoliaFxFromControl('lyricScale', this.value)"></label>
-        <label>逐字高亮<input id="folia-fx-word-highlight" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('wordHighlight', this.value)"></label>
-        <label>光晕<input id="folia-fx-glow" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('glow', this.value)"></label>
-        <label>粒子<input id="folia-fx-particle-amount" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('particleAmount', this.value)"></label>
-        <label>鼓点响应<input id="folia-fx-beat-motion" type="range" min="0" max="1" step="0.01" oninput="updateFoliaFxFromControl('beatMotion', this.value)"></label>
-        <div class="fx-section-label">性能</div>
-        <div class="fx-seg" id="folia-fx-performance-mode">
-          <button type="button" data-folia-fx="performanceMode" data-value="quality" onclick="updateFoliaFxFromControl('performanceMode','quality')">高质量</button>
-          <button type="button" data-folia-fx="performanceMode" data-value="balanced" onclick="updateFoliaFxFromControl('performanceMode','balanced')">平衡</button>
-          <button type="button" data-folia-fx="performanceMode" data-value="battery" onclick="updateFoliaFxFromControl('performanceMode','battery')">省电</button>
-        </div>
+        <div class="native-lyric-control-list" id="native-lyric-mode-controls"></div>
       </div>
       <div class="fx-section-label">Folia AI 主题</div>
       <div class="folia-theme-card" id="folia-theme-card">
@@ -675,19 +675,8 @@ try {
 
 <!-- 舞台歌词 (大字 3D, 由 JS 动态填充) -->
 <div id="stage-lyrics"></div>
-<div id="folia-stage-root" aria-hidden="true">
-  <div class="folia-stage-shell">
-    <iframe id="folia-stage-frame" title="Folia 歌词舞台" loading="lazy" allow="autoplay; fullscreen; clipboard-read; clipboard-write"></iframe>
-    <div class="folia-stage-chrome">
-      <div>
-        <div class="folia-stage-title">Folia 歌词舞台</div>
-        <div class="folia-stage-sub">接收 Mineradio 播放状态 · 不接管播放器</div>
-      </div>
-      <button class="folia-stage-close" type="button" data-folia-stage-action="close" title="关闭 Folia 舞台" aria-label="关闭 Folia 舞台">×</button>
-    </div>
-    <div class="folia-stage-loading">正在打开 Folia 舞台…</div>
-  </div>
-</div>
+<div id="native-lyric-root" aria-hidden="true"></div>
+<div id="native-lyric-live" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <!-- 手势 HUD + 手骨架 -->
 <div id="gesture-hud" class="gesture-hud">
@@ -811,7 +800,6 @@ try {
     <div class="control-cluster modes">
     <button id="comment-barrage-btn" class="ctrl-btn comment-barrage-toggle" onclick="toggleCommentBarrage()" title="评论弹幕" aria-label="评论弹幕" aria-pressed="false">弹</button>
     <button class="ctrl-btn lyrics-toggle-btn" onclick="toggleLyricsPanel()" title="歌词"><span class="lyrics-word-icon">词</span></button>
-    <button id="folia-stage-btn" class="ctrl-btn folia-stage-toggle" type="button" title="打开 Folia 歌词舞台" aria-label="打开 Folia 歌词舞台" aria-pressed="false">舞</button>
     <div id="volume-control" class="volume-control">
       <button id="volume-btn" class="ctrl-btn" onclick="toggleVolumePanel(event)" title="音量 / 静音"><svg id="volume-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15 9.5a4 4 0 0 1 0 5"/></svg></button>
       <div class="volume-popover" onclick="event.stopPropagation()">
@@ -1139,6 +1127,7 @@ var FX_FAB_AUTO_HIDE_STORE_KEY = 'mineradio-fx-fab-auto-hide-v1';
 var CONTROLS_AUTO_HIDE_STORE_KEY = 'mineradio-controls-auto-hide-v1';
 var CONTROLS_AUTO_HIDE_MIGRATION_STORE_KEY = 'mineradio-controls-auto-hide-defaulted-v2';
 var FREE_CAMERA_STORE_KEY = 'mineradio-free-camera-v1';
+var NATIVE_LYRIC_CONFIG_KEY = 'mineradio-native-lyric-visualizer-v1';
 var PERSISTENT_UI_STATE_KEYS = [
   'apex-player-volume',
   CUSTOM_COVER_STORE_KEY,
@@ -1153,6 +1142,7 @@ var PERSISTENT_UI_STATE_KEYS = [
   FX_FAB_AUTO_HIDE_STORE_KEY,
   CONTROLS_AUTO_HIDE_STORE_KEY,
   FREE_CAMERA_STORE_KEY,
+  NATIVE_LYRIC_CONFIG_KEY,
   HOTKEY_SETTINGS_STORE_KEY,
   VISUAL_GUIDE_SEEN_STORE_KEY
 ];
@@ -1215,6 +1205,18 @@ var foliaLyricMatchToken = 0;
 var foliaLyricCurrent = null;
 var FOLIA_FX_KEY = 'mineradio-folia-fx-v1';
 var foliaFx = readFoliaFxState();
+var nativeLyricConfig = readNativeLyricConfigState();
+var nativeLyricRegistry = null;
+var nativeLyricRuntime = null;
+var nativeThreeLyricHost = null;
+var nativeThreeLyricForward = null;
+var nativeThreeLyricPosition = null;
+var nativeLyricDocument = null;
+var nativeLyricDocumentSignature = '';
+var nativeLyricFrameLineIndex = -1;
+var nativeLyricLiveSignature = '';
+var nativeLyricLastFallbackMode = '';
+var nativeLyricRendererScriptPromises = Object.create(null);
 var FOLIA_THEME_SETTINGS_KEY = 'mineradio-folia-theme-settings-v1';
 var FOLIA_THEME_CACHE_KEY = 'mineradio-folia-theme-cache-v1';
 var foliaThemeSettings = readFoliaThemeSettings();
@@ -1427,7 +1429,7 @@ function applyFxFabAutoHideState(opts) {
   if (btn) {
     btn.classList.toggle('on', !!fxFabAutoHide);
     btn.textContent = fxFabAutoHide ? '›' : '‹';
-    btn.title = fxFabAutoHide ? '取消自动隐藏视觉控制台' : '自动隐藏视觉控制台';
+    btn.title = fxFabAutoHide ? '取消自动隐藏设置按钮' : '自动隐藏设置按钮';
   }
 }
 function toggleFxFabAutoHide(e) {
@@ -1435,7 +1437,7 @@ function toggleFxFabAutoHide(e) {
   fxFabAutoHide = !fxFabAutoHide;
   saveBooleanPreference(FX_FAB_AUTO_HIDE_STORE_KEY, fxFabAutoHide);
   applyFxFabAutoHideState({ forceHidden: fxFabAutoHide });
-  showToast(fxFabAutoHide ? '视觉控制台按钮已自动隐藏' : '视觉控制台按钮已固定显示');
+  showToast(fxFabAutoHide ? '设置按钮已自动隐藏' : '设置按钮已固定显示');
 }
 function updateFxFabAutoHideFromPointer(x, y) {
   if (!fxFabAutoHide || !diyPlayerMode || immersiveMode) {
@@ -1502,7 +1504,8 @@ function syncDiyModeButton() {
     if (!btn) return;
     btn.classList.toggle('on', diyPlayerMode);
     btn.setAttribute('aria-pressed', diyPlayerMode ? 'true' : 'false');
-    btn.title = diyPlayerMode ? '关闭 DIY 玩家模式' : '开启 DIY 玩家模式';
+    btn.textContent = '设置';
+    btn.title = diyPlayerMode ? '关闭设置模式' : '开启设置模式';
     btn.setAttribute('aria-label', btn.title);
   });
 }
@@ -1524,7 +1527,7 @@ function applyDiyMode(on, opts) {
     if (quality) quality.classList.remove('open');
     if (volume) volume.classList.remove('open');
   }
-  if (opts.toast) showToast(diyPlayerMode ? 'DIY 玩家模式已开启' : '已切回简约模式');
+  if (opts.toast) showToast(diyPlayerMode ? '设置模式已开启' : '已切回简约模式');
   if (opts.animate && window.gsap) {
     ['diy-mode-btn', 'fullscreen-diy-btn'].forEach(function(id) {
       var btn = document.getElementById(id);
@@ -1960,7 +1963,6 @@ var desktopRuntimeState = {
 var renderPowerState = { mode: '', width: 0, height: 0, pixelRatio: 0 };
 var visualBudgetState = {
   mode: 'active',
-  foliaSuspended: false,
   commentBarrageReleased: false,
   releaseCount: 0,
   resumeCount: 0,
@@ -1995,22 +1997,6 @@ function isBackgroundReleaseMode() {
 function visualBudgetNow() {
   return (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
 }
-function currentFoliaStageBudgetState() {
-  try {
-    if (typeof foliaStageUi !== 'undefined' && foliaStageUi && typeof foliaStageUi.getBudgetState === 'function') {
-      return foliaStageUi.getBudgetState() || {};
-    }
-  } catch (e) {}
-  return {};
-}
-function setFoliaStageBudgetSuspended(suspended, reason) {
-  var state = null;
-  try {
-    if (typeof foliaStageUiCall === 'function') state = foliaStageUiCall('setBudgetSuspended', [!!suspended, reason || 'visual-budget']);
-  } catch (e) {}
-  visualBudgetState.foliaSuspended = !!(suspended || (state && state.budgetSuspended));
-  return state;
-}
 function applyVisualReleaseBudget(reason, aggressive) {
   if (!isDeepBackgroundMode() || !isBackgroundReleaseMode()) return false;
   reason = reason || 'release';
@@ -2021,7 +2007,9 @@ function applyVisualReleaseBudget(reason, aggressive) {
     visualBudgetState.lastReleaseAt = visualBudgetNow();
   }
   visualBudgetState.lastReason = reason;
-  setFoliaStageBudgetSuspended(true, reason);
+  if (nativeLyricRuntime && typeof nativeLyricRuntime.release === 'function') nativeLyricRuntime.release(reason);
+  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.suspend === 'function') nativeThreeLyricHost.suspend();
+  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.trim === 'function') dropped += nativeThreeLyricHost.trim(aggressive ? 3 : 1) || 0;
   if (typeof clearCommentBarrage3D === 'function') {
     try {
       clearCommentBarrage3D(true);
@@ -2039,18 +2027,15 @@ function applyVisualReleaseBudget(reason, aggressive) {
   return true;
 }
 function resumeVisualReleaseBudget(reason) {
-  if (visualBudgetState.mode === 'active' && !visualBudgetState.foliaSuspended) return false;
+  if (visualBudgetState.mode === 'active') return false;
   reason = reason || 'restore';
   visualBudgetState.mode = 'active';
   visualBudgetState.commentBarrageReleased = false;
-  visualBudgetState.foliaSuspended = false;
   visualBudgetState.resumeCount += 1;
   visualBudgetState.lastResumeAt = visualBudgetNow();
   visualBudgetState.lastReason = reason;
-  setFoliaStageBudgetSuspended(false, reason);
-  if (typeof pushFoliaPlaybackBridge === 'function') {
-    try { pushFoliaPlaybackBridge('visual-budget-resume', { force: true }); } catch (e) {}
-  }
+  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.resume === 'function') nativeThreeLyricHost.resume();
+  if (nativeLyricRuntime && typeof nativeLyricRuntime.resume === 'function') nativeLyricRuntime.resume();
   return true;
 }
 function syncVisualBudgetForPowerMode(reason) {
@@ -2247,10 +2232,9 @@ function collectRuntimePerfSnapshot(now) {
       interactionBoost: (typeof isRenderInteractionActive === 'function') ? isRenderInteractionActive() : false,
       interactionReason: (typeof renderInteractionReason !== 'undefined') ? renderInteractionReason : ''
     } : null,
+    nativeLyrics: nativeLyricRuntime && typeof nativeLyricRuntime.snapshot === 'function' ? nativeLyricRuntime.snapshot() : null,
     visualBudget: {
       mode: visualBudgetState.mode,
-      foliaSuspended: visualBudgetState.foliaSuspended,
-      folia: currentFoliaStageBudgetState(),
       commentBarrageReleased: visualBudgetState.commentBarrageReleased,
       lyricTextureKeep: visualBudgetState.lyricTextureKeep,
       releaseCount: visualBudgetState.releaseCount,
@@ -2289,6 +2273,7 @@ function collectPerformanceDiagnosticRows(snapshot) {
   var rendererInfo = snapshot.renderer || {};
   var viewport = snapshot.viewport || {};
   var visualBudget = snapshot.visualBudget || {};
+  var nativeLyrics = snapshot.nativeLyrics || {};
   return [
     ['JS Heap', performanceDiagnosticMetric(snapshot.runtime && snapshot.runtime.heapMB, ' MB')],
     ['Renderer 纹理', performanceDiagnosticMetric(snapshot.renderer && snapshot.renderer.textures)],
@@ -2303,7 +2288,7 @@ function collectPerformanceDiagnosticRows(snapshot) {
     ['弹幕缓存', performanceDiagnosticMetric(caches.commentBarrage)],
     ['本地节奏', performanceDiagnosticMetric(caches.localBeatMaps)],
     ['视觉预算', performanceDiagnosticMetric(visualBudget.mode || 'active')],
-    ['Folia 暂停', performanceDiagnosticMetric(visualBudget.foliaSuspended)],
+    ['原生歌词', performanceDiagnosticMetric(nativeLyrics.mode || '未挂载')],
     ['3D 弹幕释放', performanceDiagnosticMetric(visualBudget.commentBarrageReleased)],
     ['释放次数', performanceDiagnosticMetric(visualBudget.releaseCount)]
   ];
@@ -2495,6 +2480,7 @@ var camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100)
 var RENDER_DPR_CAP = 1.35;
 var RENDER_PIXEL_BUDGET = 5200000;
 var RENDER_MIN_DPR = 0.72;
+var NATIVE_LYRIC_THREE_4K_PIXEL_BUDGET = 1920 * 1080;
 // 0 = display vsync. Keep visible playback high-refresh capable instead of capping 120Hz+ screens to 60/72.
 var RENDER_VISIBLE_VSYNC = true;
 var RENDER_ACTIVE_FPS = 0;
@@ -2513,11 +2499,22 @@ function renderQualityProfile() {
   if (quality === 'ultra') return { cap: 1.75, min: 0.85, budget: 7800000 };
   return { cap: RENDER_DPR_CAP, min: RENDER_MIN_DPR, budget: RENDER_PIXEL_BUDGET };
 }
+function nativeLyricThreeRenderBudget(cssPixels) {
+  return nativeLyricConfig && cssPixels >= 7200000 ? NATIVE_LYRIC_THREE_4K_PIXEL_BUDGET : 0;
+}
 function getRenderPixelRatio() {
   var device = window.devicePixelRatio || 1;
   if (isDeepBackgroundMode()) return Math.min(device, 0.30);
   var cssPixels = Math.max(1, innerWidth * innerHeight);
   var quality = renderQualityProfile();
+  var nativeBudget = nativeLyricThreeRenderBudget(cssPixels);
+  if (nativeBudget) {
+    quality = {
+      cap: Math.min(1, quality.cap),
+      min: Math.min(0.5, quality.min),
+      budget: Math.min(nativeBudget, quality.budget)
+    };
+  }
   var budgetCap = Math.sqrt(quality.budget / cssPixels);
   var cap = Math.min(quality.cap, budgetCap);
   return Math.max(quality.min, Math.min(device, cap));
@@ -4295,7 +4292,7 @@ var particlePointerLocalHit = new THREE.Vector3();
 var particlePointerQuat = new THREE.Quaternion();
 var particlePointerFrame = { dirty:false, ndcX:0, ndcY:0 };
 var CLICK_THRESHOLD = 6;  // 像素, 拖动 > 6px 视为 drag
-var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#folia-stage-root,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
+var UI_HIT_SELECTOR = '#search-area,#top-right,#fullscreen-diy-zone,#fx-panel,#fx-fab,#fx-fab-hide-btn,#playlist-panel,#bottom-bar,#bottom-handle,#thumb-wrap,#empty-home,#visual-guide,#trial-banner,#source-fallback-notice,.modal-mask,#toast,#ai-depth-chip,#beat-chip,#drop-overlay';
 
 function isPointerOverUi(e) {
   if (!e) return false;
@@ -8199,25 +8196,6 @@ function resolveNativeStageLyricFrame(mesh, progress, now) {
   });
 }
 
-function resolveNativeStageLyricOrbit(mesh, progress) {
-  var api = foliaNativeLyricVisualsApi();
-  var data = mesh && mesh.userData || {};
-  var frame = data.nativeVisualFrame || null;
-  var line = data.nativeLyricLine || null;
-  if (!api || typeof api.resolveCladdaghOrbit !== 'function' || !frame || !line || frame.orbitStrength <= 0) return null;
-  return api.resolveCladdaghOrbit({
-    index: line.index || 0,
-    count: Math.max(1, lyricsLines && lyricsLines.length || 1),
-    progress: progress,
-    radiusX: 0.16,
-    radiusY: 0.07,
-    depth: 0.10,
-    focus: foliaFx && isFinite(foliaFx.currentLineFocus) ? foliaFx.currentLineFocus : 0.75,
-    audioPower: currentNativeLyricAudioFrame().beatPulse,
-    effectStrength: frame.orbitStrength,
-  });
-}
-
 function updateLyricMeshProgress(mesh, progress) {
   if (!mesh || !mesh.userData || !mesh.userData.lyric) return;
   progress = Math.max(0, Math.min(1, progress || 0));
@@ -8577,14 +8555,6 @@ function updateStageLyrics3D(dt) {
         mesh.position.y += ((0.18 + Math.sin(t * 0.55 + seed) * 0.055 + Math.sin(t * 1.35 + seed) * 0.014) - mesh.position.y) * 0.075;
         mesh.position.z += ((1.48 + Math.cos(t * 0.48 + seed) * 0.080) - mesh.position.z) * 0.080;
         mesh.rotation.z = Math.sin(t * 0.34 + seed) * 0.018;
-      }
-      var orbit = resolveNativeStageLyricOrbit(mesh, mesh.userData.lastLyricProgress || 0);
-      if (orbit) {
-        mesh.position.x += orbit.x;
-        mesh.position.y += orbit.y;
-        mesh.position.z += orbit.z;
-        mesh.scale.multiplyScalar(orbit.scale);
-        mesh.rotation.z += orbit.rotateZ * Math.PI / 180;
       }
       if (data.sparks && data.sparkMat) data.sparks.visible = fx.lyricGlowParticles || getLyricSparkOpacity(data) > 0.015;
       if (data.sparks && data.basePositions) {
@@ -18131,8 +18101,8 @@ function applyLyricsState(lines, hasNativeKaraoke, timingSource) {
   lyricLineFinder.reset();
   renderLyrics();
   clearLyricTextureCache();
+  refreshNativeLyricDocument('lyrics-state');
   updateCustomLyricControls();
-  pushFoliaPlaybackBridge('lyrics-state', { force: true });
 }
 function applyOriginalLyricsState() {
   lyricSourceMode = 'original';
@@ -18179,9 +18149,9 @@ function applyCustomLyricState(song, silent) {
   lyricLineFinder.reset();
   renderLyrics();
   clearLyricTextureCache();
+  refreshNativeLyricDocument('custom-lyrics-state');
   updateCustomLyricControls();
   if (emptyHomeActive) renderHomeWeatherHero(true);
-  pushFoliaPlaybackBridge('custom-lyrics-state', { force: true });
   return true;
 }
 function preferredLyricSourceForSong(song) {
@@ -18257,6 +18227,644 @@ function foliaThemeApi() {
 function foliaFxApi() {
   return window.MineradioFoliaFxState || {};
 }
+function nativeLyricConfigApi() {
+  return window.MineradioNativeLyricConfig || {};
+}
+function nativeLyricStateApi() {
+  return window.MineradioNativeLyricState || {};
+}
+var NATIVE_LYRIC_MODE_META = {
+  'mineradio-3d': { label:'Mineradio 3D', kind:'Three.js' },
+  classic: { label:'流光', kind:'DOM / CSS' },
+  cadenza: { label:'心象', kind:'Canvas / DOM' },
+  partita: { label:'云阶', kind:'DOM / CSS' },
+  tilt: { label:'倾诉', kind:'DOM / CSS' },
+  monet: { label:'莫奈', kind:'DOM / Canvas' },
+  cappella: { label:'群唱', kind:'DOM / CSS' },
+  fume: { label:'浮名', kind:'Canvas 2D' }
+};
+var NATIVE_LYRIC_COMMON_CONTROLS = [
+  { path:'common.scale', label:'整体大小', type:'range', min:0.65, max:1.8, step:0.01 },
+  { path:'common.opacity', label:'整体透明度', type:'range', min:0.2, max:1, step:0.01 },
+  { path:'common.glow', label:'文字辉光', type:'range', min:0, max:1, step:0.01 },
+  { path:'common.beatMotion', label:'鼓点响应', type:'range', min:0, max:1, step:0.01 },
+  { path:'common.performanceMode', label:'性能档位', type:'select', options:[['quality','高质量'],['balanced','平衡'],['battery','省电']] },
+  { path:'common.reduceMotion', label:'减少动效', type:'checkbox' }
+];
+var NATIVE_LYRIC_MODE_CONTROLS = {
+  'mineradio-3d': [
+    { path:'modes.mineradio3d.effect', label:'3D 效果', type:'select', options:[['hybrid','融合'],['monet-sweep','扫光'],['classic','流光'],['off','关闭']] },
+    { path:'modes.mineradio3d.cameraMotion', label:'镜头运动', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.mineradio3d.particleAmount', label:'歌词光粒', type:'range', min:0, max:1, step:0.01 }
+  ],
+  classic: [
+    { path:'modes.classic.intensity', label:'动态强度', type:'select', options:[['calm','平静'],['normal','标准'],['chaotic','强烈']] },
+    { path:'modes.classic.spread', label:'词组散布', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.classic.enableWordRotation', label:'逐字旋转', type:'checkbox' },
+    { path:'modes.classic.useLegacyLayout', label:'旧版排版', type:'checkbox' },
+    { path:'modes.classic.wordSpacing', label:'单词间距', type:'range', min:0, max:2, step:0.05 },
+    { path:'modes.classic.wordGlow', label:'逐字辉光', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.classic.breathing', label:'整行呼吸', type:'range', min:0, max:2, step:0.05 },
+    { path:'modes.classic.chorusRipple', label:'副歌涟漪', type:'checkbox' }
+  ],
+  cadenza: [
+    { path:'modes.cadenza.fontScale', label:'文字比例', type:'range', min:0.65, max:1.8, step:0.01 },
+    { path:'modes.cadenza.widthRatio', label:'排版宽度', type:'range', min:0.42, max:0.92, step:0.01 },
+    { path:'modes.cadenza.motionAmount', label:'字块运动', type:'range', min:0, max:1.6, step:0.01 },
+    { path:'modes.cadenza.glowIntensity', label:'活动辉光', type:'range', min:0, max:1.5, step:0.01 },
+    { path:'modes.cadenza.beam', label:'光束强度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.cadenza.trails', label:'拖尾长度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.cadenza.ripple', label:'涟漪强度', type:'range', min:0, max:1, step:0.01 }
+  ],
+  partita: [
+    { path:'modes.partita.columns', label:'分栏数量', type:'range', min:2, max:5, step:1 },
+    { path:'modes.partita.guideOpacity', label:'引导线', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.partita.stagger', label:'错位幅度', type:'range', min:0, max:1, step:0.01 }
+  ],
+  tilt: [
+    { path:'modes.tilt.emphasis', label:'强调幅度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.tilt.pulse', label:'字符脉冲', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.tilt.maxLines', label:'最大行数', type:'range', min:1, max:4, step:1 }
+  ],
+  monet: [
+    { path:'modes.monet.posterContrast', label:'海报对比度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.monet.audioOverlay', label:'音频轨强度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.monet.keywordColor', label:'关键词着色', type:'checkbox' }
+  ],
+  cappella: [
+    { path:'modes.cappella.maxMessages', label:'消息数量', type:'range', min:4, max:20, step:1 },
+    { path:'modes.cappella.revealSpeed', label:'逐字速度', type:'range', min:0.5, max:2, step:0.05 },
+    { path:'modes.cappella.timestamps', label:'显示时间', type:'checkbox' }
+  ],
+  fume: [
+    { path:'modes.fume.columns', label:'文章分栏', type:'range', min:2, max:5, step:1 },
+    { path:'modes.fume.cameraMode', label:'镜头方式', type:'select', options:[['smooth','平滑'],['step','分步']] },
+    { path:'modes.fume.cameraSpeed', label:'镜头速度', type:'range', min:0.35, max:2.5, step:0.01 },
+    { path:'modes.fume.textHoldRatio', label:'文字停留', type:'range', min:0.2, max:1.8, step:0.01 },
+    { path:'modes.fume.glowIntensity', label:'当前句辉光', type:'range', min:0, max:1.5, step:0.01 },
+    { path:'modes.fume.heroScale', label:'大标题比例', type:'range', min:0.7, max:1.5, step:0.01 },
+    { path:'modes.fume.hidePrintSymbols', label:'隐藏打印标记', type:'checkbox' },
+    { path:'modes.fume.geometricBackground', label:'几何背景', type:'checkbox' },
+    { path:'modes.fume.backgroundObjectOpacity', label:'背景物体透明度', type:'range', min:0, max:1, step:0.01 },
+    { path:'modes.fume.cacheEntries', label:'快照上限', type:'range', min:8, max:48, step:1 }
+  ]
+};
+function readNativeLyricConfigState() {
+  var api = nativeLyricConfigApi();
+  var raw = null;
+  try { raw = JSON.parse(localStorage.getItem(NATIVE_LYRIC_CONFIG_KEY) || 'null'); } catch (e) { raw = null; }
+  if (api && typeof api.migrateLegacyNativeLyricConfig === 'function') return api.migrateLegacyNativeLyricConfig(raw, foliaFx || {});
+  return raw || { mode:'mineradio-3d', common:{}, modes:{} };
+}
+function saveNativeLyricConfig() {
+  var api = nativeLyricConfigApi();
+  nativeLyricConfig = api && typeof api.normalizeNativeLyricConfig === 'function'
+    ? api.normalizeNativeLyricConfig(nativeLyricConfig || {})
+    : (nativeLyricConfig || {});
+  try {
+    localStorage.setItem(NATIVE_LYRIC_CONFIG_KEY, JSON.stringify(nativeLyricConfig));
+    backupPersistentUiState((function(){ var patch = {}; patch[NATIVE_LYRIC_CONFIG_KEY] = nativeLyricConfig; return patch; })());
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function syncLegacyFoliaFxFromNativeConfig() {
+  if (!nativeLyricConfig || !nativeLyricConfig.common || !nativeLyricConfig.modes) return;
+  var api = foliaFxApi();
+  var common = nativeLyricConfig.common;
+  var mode3d = nativeLyricConfig.modes.mineradio3d || {};
+  var patch = {
+    enabled: nativeLyricConfig.enabled !== false,
+    lyricScale: common.scale,
+    lineSpacing: common.lineSpacing,
+    translationMode: common.translationMode,
+    backgroundMode: common.backgroundMode,
+    accentColor: common.accentColor,
+    glow: common.glow,
+    beatMotion: common.beatMotion,
+    performanceMode: common.performanceMode,
+    reduceMotion: common.reduceMotion,
+    nativeLyricEffect: mode3d.effect,
+    cameraMotion: mode3d.cameraMotion,
+    particleAmount: mode3d.particleAmount
+  };
+  foliaFx = api && typeof api.patchFoliaFx === 'function' ? api.patchFoliaFx(foliaFx || {}, patch) : Object.assign({}, foliaFx || {}, patch);
+  saveFoliaFxSettings();
+  syncFoliaFxControls();
+}
+function nativeLyricConfigValue(path) {
+  return String(path || '').split('.').reduce(function(value, key){
+    return value && Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+  }, nativeLyricConfig);
+}
+function nativeLyricPatchForPath(path, value) {
+  var keys = String(path || '').split('.').filter(Boolean);
+  var patch = {};
+  var cursor = patch;
+  keys.forEach(function(key, index){
+    if (index === keys.length - 1) cursor[key] = value;
+    else cursor = cursor[key] = {};
+  });
+  return patch;
+}
+function applyNativeLyricConfig(nextConfig, reason, opts) {
+  opts = opts || {};
+  var api = nativeLyricConfigApi();
+  nativeLyricConfig = api && typeof api.normalizeNativeLyricConfig === 'function'
+    ? api.normalizeNativeLyricConfig(nextConfig || {})
+    : (nextConfig || {});
+  var saved = saveNativeLyricConfig();
+  syncLegacyFoliaFxFromNativeConfig();
+  if (!opts.skipControls) syncNativeLyricControls();
+  if (nativeLyricRuntime && typeof nativeLyricRuntime.setMode === 'function' && !opts.skipMode) {
+    nativeLyricRuntime.setMode(nativeLyricConfig.mode);
+  }
+  var status = document.getElementById('native-lyric-settings-status');
+  if (status) status.textContent = (saved ? '' : '未保存 · ') + ((NATIVE_LYRIC_MODE_META[nativeLyricConfig.mode] || {}).label || nativeLyricConfig.mode);
+  return nativeLyricConfig;
+}
+function setNativeLyricMode(mode, silent) {
+  var api = nativeLyricConfigApi();
+  var next = api && typeof api.patchNativeLyricConfig === 'function'
+    ? api.patchNativeLyricConfig(nativeLyricConfig || {}, { mode: mode })
+    : Object.assign({}, nativeLyricConfig || {}, { mode: mode });
+  applyNativeLyricConfig(next, 'mode');
+  if (!silent) showToast('歌词视觉: ' + ((NATIVE_LYRIC_MODE_META[nativeLyricConfig.mode] || {}).label || nativeLyricConfig.mode));
+}
+function updateNativeLyricSetting(path, value, type, output) {
+  if (type === 'checkbox') value = !!value;
+  else if (type === 'range') value = Number(value);
+  var api = nativeLyricConfigApi();
+  var patch = nativeLyricPatchForPath(path, value);
+  nativeLyricConfig = api && typeof api.patchNativeLyricConfig === 'function'
+    ? api.patchNativeLyricConfig(nativeLyricConfig || {}, patch)
+    : Object.assign({}, nativeLyricConfig || {}, patch);
+  applyNativeLyricConfig(nativeLyricConfig, path, { skipControls:true, skipMode:true });
+  if (output) output.textContent = type === 'range' ? String(Number(value).toFixed(Number(value) % 1 ? 2 : 0)) : String(value);
+}
+function nativeLyricControlElement(definition) {
+  var row = document.createElement('label');
+  row.className = 'native-lyric-control' + (definition.type === 'checkbox' ? ' is-toggle' : '');
+  var label = document.createElement('span');
+  label.textContent = definition.label;
+  row.appendChild(label);
+  var value = nativeLyricConfigValue(definition.path);
+  var input;
+  if (definition.type === 'select') {
+    input = document.createElement('select');
+    (definition.options || []).forEach(function(option){
+      var node = document.createElement('option');
+      node.value = option[0];
+      node.textContent = option[1];
+      input.appendChild(node);
+    });
+    input.value = value;
+    input.addEventListener('change', function(){ updateNativeLyricSetting(definition.path, input.value, definition.type); });
+  } else {
+    input = document.createElement('input');
+    input.type = definition.type;
+    if (definition.type === 'checkbox') {
+      input.checked = value === true;
+      input.addEventListener('change', function(){ updateNativeLyricSetting(definition.path, input.checked, definition.type); });
+    } else {
+      input.min = definition.min;
+      input.max = definition.max;
+      input.step = definition.step;
+      input.value = value;
+      var output = document.createElement('output');
+      output.textContent = String(value);
+      input.addEventListener('input', function(){ updateNativeLyricSetting(definition.path, input.value, definition.type, output); });
+      row.appendChild(input);
+      row.appendChild(output);
+      return row;
+    }
+  }
+  row.appendChild(input);
+  return row;
+}
+function nativeCappellaAssetControl(kind) {
+  var row = document.createElement('div');
+  row.className = 'native-lyric-control native-lyric-asset-control';
+  var label = document.createElement('span');
+  label.textContent = kind === 'emoji' ? '表情素材' : '头像素材';
+  var actions = document.createElement('span');
+  actions.className = 'native-lyric-asset-actions';
+  var configKey = kind === 'emoji' ? 'emojiPackId' : 'avatarPackId';
+  var packId = nativeLyricConfig.modes.cappella[configKey];
+  var status = document.createElement('small');
+  status.textContent = packId === 'custom-local' ? '本机自定义' : 'Folia 内置';
+  var importButton = document.createElement('button');
+  importButton.type = 'button';
+  importButton.className = 'fx-mini-btn ghost';
+  importButton.textContent = '导入';
+  importButton.addEventListener('click', function(){ importNativeCappellaAssets(kind); });
+  var builtinButton = document.createElement('button');
+  builtinButton.type = 'button';
+  builtinButton.className = 'fx-mini-btn ghost';
+  builtinButton.textContent = '内置';
+  builtinButton.addEventListener('click', function(){ useBuiltinNativeCappellaAssets(kind); });
+  actions.appendChild(status);
+  actions.appendChild(importButton);
+  actions.appendChild(builtinButton);
+  row.appendChild(label);
+  row.appendChild(actions);
+  return row;
+}
+function importNativeCappellaAssets(kind) {
+  kind = kind === 'emoji' ? 'emoji' : 'avatar';
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  input.onchange = function(){
+    var files = Array.prototype.slice.call(input.files || [], 0, 24).filter(function(file){ return file && file.size > 0 && file.size <= 5 * 1024 * 1024; });
+    if (!files.length) {
+      showToast('没有可导入的图片，单张上限 5MB');
+      return;
+    }
+    loadNativeLyricRendererScript('folia-native/cappella-assets.js').then(function(){
+      var assetsApi = window.MineradioNativeLyricCappellaAssets || {};
+      if (!assetsApi.createCappellaAssetStore) throw new Error('asset store unavailable');
+      var store = assetsApi.createCappellaAssetStore();
+      return Promise.all(files.map(function(file, index){
+        var randomId = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : (Date.now() + '-' + index);
+        return store.save(kind, { id:'custom-' + kind + '-' + randomId, name:file.name, blob:file });
+      })).then(function(){ store.close(); });
+    }).then(function(){
+      var key = kind === 'emoji' ? 'emojiPackId' : 'avatarPackId';
+      updateNativeLyricSetting('modes.cappella.' + key, 'custom-local', 'select');
+      syncNativeLyricControls();
+      window.dispatchEvent(new CustomEvent('mineradio-cappella-assets-changed'));
+      showToast((kind === 'emoji' ? '群唱表情' : '群唱头像') + '已存入本机素材库');
+    }).catch(function(){ showToast('群唱素材导入失败'); });
+  };
+  input.click();
+}
+function useBuiltinNativeCappellaAssets(kind) {
+  var key = kind === 'emoji' ? 'emojiPackId' : 'avatarPackId';
+  updateNativeLyricSetting('modes.cappella.' + key, 'builtin-folia', 'select');
+  syncNativeLyricControls();
+  window.dispatchEvent(new CustomEvent('mineradio-cappella-assets-changed'));
+}
+function renderNativeLyricModeControls() {
+  var container = document.getElementById('native-lyric-mode-controls');
+  if (!container || !nativeLyricConfig) return;
+  var mode = nativeLyricConfig.mode || 'mineradio-3d';
+  var definitions = NATIVE_LYRIC_COMMON_CONTROLS.concat(NATIVE_LYRIC_MODE_CONTROLS[mode] || []);
+  container.replaceChildren();
+  definitions.forEach(function(definition){ container.appendChild(nativeLyricControlElement(definition)); });
+  if (mode === 'cappella') {
+    container.appendChild(nativeCappellaAssetControl('emoji'));
+  }
+  var meta = NATIVE_LYRIC_MODE_META[mode] || { label:mode, kind:'' };
+  var name = document.getElementById('native-lyric-current-mode-name');
+  var kind = document.getElementById('native-lyric-current-mode-kind');
+  if (name) name.textContent = meta.label;
+  if (kind) kind.textContent = meta.kind;
+}
+function syncNativeLyricControls() {
+  var api = nativeLyricConfigApi();
+  if (api && typeof api.normalizeNativeLyricConfig === 'function') nativeLyricConfig = api.normalizeNativeLyricConfig(nativeLyricConfig || {});
+  document.querySelectorAll('[data-native-lyric-mode]').forEach(function(button){
+    var active = button.getAttribute('data-native-lyric-mode') === nativeLyricConfig.mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  renderNativeLyricModeControls();
+}
+function resetNativeLyricSettings() {
+  var api = nativeLyricConfigApi();
+  var defaults = api.DEFAULT_NATIVE_LYRIC_CONFIG || {};
+  try { localStorage.removeItem(NATIVE_LYRIC_CONFIG_KEY); } catch (e) {}
+  applyNativeLyricConfig(defaults, 'reset');
+  showToast('原生歌词设置已重置');
+}
+function nativeLyricTrackMetadata() {
+  var song = typeof currentLyricSong === 'function' ? currentLyricSong() : null;
+  song = song || {};
+  var rawArtist = song.artist || song.artists || song.ar || '';
+  var artist = Array.isArray(rawArtist) ? rawArtist.map(function(item){
+    return item && typeof item === 'object' ? item.name || '' : String(item || '');
+  }).filter(Boolean).join(' / ') : String(rawArtist || '');
+  return {
+    id: songCustomLyricKey(song) || String(song.id || ''),
+    source: lyricSourceMode || 'original',
+    title: song.name || song.title || '',
+    artist: artist,
+    album: song.albumName || song.album && song.album.name || song.al && song.al.name || '',
+    cover: song.customCover || song.cover || '',
+    duration: audio && isFinite(audio.duration) ? audio.duration : 0
+  };
+}
+function refreshNativeLyricDocument(reason) {
+  var api = nativeLyricStateApi();
+  if (!api || typeof api.buildNativeLyricDocument !== 'function') return null;
+  var metadata = nativeLyricTrackMetadata();
+  var signature = [metadata.id, metadata.source, lyricsTimingSource, lyricsLines.length].concat(lyricsLines.map(function(line){
+    return [line.t, line.duration, line.text, line.translation || line.translated || '', line.words && line.words.length || 0].join(':');
+  })).join('|');
+  if (signature === nativeLyricDocumentSignature && nativeLyricDocument) return nativeLyricDocument;
+  nativeLyricDocumentSignature = signature;
+  nativeLyricDocument = api.buildNativeLyricDocument(lyricsLines, metadata);
+  nativeLyricFrameLineIndex = -1;
+  if (nativeLyricRuntime) nativeLyricRuntime.setDocument(nativeLyricDocument);
+  return nativeLyricDocument;
+}
+function nativeLyricViewport() {
+  return { width:Math.max(1, innerWidth), height:Math.max(1, innerHeight), dpr:Math.max(1, window.devicePixelRatio || 1) };
+}
+function nativeLyricSafeArea(frame) {
+  var viewport = frame && frame.viewport || nativeLyricViewport();
+  var width = Math.max(1, Number(viewport.width) || innerWidth || 1);
+  var height = Math.max(1, Number(viewport.height) || innerHeight || 1);
+  var horizontal = Math.max(24, width * 0.08);
+  var top = Math.max(document.body && document.body.classList.contains('desktop-shell') ? 62 : 48, height * 0.10);
+  var bottom = Math.max(92, height * 0.17);
+  var bar = document.getElementById('bottom-bar');
+  if (bar && bar.classList.contains('visible') && !bar.classList.contains('soft-hidden')) {
+    var rect = bar.getBoundingClientRect();
+    bottom = Math.max(bottom, height - rect.top + 20);
+  }
+  var shelfOpen = typeof shouldOffsetLyricsForShelfDetail === 'function' && shouldOffsetLyricsForShelfDetail();
+  return {
+    left:horizontal,
+    right:shelfOpen ? Math.max(horizontal, width * 0.38) : horizontal,
+    top:top,
+    bottom:bottom,
+    shelfOpen:!!shelfOpen
+  };
+}
+function nativeLyricWorldPerPixel(frame) {
+  var viewport = frame && frame.viewport || nativeLyricViewport();
+  var height = Math.max(1, Number(viewport.height) || innerHeight || 1);
+  var fov = Math.max(1, Number(camera && camera.fov) || 45) * Math.PI / 180;
+  return (2 * Math.tan(fov * 0.5) * 4.85) / height;
+}
+function nativeClassicLyricTypography() {
+  var fontSize = innerWidth < 640 ? 42 : innerWidth < 1000 ? 56 : 72;
+  return {
+    fontFamily:lyricFontStackForKey(fx && fx.lyricFont),
+    fontWeight:lyricFontWeightValue(),
+    letterSpacing:lyricLetterSpacingPx(fontSize) / Math.max(1, fontSize),
+    key:lyricTextureStyleKey()
+  };
+}
+var nativeClassicLyricMeasureCanvas = null;
+function nativeClassicLyricMeasureText(text, typography, fontSize) {
+  text = String(text || '');
+  if (!nativeClassicLyricMeasureCanvas) nativeClassicLyricMeasureCanvas = document.createElement('canvas');
+  var context = nativeClassicLyricMeasureCanvas.getContext('2d');
+  var split = window.MineradioNativeLyricLayout && window.MineradioNativeLyricLayout.splitGraphemes;
+  var graphemes = typeof split === 'function' ? split(text) : Array.from(text);
+  var width = 0;
+  if (context) {
+    context.font = typography.fontWeight + ' ' + fontSize + 'px ' + typography.fontFamily;
+    for (var i = 0; i < graphemes.length; i++) width += context.measureText(graphemes[i]).width;
+  } else {
+    width = graphemes.length * fontSize * 0.65;
+  }
+  width += Math.max(0, graphemes.length - 1) * (Number(typography.letterSpacing) || 0) * fontSize;
+  return Math.max(0, width);
+}
+function nativeClassicLyricParallax(frame) {
+  var common = frame && frame.config && frame.config.common || {};
+  var shelfOpen = typeof shouldOffsetLyricsForShelfDetail === 'function' && shouldOffsetLyricsForShelfDetail();
+  if ((frame && frame.reducedMotion) || common.performanceMode === 'battery' || shelfOpen || !orbit || orbit.centerLocked || (orbit.focus && orbit.focus.active)) {
+    return { x:0, y:0, rotationX:0, rotationY:0 };
+  }
+  var yaw = clampRange(gestureRotation.y / 0.12, -1, 1);
+  var pitch = clampRange(gestureRotation.x / 0.10, -1, 1);
+  return {
+    x:yaw * 0.03,
+    y:-pitch * 0.018,
+    rotationX:pitch * 3.2 * Math.PI / 180,
+    rotationY:-yaw * 4 * Math.PI / 180
+  };
+}
+function nativeThreeLyricAnchor(frame) {
+  if (!camera || !THREE) return null;
+  if (!nativeThreeLyricForward) nativeThreeLyricForward = new THREE.Vector3();
+  if (!nativeThreeLyricPosition) nativeThreeLyricPosition = new THREE.Vector3();
+  camera.getWorldDirection(nativeThreeLyricForward);
+  nativeThreeLyricPosition.copy(camera.position).addScaledVector(nativeThreeLyricForward, 4.85);
+  var common = frame && frame.config && frame.config.common || nativeLyricConfig && nativeLyricConfig.common || {};
+  return {
+    position:nativeThreeLyricPosition,
+    quaternion:camera.quaternion,
+    scale:Math.max(0.65, Math.min(1.8, Number(common.scale) || 1)),
+    distance:4.85,
+    safeArea:nativeLyricSafeArea(frame),
+    shelfOpen:typeof shouldOffsetLyricsForShelfDetail === 'function' && shouldOffsetLyricsForShelfDetail()
+  };
+}
+function createNativeThreeLyricHost() {
+  if (nativeThreeLyricHost) return nativeThreeLyricHost;
+  var api = window.MineradioNativeLyricThreeHost || {};
+  if (typeof api.createThreeLyricHost !== 'function' || !scene || !camera || !renderer) return null;
+  try {
+    nativeThreeLyricHost = api.createThreeLyricHost({
+      THREE:THREE,
+      scene:scene,
+      camera:camera,
+      renderer:renderer,
+      getAnchor:nativeThreeLyricAnchor,
+      transitionMaxPixels:NATIVE_LYRIC_THREE_4K_PIXEL_BUDGET,
+      atlasMaxPages:4,
+      atlasMaxBytes:32 * 1024 * 1024
+    });
+  } catch (error) {
+    nativeThreeLyricHost = null;
+    console.warn('native Three lyric host failed:', error);
+  }
+  return nativeThreeLyricHost;
+}
+function notifyNativeClassicThreeFallback(info) {
+  showToast('流光 3D 暂不可用，已临时切换兼容歌词');
+  if (info && info.error) console.warn('classic Three lyric fallback:', info.error);
+}
+function updateNativeLyricLiveRegion(line) {
+  var translationMode = nativeLyricConfig && nativeLyricConfig.common && nativeLyricConfig.common.translationMode || 'auto';
+  var text = line && line.fullText || '';
+  var translation = line && translationMode !== 'off' ? line.translation || '' : '';
+  var signature = text + '\n' + translation;
+  if (signature === nativeLyricLiveSignature) return false;
+  nativeLyricLiveSignature = signature;
+  var live = document.getElementById('native-lyric-live');
+  if (live) live.textContent = translation ? text + '。' + translation : text;
+  return true;
+}
+function nativeLyricModeIs3D() {
+  return !nativeLyricConfig || nativeLyricConfig.mode === 'mineradio-3d';
+}
+function setNative3DLyricVisible(visible) {
+  if (stageLyrics && stageLyrics.group) stageLyrics.group.visible = !!visible;
+}
+function captureNative3DLyricTransition() {
+  var layer = document.createElement('div');
+  layer.className = 'native-mineradio-3d-transition-capture';
+  return layer;
+}
+function nativeLyric3DSnapshot() {
+  return { domNodes:0, canvases:0, cacheEntries:cacheCount(lyricTextureCache), cacheBytes:0 };
+}
+function loadNativeLyricRendererScript(src) {
+  src = String(src || '');
+  if (!src) return Promise.reject(new Error('Native lyric renderer script is required'));
+  if (nativeLyricRendererScriptPromises[src]) return nativeLyricRendererScriptPromises[src];
+  nativeLyricRendererScriptPromises[src] = new Promise(function(resolve, reject){
+    var script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = function(){ resolve(src); };
+    script.onerror = function(){
+      delete nativeLyricRendererScriptPromises[src];
+      reject(new Error('Unable to load native lyric renderer: ' + src));
+    };
+    document.head.appendChild(script);
+  });
+  return nativeLyricRendererScriptPromises[src];
+}
+function registerNativeLyricRenderer(mode, scripts, globalName, factoryName, extendContext) {
+  if (!nativeLyricRegistry) return false;
+  scripts = Array.isArray(scripts) ? scripts : [scripts];
+  nativeLyricRegistry.register(mode, function(){
+    return scripts.reduce(function(chain, src){
+      return chain.then(function(){ return loadNativeLyricRendererScript(src); });
+    }, Promise.resolve()).then(function(){
+      var namespace = window[globalName] || {};
+      var factory = namespace[factoryName];
+      if (typeof factory !== 'function') throw new Error('Native lyric renderer factory is missing: ' + mode);
+      return function(context){
+        var nextContext = typeof extendContext === 'function' ? extendContext(context || {}) : context;
+        return factory(nextContext);
+      };
+    });
+  });
+  return true;
+}
+function initNativeLyricRuntime() {
+  var registryApi = window.MineradioNativeLyricRegistry || {};
+  var runtimeApi = window.MineradioNativeLyricRuntime || {};
+  var adapterApi = window.MineradioNativeLyricMineradio3D || {};
+  if (!registryApi.createRendererRegistry || !runtimeApi.createNativeLyricRuntime || !adapterApi.createMineradio3DRenderer) return false;
+  createNativeThreeLyricHost();
+  nativeLyricRegistry = registryApi.createRendererRegistry();
+  nativeLyricRegistry.register('mineradio-3d', function(){
+    return function(){
+      return adapterApi.createMineradio3DRenderer({
+        setVisible:setNative3DLyricVisible,
+        clear:function(){ clearStageLyrics(); },
+        captureTransition:captureNative3DLyricTransition,
+        snapshot:nativeLyric3DSnapshot
+      });
+    };
+  });
+  registerNativeLyricRenderer('cappella', [
+    'folia-native/cappella-state.js',
+    'folia-native/cappella-assets.js',
+    'folia-native/renderers/cappella.js'
+  ], 'MineradioNativeLyricCappella', 'createCappellaRenderer');
+  registerNativeLyricRenderer('classic', [
+    'folia-native/dom-state.js',
+    'folia-native/classic-three-groups.js',
+    'folia-native/classic-three-motion.js',
+    'folia-native/classic-three-state.js',
+    'folia-native/three/spark-field.js',
+    'folia-native/renderers/shared-dom.js',
+    'folia-native/renderers/classic.js',
+    'folia-native/renderers/adaptive-three.js',
+    'folia-native/renderers/classic-three.js'
+  ], 'MineradioNativeLyricClassicThree', 'createClassicThreeRenderer', function(context){
+    return Object.assign({}, context, {
+      THREE:THREE,
+      host:nativeThreeLyricHost,
+      getSafeArea:nativeLyricSafeArea,
+      getWorldPerPixel:nativeLyricWorldPerPixel,
+      getTypography:nativeClassicLyricTypography,
+      measureText:nativeClassicLyricMeasureText,
+      getParallax:nativeClassicLyricParallax,
+      onFallback:notifyNativeClassicThreeFallback,
+      onError:function(error, detail){ console.warn('classic lyric renderer failed:', detail, error); }
+    });
+  });
+  registerNativeLyricRenderer('cadenza', [
+    'folia-native/cadenza-state.js',
+    'folia-native/renderers/cadenza.js'
+  ], 'MineradioNativeLyricCadenza', 'createCadenzaRenderer');
+  registerNativeLyricRenderer('partita', [
+    'folia-native/dom-state.js',
+    'folia-native/renderers/shared-dom.js',
+    'folia-native/renderers/partita.js'
+  ], 'MineradioNativeLyricPartita', 'createPartitaRenderer');
+  registerNativeLyricRenderer('tilt', [
+    'folia-native/dom-state.js',
+    'folia-native/renderers/shared-dom.js',
+    'folia-native/renderers/tilt.js'
+  ], 'MineradioNativeLyricTilt', 'createTiltRenderer');
+  registerNativeLyricRenderer('monet', [
+    'folia-native/monet-state.js',
+    'folia-native/renderers/monet.js'
+  ], 'MineradioNativeLyricMonet', 'createMonetRenderer');
+  registerNativeLyricRenderer('fume', [
+    'folia-native/fume-state.js',
+    'folia-native/renderers/fume.js'
+  ], 'MineradioNativeLyricFume', 'createFumeRenderer');
+  nativeLyricRuntime = runtimeApi.createNativeLyricRuntime({
+    registry:nativeLyricRegistry,
+    root:document.getElementById('native-lyric-root'),
+    fallbackMode:'mineradio-3d',
+    onFallback:function(info){
+      var failedMode = info && info.mode || '';
+      if (failedMode && failedMode !== nativeLyricLastFallbackMode) showToast('歌词视觉加载失败，已回到 Mineradio 3D');
+      nativeLyricLastFallbackMode = failedMode;
+      var configApi = nativeLyricConfigApi();
+      nativeLyricConfig = configApi.patchNativeLyricConfig(nativeLyricConfig || {}, { mode:'mineradio-3d' });
+      saveNativeLyricConfig();
+      syncNativeLyricControls();
+    },
+    onError:function(error, context){ console.warn('native lyric renderer failed:', context, error); }
+  });
+  nativeLyricRuntime.resize(nativeLyricViewport());
+  nativeLyricRuntime.setDocument(nativeLyricDocument || refreshNativeLyricDocument('runtime-init'));
+  nativeLyricRuntime.setMode(nativeLyricConfig.mode || 'mineradio-3d');
+  syncNativeLyricControls();
+  return true;
+}
+function updateNativeLyricRuntime(dt) {
+  if (!nativeLyricRuntime || !nativeLyricDocument || visualBudgetState.mode === 'released') return false;
+  var api = nativeLyricStateApi();
+  if (!api || typeof api.buildNativeLyricFrame !== 'function') return false;
+  var now = audio && isFinite(audio.currentTime) ? audio.currentTime : 0;
+  if (typeof api.findActiveLineIndex === 'function') nativeLyricFrameLineIndex = api.findActiveLineIndex(nativeLyricDocument, now, nativeLyricFrameLineIndex);
+  updateNativeLyricLiveRegion(nativeLyricFrameLineIndex >= 0 ? nativeLyricDocument.lines[nativeLyricFrameLineIndex] : null);
+  return nativeLyricRuntime.update(api.buildNativeLyricFrame(nativeLyricDocument, {
+    now:now,
+    dt:dt,
+    rafDeltaMs:Math.max(0, Number(dt) || 0) * 1000,
+    lineIndex:nativeLyricFrameLineIndex,
+    playing:playing,
+    audio:{ frequencyData:frequencyData, bass:bass, mid:mid, treble:treble, energy:audioEnergy, beatPulse:beatPulse, beatOnset:beatOnsetFlag },
+    theme:Object.assign({}, stageLyrics && stageLyrics.palette || {}, {
+      wordColors:foliaThemeCurrent && foliaThemeCurrent.wordColors || []
+    }),
+    viewport:nativeLyricViewport(),
+    quality:nativeLyricConfig.common.performanceMode,
+    reducedMotion:nativeLyricConfig.common.reduceMotion,
+    track:nativeLyricTrackMetadata(),
+    config:nativeLyricConfig
+  }));
+}
+function destroyNativeLyricRuntime() {
+  if (nativeLyricRuntime && typeof nativeLyricRuntime.destroy === 'function') nativeLyricRuntime.destroy();
+  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.destroy === 'function') nativeThreeLyricHost.destroy();
+  nativeLyricRuntime = null;
+  nativeThreeLyricHost = null;
+  nativeLyricRegistry = null;
+  nativeLyricDocument = null;
+  nativeLyricLiveSignature = '';
+}
+window.addEventListener('pagehide', destroyNativeLyricRuntime);
 function readFoliaFxState() {
   var api = foliaFxApi();
   var raw = {};
@@ -18285,9 +18893,8 @@ function applyFoliaFxPatch(patch, reason) {
     : Object.assign({}, foliaFx || {}, patch || {});
   var saved = saveFoliaFxSettings();
   syncFoliaFxControls();
-  pushFoliaPlaybackBridge('folia-fx-state', { force: true });
   var status = document.getElementById('folia-fx-status');
-  if (status) status.textContent = saved ? '已保存并实时推送 · ' + (reason || 'updated') : '保存失败，已尝试实时推送';
+  if (status) status.textContent = saved ? '已保存 · ' + (reason || 'updated') : '保存失败';
   return foliaFx;
 }
 function syncFoliaFxControls() {
@@ -18322,8 +18929,7 @@ function resetFoliaFxSettings() {
   try { localStorage.removeItem(FOLIA_FX_KEY); } catch (e) {}
   saveFoliaFxSettings();
   syncFoliaFxControls();
-  pushFoliaPlaybackBridge('folia-fx-state', { force: true });
-  showToast('Folia 舞台效果已重置');
+  showToast('原生歌词兼容设置已重置');
 }
 function readFoliaThemeSettings() {
   var api = foliaThemeApi();
@@ -18496,7 +19102,6 @@ function applyFoliaThemeResult(result, opts) {
   refreshCurrentLyricStyle();
   saveLyricLayout();
   pushDesktopLyricsState(true);
-  pushFoliaPlaybackBridge('theme-state', { force: true });
   renderFoliaThemePreview(result);
   setFoliaThemeStatus(result.generated === false ? '已使用封面色降级主题' : '已应用 Folia AI 主题', result.generated === false ? '' : 'good');
   if (!opts.silent) showToast(result.generated === false ? '已用封面色生成 Folia 主题' : 'Folia AI 主题已应用');
@@ -18546,15 +19151,6 @@ async function generateFoliaThemeForCurrentSong(force) {
   } finally {
     foliaThemeGenerating = false;
   }
-}
-function foliaBridgeThemePayload() {
-  return foliaThemeCurrent || {};
-}
-function foliaBridgeFxPayload() {
-  var api = window.MineradioFoliaFxState || {};
-  return api && typeof api.foliaFxToBridgePayload === 'function'
-    ? api.foliaFxToBridgePayload(foliaFx)
-    : (foliaFx || {});
 }
 function setCustomLyricStatus(text, tone) {
   var el = document.getElementById('custom-lyric-status');
@@ -20386,7 +20982,6 @@ function syncPlaybackStateFromAudioEvent(reason) {
     else if (!isPlaying) clearCommentBarrage3D(true);
   }
   forcePlaybackControlsInteractive();
-  pushFoliaPlaybackBridge('audio-' + reason, { force: reason === 'play' || reason === 'playing' || reason === 'pause' || reason === 'ended' });
 }
 
 function isPlaybackRecursionError(err) {
@@ -20489,7 +21084,6 @@ async function playQueueAt(idx, opts) {
     updateControlTrackInfo(song);
     document.getElementById('thumb-wrap').classList.add('visible');
   });
-  safePlaybackStep('folia-bridge-track', function(){ pushFoliaPlaybackBridge('track-switch', { force: true }); });
   markPlayPhase('lyric-prep');
   safePlaybackStep('lyric-prep', function(){
     var initialLyricLines = withLyricFallback([]);
@@ -22250,7 +22844,6 @@ setInterval(function(){
   updateListenStatsTick(false);
   updatePlaybackProgressUi();
   if (audio.currentTime) updateLyricsHighlight();
-  pushFoliaPlaybackBridge('playback-tick');
 }, 200);
 
 // ============================================================
@@ -22668,7 +23261,7 @@ var lyricColorPresets = [
 ];
 var USER_FX_ARCHIVE_STORE_KEY = 'mineradio-user-fx-archives-v1';
 var USER_FX_ARCHIVE_EXPORT_TYPE = 'mineradio-user-fx-archive';
-var USER_FX_ARCHIVE_SCHEMA = 1;
+var USER_FX_ARCHIVE_SCHEMA = 2;
 function defaultUserFxArchiveName(index) {
   return '存档 ' + (index + 1);
 }
@@ -22685,6 +23278,11 @@ function archiveNumber(raw, key, fallback, min, max) {
 function archiveMode(raw, key, pattern, fallback) {
   var value = String(raw && raw[key] != null ? raw[key] : fallback);
   return pattern.test(value) ? value : fallback;
+}
+function normalizeNativeLyricArchiveSnapshot(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  var api = nativeLyricConfigApi();
+  return api && typeof api.normalizeNativeLyricConfig === 'function' ? api.normalizeNativeLyricConfig(raw) : raw;
 }
 function normalizeFxArchiveSnapshot(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -22777,6 +23375,7 @@ function normalizeFxArchiveSnapshot(raw) {
     shelfOpacity: archiveNumber(raw, 'shelfOpacity', fxDefaults.shelfOpacity, 0.25, 1),
     shelfBgOpacity: archiveNumber(raw, 'shelfBgOpacity', fxDefaults.shelfBgOpacity, 0.25, 0.98),
     shelfAccentColor: normalizeHexColor(raw.shelfAccentColor || fxDefaults.shelfAccentColor, fxDefaults.shelfAccentColor),
+    nativeLyrics: normalizeNativeLyricArchiveSnapshot(raw.nativeLyrics),
     cam: archiveMode(raw, 'cam', /^(off|gesture)$/, fxDefaults.cam)
   };
 }
@@ -22834,7 +23433,13 @@ function formatUserArchiveTime(ts) {
   return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 function captureFxArchiveSnapshot() {
-  return normalizeFxArchiveSnapshot(Object.assign({ visualPresetSchema: VISUAL_PRESET_SCHEMA }, fx));
+  var api = nativeLyricConfigApi();
+  return normalizeFxArchiveSnapshot(Object.assign({
+    visualPresetSchema: VISUAL_PRESET_SCHEMA,
+    nativeLyrics: api && typeof api.toArchiveNativeLyricConfig === 'function'
+      ? api.toArchiveNativeLyricConfig(nativeLyricConfig || {})
+      : nativeLyricConfig
+  }, fx));
 }
 function applySavedLyricPaletteState() {
   if (!stageLyrics) return;
@@ -22850,7 +23455,7 @@ function applyFxArchiveSnapshot(snapshot) {
   if (!data) return false;
   var targetPreset = data.preset;
   Object.keys(data).forEach(function(key){
-    if (key === 'visualPresetSchema' || key === 'preset') return;
+    if (key === 'visualPresetSchema' || key === 'preset' || key === 'nativeLyrics') return;
     fx[key] = data[key];
   });
   normalizeDevelopmentLockedFxState();
@@ -22874,6 +23479,7 @@ function applyFxArchiveSnapshot(snapshot) {
   applyWallpaperModeState(true);
   updateRenderPowerClasses();
   applyRendererPowerMode();
+  if (data.nativeLyrics) applyNativeLyricConfig(data.nativeLyrics, 'archive');
   saveLyricLayout();
   return true;
 }
@@ -24150,18 +24756,80 @@ function ensureFxSliderResetButton(id, key) {
   });
   el.parentElement.appendChild(btn);
 }
+var FX_PANEL_HOME_ITEMS = [
+  { id: 'presets', label: '预设', icon: 'sliders', description: '视觉预设、用户存档、保存当前方案' },
+  { id: 'appearance', label: '外观', icon: 'palette', description: '界面高亮、视觉主色、背景媒体、玻璃质感' },
+  { id: 'lyrics', label: '歌词', icon: 'lyrics', description: '歌词来源、字体布局、原生歌词参数' },
+  { id: 'motion', label: '动态', icon: 'motion', description: '律动强度、镜头、叠加效果、3D 歌单架' },
+  { id: 'advanced', label: '高级', icon: 'advanced', description: '粒子高级参数、重置、导入导出、实验项' }
+];
 var fxPanelTab = 'presets';
-function setFxPanelTab(tab) {
+var fxPanelHomeVisible = true;
+function fxPanelHomeIconSvg(icon) {
+  var icons = {
+    sliders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6"/><path d="M14 7h6"/><circle cx="12" cy="7" r="2"/><path d="M4 17h10"/><path d="M18 17h2"/><circle cx="16" cy="17" r="2"/></svg>',
+    palette: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 0 0-8 8c0 3.4 2.3 6 5.4 6H11a1.7 1.7 0 0 0 1.2-2.9 1.7 1.7 0 0 1 1.2-2.9H15a5 5 0 0 0 5-5c0-1.8-2.7-3.2-8-3.2Z"/><circle cx="8.2" cy="11" r=".8"/><circle cx="10.5" cy="8.2" r=".8"/><circle cx="14" cy="8.2" r=".8"/></svg>',
+    lyrics: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h10"/><path d="M7 10h7"/><path d="M7 14h9"/><path d="M7 18h5"/></svg>',
+    motion: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13c3-6 5 6 8 0s5 6 8 0"/><path d="M4 7c2.5-4 4.5 4 7 0s4.5 4 7 0"/></svg>',
+    advanced: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4h4"/><path d="M12 4v6"/><path d="M8 20h8"/><path d="M9 10 5.5 18h13L15 10Z"/></svg>'
+  };
+  return icons[icon] || icons.sliders;
+}
+function setFxPanelHeader(mode, label) {
+  var title = document.querySelector('#fx-panel .fx-title');
+  var sub = document.querySelector('#fx-panel .fx-sub');
+  var back = document.getElementById('fx-panel-back-btn');
+  if (title) title.textContent = mode === 'home' ? '设置' : label;
+  if (sub) sub.textContent = mode === 'home' ? 'MINERADIO VISUALS · 鼠标移开自动隐藏' : 'MINERADIO VISUALS · 设置分类';
+  if (back) back.classList.toggle('show', mode !== 'home');
+}
+function setFxPanelTransition(panel, direction) {
+  if (!panel) return;
+  panel.classList.remove('fx-view-forward', 'fx-view-back');
+  if (direction !== 'forward' && direction !== 'back') return;
+  void panel.offsetWidth;
+  panel.classList.add(direction === 'back' ? 'fx-view-back' : 'fx-view-forward');
+}
+function showFxPanelHome() {
+  var panel = document.getElementById('fx-panel');
+  if (!panel) return;
+  setFxPanelTransition(panel, 'back');
+  fxPanelHomeVisible = true;
+  panel.setAttribute('data-active-tab', 'home');
+  panel.classList.add('fx-home-visible');
+  var home = document.getElementById('fx-panel-home');
+  if (home) home.classList.add('active');
+  document.querySelectorAll('#fx-panel-tabs [data-fx-tab]').forEach(function(btn){
+    btn.classList.remove('active');
+  });
+  document.querySelectorAll('#fx-panel .fx-tab-page').forEach(function(page){
+    page.classList.remove('active');
+  });
+  setFxPanelHeader('home');
+  repositionFxFloatingPanels();
+}
+function setFxPanelTab(tab, opts) {
   var allowed = { presets:1, appearance:1, lyrics:1, motion:1, advanced:1 };
   fxPanelTab = allowed[tab] ? tab : 'presets';
+  fxPanelHomeVisible = !!(opts && opts.home);
+  if (fxPanelHomeVisible) {
+    showFxPanelHome();
+    return;
+  }
   var panel = document.getElementById('fx-panel');
+  setFxPanelTransition(panel, 'forward');
   if (panel) panel.setAttribute('data-active-tab', fxPanelTab);
+  if (panel) panel.classList.remove('fx-home-visible');
+  var home = document.getElementById('fx-panel-home');
+  if (home) home.classList.remove('active');
   document.querySelectorAll('#fx-panel-tabs [data-fx-tab]').forEach(function(btn){
     btn.classList.toggle('active', btn.getAttribute('data-fx-tab') === fxPanelTab);
   });
   document.querySelectorAll('#fx-panel .fx-tab-page').forEach(function(page){
     page.classList.toggle('active', page.getAttribute('data-fx-page') === fxPanelTab);
   });
+  var selected = FX_PANEL_HOME_ITEMS.filter(function(item){ return item.id === fxPanelTab; })[0];
+  setFxPanelHeader('page', selected ? selected.label : '');
   repositionFxFloatingPanels();
 }
 function fxPanelInputId(node) {
@@ -24172,7 +24840,7 @@ function fxPanelTargetForNode(node, current) {
   if (!node) return current || 'presets';
   var id = node.id || '';
   var inputId = fxPanelInputId(node);
-  if (id === 'preset-grid' || id === 'user-archive-grid') return 'presets';
+  if (id === 'native-lyric-mode-grid' || id === 'preset-grid' || id === 'user-archive-grid') return 'presets';
   if (id === 'fx-lyric-fold') return 'lyrics';
   if (id === 'fx-overlay-fold' || id === 'fx-stage-fold') return 'motion';
   if (id === 'fx-advanced' || node.classList.contains('fx-actions')) return 'advanced';
@@ -24186,41 +24854,94 @@ function organizeFxPanel() {
   var panel = document.getElementById('fx-panel');
   if (!panel) return;
   if (panel._fxPanelOrganized) {
-    setFxPanelTab(fxPanelTab);
+    if (fxPanelHomeVisible) showFxPanelHome();
+    else setFxPanelTab(fxPanelTab);
     return;
   }
   var head = panel.querySelector('.fx-head');
-  var tabMeta = [
-    ['presets', '\u9884\u8bbe'],
-    ['appearance', '\u5916\u89c2'],
-    ['lyrics', '\u6b4c\u8bcd'],
-    ['motion', '\u52a8\u6001'],
-    ['advanced', '\u9ad8\u7ea7']
-  ];
+  if (head && !head.querySelector('#fx-panel-back-btn')) {
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.id = 'fx-panel-back-btn';
+    backBtn.className = 'fx-panel-back-btn';
+    backBtn.setAttribute('aria-label', '返回设置首页');
+    backBtn.title = '返回设置首页';
+    backBtn.textContent = '\u2039';
+    backBtn.addEventListener('click', function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      showFxPanelHome();
+    });
+    head.insertBefore(backBtn, head.firstChild);
+    head.classList.add('fx-head-with-back');
+  }
+  var home = document.createElement('div');
+  home.className = 'fx-panel-home';
+  home.id = 'fx-panel-home';
+  var homeLabel = document.createElement('div');
+  homeLabel.className = 'fx-section-label';
+  homeLabel.textContent = '\u8bbe\u7f6e\u5206\u7c7b';
+  home.appendChild(homeLabel);
+  var homeList = document.createElement('div');
+  homeList.className = 'fx-panel-home-list';
+  FX_PANEL_HOME_ITEMS.forEach(function(item, idx){
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'fx-panel-home-btn';
+    btn.setAttribute('data-fx-home-tab', item.id);
+    btn.style.setProperty('--fx-home-index', idx);
+    var icon = document.createElement('span');
+    icon.className = 'fx-panel-home-icon';
+    icon.innerHTML = fxPanelHomeIconSvg(item.icon);
+    var copy = document.createElement('span');
+    copy.className = 'fx-panel-home-copy';
+    var title = document.createElement('b');
+    title.textContent = item.label;
+    var desc = document.createElement('small');
+    desc.textContent = item.description;
+    copy.appendChild(title);
+    copy.appendChild(desc);
+    var arrow = document.createElement('span');
+    arrow.className = 'fx-panel-home-arrow';
+    arrow.textContent = '\u203a';
+    btn.appendChild(icon);
+    btn.appendChild(copy);
+    btn.appendChild(arrow);
+    btn.addEventListener('click', function(){
+      setFxPanelTab(item.id);
+    });
+    homeList.appendChild(btn);
+  });
+  home.appendChild(homeList);
   var tabs = document.createElement('div');
   tabs.className = 'fx-panel-tabs';
   tabs.id = 'fx-panel-tabs';
-  tabMeta.forEach(function(meta){
+  FX_PANEL_HOME_ITEMS.forEach(function(item){
     var btn = document.createElement('button');
     btn.type = 'button';
-    btn.setAttribute('data-fx-tab', meta[0]);
-    btn.textContent = meta[1];
+    btn.setAttribute('data-fx-tab', item.id);
+    btn.textContent = item.label;
     tabs.appendChild(btn);
   });
-  if (head && head.nextSibling) panel.insertBefore(tabs, head.nextSibling);
-  else panel.insertBefore(tabs, panel.firstChild);
+  if (head && head.nextSibling) {
+    panel.insertBefore(home, head.nextSibling);
+    panel.insertBefore(tabs, home.nextSibling);
+  } else {
+    panel.insertBefore(home, panel.firstChild);
+    panel.insertBefore(tabs, home.nextSibling);
+  }
   var pages = {};
   var insertAfter = tabs;
-  tabMeta.forEach(function(meta){
+  FX_PANEL_HOME_ITEMS.forEach(function(item){
     var page = document.createElement('div');
     page.className = 'fx-tab-page';
-    page.setAttribute('data-fx-page', meta[0]);
+    page.setAttribute('data-fx-page', item.id);
     insertAfter.parentNode.insertBefore(page, insertAfter.nextSibling);
     insertAfter = page;
-    pages[meta[0]] = page;
+    pages[item.id] = page;
   });
   var original = Array.prototype.slice.call(panel.children).filter(function(child){
-    return child !== head && child !== tabs && !child.classList.contains('fx-tab-page');
+    return child !== head && child !== home && child !== tabs && !child.classList.contains('fx-tab-page');
   });
   var current = 'presets';
   original.forEach(function(node, idx){
@@ -24244,7 +24965,7 @@ function organizeFxPanel() {
     setFxPanelTab(btn.getAttribute('data-fx-tab'));
   });
   panel._fxPanelOrganized = true;
-  setFxPanelTab(fxPanelTab);
+  showFxPanelHome();
 }
 
 function fxControlBlock(id) {
@@ -24325,7 +25046,7 @@ function applyBackgroundMediaHint() {
 }
 function relabelFxPanelControls() {
   var title = document.querySelector('#fx-panel .fx-title');
-  if (title) title.textContent = '视觉控制台';
+  if (title) title.textContent = '设置';
   ensureLyricPrimaryControls();
   applyBackgroundMediaHint();
   var overlayGrid = document.getElementById('t-cinema');
@@ -24806,7 +25527,7 @@ function toggleFxPanel(force) {
   var el = document.getElementById('fx-panel');
   if (!el) return;
   if (!diyPlayerMode && force !== false) {
-    showToast('开启 DIY 玩家模式后可打开视觉控制台');
+    showToast('开启设置模式后可打开设置面板');
     return;
   }
   var currentlyOpen = el.classList.contains('show') || el.classList.contains('peek');
@@ -26377,27 +27098,27 @@ var visualGuideSteps = [
     target: 'shelf',
     kicker: '05 / Visual',
     title: '进阶视觉都放在舞台周围',
-    body: '右侧 3D 歌单架和 DIY 玩家模式是进阶入口；先播放一首歌，再慢慢调视觉效果。'
+    body: '右侧 3D 歌单架和设置模式是进阶入口；先播放一首歌，再慢慢调视觉效果。'
   },
   {
     selector: '#diy-mode-btn',
-    kicker: '06 / DIY',
-    title: '高级功能在 DIY 玩家模式',
-    body: '视觉控制台、上传/封面、自定义歌词、音质和更多面板都会在这里展开。'
+    kicker: '06 / 设置',
+    title: '高级功能在设置模式',
+    body: '设置面板、上传/封面、自定义歌词、音质和更多面板都会在这里展开。'
   }
 ];
 var visualGuideStepsDiy = [
   {
     selector: '#diy-mode-btn',
-    kicker: '01 / DIY',
-    title: 'DIY 玩家模式已展开',
-    body: '这里可以随时切回默认模式。DIY 模式会显示完整控制台、上传、视觉面板和高级调参。'
+    kicker: '01 / 设置',
+    title: '设置模式已展开',
+    body: '这里可以随时切回默认模式。设置模式会显示完整控制台、上传、视觉面板和高级调参。'
   },
   {
     selector: '#search-box',
     kicker: '02 / Search',
     title: '搜索源和导入入口会展开',
-    body: '顶部搜索支持更多来源切换，上传歌曲、封面等入口也会在 DIY 模式中显示。'
+    body: '顶部搜索支持更多来源切换，上传歌曲、封面等入口也会在设置模式中显示。'
   },
   {
     selector: '#playlist-panel',
@@ -26408,14 +27129,14 @@ var visualGuideStepsDiy = [
   {
     selector: '#fx-panel',
     kicker: '04 / Visual Lab',
-    title: '右侧是视觉控制台',
-    body: '靠近右下角或点击视觉按钮，可以调节粒子、歌词、镜头、3D 歌单架和更多视觉参数。'
+    title: '右侧是设置面板',
+    body: '靠近右下角或点击设置按钮，可以调节粒子、歌词、镜头、3D 歌单架和更多视觉参数。'
   },
   {
     selector: '#quality-control',
     kicker: '05 / Controls',
     title: '高级播放控制会补全',
-    body: '音质、播放顺序、收藏、歌词源和更多按钮会在 DIY 模式中完整显示。'
+    body: '音质、播放顺序、收藏、歌词源和更多按钮会在设置模式中完整显示。'
   },
   {
     target: 'shelf',
@@ -27063,6 +27784,7 @@ function refreshMainRendererViewport(reason) {
     camera.updateProjectionMatrix();
   }
   applyRendererPowerMode();
+  if (nativeLyricRuntime && typeof nativeLyricRuntime.resize === 'function') nativeLyricRuntime.resize(nativeLyricViewport());
   if (typeof requestStageLyricCameraSnap === 'function' && (desktopRuntimeState.fullscreen || document.fullscreenElement)) {
     requestStageLyricCameraSnap(reason === 'resize' ? 4 : 10);
   }
@@ -27145,7 +27867,7 @@ document.addEventListener('keydown', function(e){
   else if (e.code === 'KeyL') { if (!immersiveMode) toggleLyricsPanel(); }
   else if (e.code === 'KeyP') {
     if (!immersiveMode && diyPlayerMode) toggleFxPanel();
-    else if (!immersiveMode) showToast('开启 DIY 玩家模式后可打开视觉控制台');
+    else if (!immersiveMode) showToast('开启设置模式后可打开设置面板');
   }
   else if (e.code === 'KeyI') toggleImmersiveMode();
   else if (e.code === 'KeyF') toggleFullscreen();
@@ -28094,171 +28816,8 @@ var desktopOverlayPushState = {
   lastLyricsBeatKey: '',
   lastWallpaperKey: ''
 };
-var foliaStageBridgeState = {
-  targets: [],
-  subscribers: [],
-  lastAt: 0,
-  lastKey: ''
-};
 function getDesktopWindowApi() {
   return window.desktopWindow && window.desktopWindow.isDesktop ? window.desktopWindow : null;
-}
-function foliaBridgeStateApi() {
-  return window.MineradioFoliaBridgeState || null;
-}
-function currentFoliaBridgeSong() {
-  var song = currentCoverSong() || {};
-  var cover = (typeof songCoverSrc === 'function' && song) ? songCoverSrc(song, 720) : '';
-  return Object.assign({}, song, {
-    coverUrl: cover || song.cover || song.picUrl || ''
-  });
-}
-function foliaBridgePlaybackPayload() {
-  var time = audio && isFinite(audio.currentTime) ? Number(audio.currentTime) : getPlaybackCurrentSeconds();
-  var duration = audio && isFinite(audio.duration) ? Number(audio.duration) : getPlaybackDurationSeconds();
-  var rate = audio && isFinite(audio.playbackRate) && audio.playbackRate > 0 ? Number(audio.playbackRate) : 1;
-  return {
-    playing: !!playing,
-    currentTime: Math.max(0, time || 0),
-    duration: Math.max(0, duration || 0),
-    rate: rate,
-    queueIndex: currentIdx,
-    queueLength: playQueue && playQueue.length || 0
-  };
-}
-function foliaBridgeLyricsPayload() {
-  return {
-    lines: Array.isArray(lyricsLines) ? lyricsLines : [],
-    timingSource: lyricsTimingSource || 'none',
-    hasNativeKaraoke: !!lyricsHasNativeKaraoke
-  };
-}
-function foliaBridgeAudioPayload() {
-  return {
-    energy: isFinite(audioEnergy) ? audioEnergy : 0,
-    bass: isFinite(bass) ? bass : 0,
-    mid: isFinite(mid) ? mid : 0,
-    treble: isFinite(treble) ? treble : 0,
-    beatPulse: isFinite(beatPulse) ? beatPulse : 0,
-    beatOnset: !!beatOnsetFlag
-  };
-}
-function createFoliaPlaybackBridgeSnapshot(reason) {
-  var api = foliaBridgeStateApi();
-  if (!api || typeof api.createFoliaBridgeSnapshot !== 'function') return null;
-  return api.createFoliaBridgeSnapshot({
-    now: Date.now(),
-    reason: reason || 'sync',
-    song: currentFoliaBridgeSong(),
-    playback: foliaBridgePlaybackPayload(),
-    lyrics: foliaBridgeLyricsPayload(),
-    audio: foliaBridgeAudioPayload(),
-    theme: foliaBridgeThemePayload(),
-    foliaFx: foliaBridgeFxPayload()
-  });
-}
-function foliaBridgeHasConsumers() {
-  return !!(foliaStageBridgeState.targets.length || foliaStageBridgeState.subscribers.length);
-}
-function notifyFoliaBridgeSubscribers(message) {
-  foliaStageBridgeState.subscribers.slice().forEach(function(handler) {
-    try { handler(message.payload, message); }
-    catch (e) { console.warn('[FoliaBridgeSubscriber]', e); }
-  });
-}
-function postFoliaBridgeTargets(message) {
-  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
-    var target = entry && entry.target;
-    if (!target || typeof target.postMessage !== 'function') return false;
-    try {
-      target.postMessage(message, entry.origin || window.location.origin || '*');
-      return true;
-    } catch (e) {
-      console.warn('[FoliaBridgeTarget]', e);
-      return false;
-    }
-  });
-}
-function pushFoliaPlaybackBridge(reason, opts) {
-  opts = opts || {};
-  var force = opts.force === true;
-  if (!force && !foliaBridgeHasConsumers()) return null;
-  var api = foliaBridgeStateApi();
-  if (!api || typeof api.createFoliaBridgeMessage !== 'function') return null;
-  var now = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-  if (!force && now - foliaStageBridgeState.lastAt < 96) return null;
-  var snapshot = createFoliaPlaybackBridgeSnapshot(reason);
-  if (!snapshot) return null;
-  var key = typeof api.foliaBridgeSnapshotKey === 'function' ? api.foliaBridgeSnapshotKey(snapshot) : '';
-  if (!force && key && key === foliaStageBridgeState.lastKey && now - foliaStageBridgeState.lastAt < 820) return snapshot;
-  foliaStageBridgeState.lastAt = now;
-  foliaStageBridgeState.lastKey = key;
-  var message = api.createFoliaBridgeMessage(snapshot);
-  try { window.dispatchEvent(new CustomEvent(api.FOLIA_BRIDGE_MESSAGE_TYPE || 'mineradio:folia-playback-state', { detail: snapshot })); } catch (e) {}
-  notifyFoliaBridgeSubscribers(message);
-  postFoliaBridgeTargets(message);
-  return snapshot;
-}
-function registerFoliaBridgeTarget(targetWindow, targetOrigin) {
-  if (!targetWindow || typeof targetWindow.postMessage !== 'function') return function(){};
-  var origin = targetOrigin || window.location.origin || '*';
-  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
-    return entry.target !== targetWindow;
-  });
-  foliaStageBridgeState.targets.push({ target: targetWindow, origin: origin });
-  pushFoliaPlaybackBridge('target-register', { force: true });
-  return function() { unregisterFoliaBridgeTarget(targetWindow); };
-}
-function unregisterFoliaBridgeTarget(targetWindow) {
-  foliaStageBridgeState.targets = foliaStageBridgeState.targets.filter(function(entry) {
-    return entry.target !== targetWindow;
-  });
-}
-function subscribeFoliaBridge(handler) {
-  if (typeof handler !== 'function') return function(){};
-  foliaStageBridgeState.subscribers.push(handler);
-  var snapshot = createFoliaPlaybackBridgeSnapshot('subscriber-register');
-  if (snapshot) {
-    try { handler(snapshot, foliaBridgeStateApi().createFoliaBridgeMessage(snapshot)); } catch (e) {}
-  }
-  return function() {
-    foliaStageBridgeState.subscribers = foliaStageBridgeState.subscribers.filter(function(fn) {
-      return fn !== handler;
-    });
-  };
-}
-window.MineradioFoliaBridge = {
-  snapshot: createFoliaPlaybackBridgeSnapshot,
-  push: pushFoliaPlaybackBridge,
-  registerTarget: registerFoliaBridgeTarget,
-  unregisterTarget: unregisterFoliaBridgeTarget,
-  subscribe: subscribeFoliaBridge
-};
-var foliaStageUi = null;
-function createFoliaStageUiController() {
-  if (!window.MineradioFoliaStageUi || typeof window.MineradioFoliaStageUi.init !== 'function') return null;
-  return window.MineradioFoliaStageUi.init({
-    document: document,
-    bridge: window.MineradioFoliaBridge,
-    showToast: showToast,
-    fetch: window.fetch ? window.fetch.bind(window) : null
-  });
-}
-function foliaStageUiCall(method, args) {
-  if (!foliaStageUi && window.MineradioFoliaStageUi) foliaStageUi = createFoliaStageUiController();
-  if (foliaStageUi && typeof foliaStageUi[method] === 'function') return foliaStageUi[method].apply(foliaStageUi, args || []);
-  return null;
-}
-foliaStageUi = createFoliaStageUiController();
-function toggleFoliaStage(e) {
-  if (e) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-  return foliaStageUiCall('toggle', []);
-}
-function closeFoliaStage() {
-  return foliaStageUiCall('close', arguments);
 }
 function currentDesktopSongMeta() {
   var song = playQueue && currentIdx >= 0 ? playQueue[currentIdx] : null;
@@ -28974,7 +29533,6 @@ function animate() {
   uniforms.uTreble.value = treble;
   uniforms.uBeat.value   = beatPulse;
   uniforms.uEnergy.value = audioEnergy;
-  pushFoliaPlaybackBridge('audio-frame');
   uniforms.uMouseXY.value.set(mouseWorld.x, mouseWorld.y);
   uniforms.uMouseActive.value = mouseActive ? 1 : 0;
   var skullBackdropDim = fx && fx.preset === SKULL_PRESET_INDEX ? 0.58 : 1;
@@ -28988,7 +29546,7 @@ function animate() {
 
   updateRipples(dt);
   updateFloatLayer(dt);
-  tickLyricsParticles();
+  if (nativeLyricModeIs3D()) tickLyricsParticles();
   updateHomeAudioVisual(dt);
 
   // 电影镜头
@@ -29019,7 +29577,8 @@ function animate() {
     backCoverGroup.rotation.copy(particles.rotation);
   }
   updateSkullParticleLayer(dt);
-  updateStageLyrics3D(dt);
+  if (nativeLyricModeIs3D()) updateStageLyrics3D(dt);
+  updateNativeLyricRuntime(dt);
   updateCommentBarrage3D(dt);
   if (shelfManager) shelfManager.update(dt);
   syncDesktopOverlayState();
@@ -29033,6 +29592,7 @@ function animate() {
 
   renderSceneWithShelfOverlay();
 }
+initNativeLyricRuntime();
 animate();
 </script>
 </body>
