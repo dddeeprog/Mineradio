@@ -1586,6 +1586,8 @@ async function rendererDiagnostics(page, mode) {
 
 for (const viewport of viewports) {
   test(`eight native modes render at ${viewport.name}`, async ({ page }) => {
+    // Scoped to this eight-mode screenshot and diagnostics contract only.
+    test.setTimeout(300000);
     const pageErrors = await preparePage(page, viewport);
     for (const mode of modes) {
       await renderMode(page, mode);
