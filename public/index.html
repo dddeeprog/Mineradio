@@ -52,6 +52,7 @@
 <script src="local-library.js"></script>
 <script src="local-beat-cache.js"></script>
 <script src="source-navigation.js"></script>
+<script src="palette-helpers.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -1068,6 +1069,8 @@ try {
 
 <script>
 'use strict';
+
+var paletteHelpers = window.MineradioPaletteHelpers || {};
 
 // ============================================================
 //  Global State
@@ -6569,6 +6572,7 @@ function saveLyricLayout() {
   } catch (e) {}
 }
 function normalizeHexColor(value, fallback) {
+  if (typeof paletteHelpers.normalizeHexColor === 'function') return paletteHelpers.normalizeHexColor(value, fallback);
   var hex = String(value || '').trim();
   if (/^#[0-9a-f]{3}$/i.test(hex)) {
     hex = '#' + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2) + hex.charAt(3) + hex.charAt(3);
@@ -6938,6 +6942,7 @@ function shelfAccentRgba(alpha, fallback) {
   return 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha + ')';
 }
 function rgbToHexColor(r, g, b) {
+  if (typeof paletteHelpers.rgbToHexColor === 'function') return paletteHelpers.rgbToHexColor(r, g, b);
   function part(v) {
     return Math.max(0, Math.min(255, Math.round(v || 0))).toString(16).padStart(2, '0');
   }
@@ -7090,6 +7095,7 @@ function applyStonePrintTexture(ctx, W, H, fontSize) {
   ctx.restore();
 }
 function hexToRgb(hex) {
+  if (typeof paletteHelpers.hexToRgb === 'function') return paletteHelpers.hexToRgb(hex);
   hex = normalizeHexColor(hex).slice(1);
   return {
     r: parseInt(hex.slice(0, 2), 16),
@@ -7388,6 +7394,7 @@ function readableInkForHex(hex) {
   return lum > 0.54 ? '#06100f' : '#f8fbff';
 }
 function lyricPaletteFromHex(hex) {
+  if (typeof paletteHelpers.lyricPaletteFromHex === 'function') return paletteHelpers.lyricPaletteFromHex(hex);
   var c = hexToRgb(hex);
   var hsl = rgbToHsl(c.r, c.g, c.b);
   var neutral = hsl.s < 0.035;
@@ -7464,6 +7471,12 @@ function applyLyricPaletteToMesh(mesh) {
   if (data.sunMat) data.sunMat.color.copy(lyricThreeColor(pal.highlight || pal.secondary || pal.primary, '#fff0b8', 0.50));
 }
 function effectiveLyricPalette(pal) {
+  if (typeof paletteHelpers.effectiveLyricPalette === 'function') {
+    return paletteHelpers.effectiveLyricPalette({
+      palette: pal || stageLyrics.coverPalette || stageLyrics.palette || {},
+      fx: fx
+    });
+  }
   var src = pal || stageLyrics.coverPalette || stageLyrics.palette || {};
   var out = {
     primary: src.primary || '#d6f8ff',
@@ -7529,6 +7542,14 @@ function updateLyricPaletteFromCover(coverCanvas) {
     var ctx = coverCanvas.getContext('2d');
     var img = ctx.getImageData(0, 0, coverCanvas.width, coverCanvas.height).data;
     var w = coverCanvas.width, h = coverCanvas.height;
+    var helperPalette = typeof paletteHelpers.lyricPaletteFromImageData === 'function'
+      ? paletteHelpers.lyricPaletteFromImageData(img, w, h)
+      : null;
+    if (helperPalette) {
+      stageLyrics.coverPalette = helperPalette;
+      if (fx.lyricColorMode !== 'custom') setStageLyricPalette(stageLyrics.coverPalette);
+      return;
+    }
     var sumR = 0, sumG = 0, sumB = 0, count = 0;
     var best = { score:-1, r:143, g:233, b:255 };
     for (var y = 0; y < h; y += 8) {
@@ -24215,6 +24236,12 @@ function currentCoverPickerCanvas() {
   return null;
 }
 function coverPickerSwatchColors() {
+  if (typeof paletteHelpers.coverPickerSwatchColors === 'function') {
+    return paletteHelpers.coverPickerSwatchColors({
+      coverPalette: stageLyrics.coverPalette || stageLyrics.palette || {},
+      fx: fx
+    });
+  }
   var pal = stageLyrics.coverPalette || stageLyrics.palette || {};
   var list = [pal.primary, pal.secondary, pal.highlight, fx.visualTintColor, fx.uiAccentColor, fx.homeAccentColor]
     .map(function(c){ return normalizeHexColor(c || '', ''); })
@@ -28925,6 +28952,7 @@ function currentDesktopLyricSnapshot() {
   return { text: normalizeDesktopLyricText(currentDesktopSongMeta().title || 'Mineradio'), progress: 0, progressSpan: 4.8 };
 }
 function desktopOverlayColorValue(value, fallback) {
+  if (typeof paletteHelpers.desktopOverlayColorValue === 'function') return paletteHelpers.desktopOverlayColorValue(value, fallback);
   var raw = String(value || '').trim();
   fallback = String(fallback || '#d6f8ff').trim();
   if (/^#[0-9a-f]{3}$/i.test(raw) || /^#[0-9a-f]{6}$/i.test(raw)) return normalizeHexColor(raw, fallback);
@@ -28933,6 +28961,9 @@ function desktopOverlayColorValue(value, fallback) {
 }
 function desktopOverlayColors() {
   var pal = stageLyrics && stageLyrics.palette || {};
+  if (typeof paletteHelpers.desktopOverlayColors === 'function') {
+    return paletteHelpers.desktopOverlayColors({ palette: pal, fx: fx });
+  }
   return {
     primary: desktopOverlayColorValue(pal.primary || fx.lyricColor || '#d6f8ff', '#d6f8ff'),
     secondary: desktopOverlayColorValue(pal.secondary || fx.visualTintColor || '#9cffdf', '#9cffdf'),

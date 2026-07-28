@@ -54,7 +54,7 @@
 | 本地库 | 当前 `public/local-library.js` 与 `public/local-*.js` | merge-two | 当前实现等价，待审计。 |
 | 桌面能力 | 当前 `desktop/` | merge-two | 当前实现等价，待审计。 |
 | 节奏缓存 | 当前 `public/local-beat-cache.js` | merge-two | 当前实现等价，待审计。 |
-| 调色板 | `public/index.html` | merge-two helper | 待提取；后续迁移为独立、可测试的纯函数。 |
+| 调色板 | `public/palette-helpers.js` 与 `public/index.html` | merge-two helper | Task 9 已迁移：归档纯函数模块以 UMD 形式提供颜色规范化、歌词调色板、封面取色、取色器色板和桌面歌词覆盖层颜色；页面仅保留状态与 Three.js 写入。 |
 
 ## Task 6 - 群唱能力审计（2026-07-28）
 
@@ -103,6 +103,19 @@
 - `node --test tests/folia-native-cappella.test.js tests/folia-native-page-integration.test.js`：`22/22` 通过；定向 `Cappella|群唱` Playwright：`1/1` 通过。
 - 默认全量视觉测试曾以通用 `120000ms` 截断八模式截图/深度诊断用例；所有 `page.evaluate` 和等待最终均可返回，故根因是该重型用例的总预算，而非群唱或渲染器死锁。
 - `tests/visual/folia-native.spec.js` 仅为 `eight native modes render at ${viewport.name}` 设置 `300000ms` 局部预算；全局 `120000ms` 及 `4K warmed renderers` 的 20 次切换性能合同保持不变。默认配置下 `390x844` 定向用例 `1/1` 通过（`2.5m`），最终 `npm run test:visual`：`16/16` 通过（`11.8m`）。
+
+## Task 9 - 调色板纯函数提取（2026-07-28）
+
+### 证据与结论
+
+- 来源源码：`archive/pre-unify-merge-two-20260728:public/palette-helpers.js`。当前 `public/palette-helpers.js` 与归档 blob 的 `git hash-object` 均为 `5f59a552dda46270988746bb0997497e1e803043`。
+- 当前模块为纯 UMD：CommonJS 导出与浏览器 `window.MineradioPaletteHelpers` 暴露同一组颜色函数；模块不读取 DOM、storage、timer、audio 或 renderer 状态。
+- `public/index.html` 在首个内联脚本前加载模块，并在主内联脚本中声明 `var paletteHelpers = window.MineradioPaletteHelpers || {};`。现有 `normalizeHexColor`、`rgbToHexColor`、`hexToRgb`、`lyricPaletteFromHex`、`effectiveLyricPalette`、封面像素调色板、取色器色板与桌面歌词覆盖层颜色入口均优先委托给该模块；本地歌词状态、网格和 Three.js/shader 写入继续留在页面。
+- `package.json` 仅在 `npm run check` 中新增 `node --check public/palette-helpers.js`。
+- RED 证据（恢复前已有）：`node --test public/palette-helpers.test.js` 因 `./palette-helpers` 缺失报 `MODULE_NOT_FOUND`。
+- 实际 GREEN/回归证据：`node --test public/palette-helpers.test.js` 为 `9/9`；`npm run check` 通过；`node --test public/palette-helpers.test.js tests/smoke.test.js tests/renderer-helpers.test.js` 为 `61/61`；`npm test` 为 `569/569`；`git diff --check` 通过。
+
+结论：Task 9 已将归档调色板帮助函数按原 blob 迁入可测试模块，并以局部页面包装函数接入；没有整文件替换 `public/index.html`，也没有迁移页面专属渲染所有权。
 
 ## 迁移纪律
 

@@ -31,6 +31,16 @@ test('maintenance baseline scripts are wired', () => {
   );
 });
 
+test('palette helpers load before page initialization', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const helperScript = html.indexOf('<script src="palette-helpers.js"></script>');
+  const firstInlineScript = html.search(/<script>\s*try\s*\{/);
+
+  assert.notEqual(helperScript, -1);
+  assert.notEqual(firstInlineScript, -1);
+  assert.ok(helperScript < firstInlineScript);
+});
+
 test('complete weather route is registered in the local API server', () => {
   const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
   const route = fs.readFileSync(path.join(repoRoot, 'server', 'routes', 'weather-full.js'), 'utf8');
