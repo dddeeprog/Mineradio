@@ -12,6 +12,11 @@ const GENERATION_ROOT_FILE_NAME = 'root';
 const GENERATION_OWNER_PREFIX = 'owner.';
 const GENERATION_OWNER_SUFFIX = '.json';
 const GENERATION_RELEASED_SUFFIX = '.released';
+const GENERATION_PENDING_SUFFIX = '.pending';
+const GENERATION_COMPACTING_SUFFIX = '.compacting';
+const GENERATION_RESIDUE_CLEAN = 'clean';
+const GENERATION_RESIDUE_BLOCKED = 'blocked';
+const GENERATION_RESIDUE_FAILED = 'failed';
 const LOCK_ACQUIRE_ATTEMPTS = 10;
 const LOCK_RELEASE_ATTEMPTS = 3;
 const LOCK_RETRY_MS = 10;
@@ -30,6 +35,10 @@ function publicationError() {
 
 function cleanupError() {
   return bridgeDiscoveryError('Bridge discovery descriptor cleanup failed.');
+}
+
+function generationCleanupError() {
+  return bridgeDiscoveryError('Bridge discovery generation cleanup failed.');
 }
 
 function lockAcquireError() {
@@ -213,6 +222,44 @@ function generationDirectoryPath(appData) {
   return path.join(appData, GENERATION_DIRECTORY_NAME);
 }
 
+function generationRootPath(generationDirectory) {
+  return path.join(generationDirectory, GENERATION_ROOT_FILE_NAME);
+}
+
+function temporaryGenerationRootPath(generationDirectory, lockId) {
+  return path.join(
+    generationDirectory,
+    '.root.' + lockId + '.tmp',
+  );
+}
+
+function isGenerationOwnerFileName(fileName) {
+  if (
+    typeof fileName !== 'string' ||
+    !fileName.startsWith(GENERATION_OWNER_PREFIX) ||
+    !fileName.endsWith(GENERATION_OWNER_SUFFIX)
+  ) {
+    return false;
+  }
+  const lockId = fileName.slice(
+    GENERATION_OWNER_PREFIX.length,
+    -GENERATION_OWNER_SUFFIX.length,
+  );
+  return isValidLockId(lockId);
+}
+
+function generationArtifactOwnerFileName(fileName, suffix) {
+  if (!fileName.endsWith(suffix)) return null;
+  const ownerFileName = fileName.slice(0, -suffix.length);
+  return isGenerationOwnerFileName(ownerFileName) ? ownerFileName : null;
+}
+
+function isTemporaryGenerationRootFileName(fileName) {
+  return typeof fileName === 'string' &&
+    fileName.startsWith('.root.') &&
+    fileName.endsWith('.tmp');
+}
+
 function generationOwnerFileName(lockId) {
   return `${GENERATION_OWNER_PREFIX}${lockId}${GENERATION_OWNER_SUFFIX}`;
 }
@@ -227,6 +274,18 @@ function generationNextPath(ownerPath) {
 
 function generationReleasedPath(ownerPath) {
   return `${ownerPath}${GENERATION_RELEASED_SUFFIX}`;
+}
+
+function generationPendingPath(ownerPath) {
+  return ownerPath + GENERATION_PENDING_SUFFIX;
+}
+
+function generationCompactingPath(ownerPath) {
+  return ownerPath + GENERATION_COMPACTING_SUFFIX;
+}
+
+function generationResidueResult(cleaned) {
+  return cleaned ? GENERATION_RESIDUE_CLEAN : GENERATION_RESIDUE_FAILED;
 }
 
 async function readGenerationFromLink(fs, generationDirectory, linkPath) {
@@ -249,42 +308,114 @@ async function readGenerationFromLink(fs, generationDirectory, linkPath) {
 }
 
 async function readGenerationTerminal(fs, generationDirectory) {
-  const rootPath = path.join(generationDirectory, GENERATION_ROOT_FILE_NAME);
+  const rootPath = generationRootPath(generationDirectory);
   let current = await readGenerationFromLink(fs, generationDirectory, rootPath);
-  if (!current.exists || current.error) return current;
+  const nodes = [];
+  if (!current.exists || current.error) return { ...current, nodes };
 
   const seenLockIds = new Set();
   while (current.exists) {
     if (seenLockIds.has(current.owner.lockId)) {
-      return { exists: true, error: true };
+      return { exists: true, error: true, nodes };
     }
     seenLockIds.add(current.owner.lockId);
+    nodes.push(current);
 
     const next = await readGenerationFromLink(
       fs,
       generationDirectory,
       generationNextPath(current.ownerPath),
     );
-    if (!next.exists || next.error) return next.exists ? next : current;
+    if (!next.exists) return { ...current, nodes };
+    if (next.error) return { ...next, nodes };
     current = next;
   }
-  return current;
+  return { exists: false, nodes };
 }
 
-async function writeGenerationOwner(fs, generationDirectory, owner) {
+async function writeGenerationCandidate(fs, generationDirectory, owner) {
   const ownerPath = generationOwnerPath(generationDirectory, owner.lockId);
-  await fs.writeFile(ownerPath, JSON.stringify(owner), {
+  const pendingPath = generationPendingPath(ownerPath);
+  await fs.writeFile(pendingPath, JSON.stringify(owner), {
     encoding: 'utf8',
     flag: 'wx',
     mode: 0o600,
   });
-  return ownerPath;
+  try {
+    await fs.writeFile(ownerPath, JSON.stringify(owner), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch (error) {
+    await removeGenerationFile(fs, pendingPath);
+    throw error;
+  }
+  return { ownerPath, pendingPath };
 }
 
-async function cleanupGenerationCandidate(fs, ownerPath) {
+async function removeGenerationFile(fs, filePath) {
   try {
-    await fs.unlink(ownerPath);
-  } catch {}
+    await fs.unlink(filePath);
+    return true;
+  } catch (error) {
+    return error?.code === 'ENOENT';
+  }
+}
+
+async function cleanupGenerationCandidate(fs, ownerPath, pendingPath) {
+  const ownerRemoved = await removeGenerationFile(fs, ownerPath);
+  const pendingRemoved = !pendingPath ||
+    await removeGenerationFile(fs, pendingPath);
+  const compactingRemoved = await removeGenerationFile(
+    fs,
+    generationCompactingPath(ownerPath),
+  );
+  const releaseRemoved = await removeGenerationFile(
+    fs,
+    generationReleasedPath(ownerPath),
+  );
+  return ownerRemoved && pendingRemoved && compactingRemoved && releaseRemoved;
+}
+
+async function completeGenerationCandidateLink(fs, generation) {
+  if (!(await removeGenerationFile(fs, generation.pendingPath))) {
+    generation.cleanupFailed = true;
+  }
+  return generation;
+}
+
+async function readGenerationCompactingMarker(fs, generation) {
+  const marker = await readLockOwner(
+    fs,
+    generationCompactingPath(generation.ownerPath),
+  );
+  if (!marker.exists) return { exists: false };
+  if (marker.error || !lockOwnersMatch(marker.record, generation.owner)) {
+    return { exists: true, error: true };
+  }
+  return { exists: true, owner: marker.record };
+}
+
+// This intent/fence is present from before the successor CAS until compaction
+// reaches a durable root, so no later candidate may append through this one.
+async function createGenerationCompactingMarker(fs, generation) {
+  const compactingPath = generationCompactingPath(generation.ownerPath);
+  try {
+    await fs.writeFile(compactingPath, JSON.stringify(generation.owner), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    return true;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') return false;
+  }
+  const existing = await readGenerationCompactingMarker(fs, generation);
+  return Boolean(
+    existing.exists &&
+    !existing.error,
+  );
 }
 
 async function hasGenerationReleaseMarker(fs, ownerPath) {
@@ -296,6 +427,606 @@ async function hasGenerationReleaseMarker(fs, ownerPath) {
   }
 }
 
+async function cleanupGenerationNode(fs, ownerPath) {
+  const nextRemoved = await removeGenerationFile(fs, generationNextPath(ownerPath));
+  const releaseRemoved = await removeGenerationFile(
+    fs,
+    generationReleasedPath(ownerPath),
+  );
+  const pendingRemoved = await removeGenerationFile(
+    fs,
+    generationPendingPath(ownerPath),
+  );
+  const compactingRemoved = await removeGenerationFile(
+    fs,
+    generationCompactingPath(ownerPath),
+  );
+  if (!nextRemoved || !releaseRemoved || !pendingRemoved || !compactingRemoved) {
+    return false;
+  }
+  return removeGenerationFile(fs, ownerPath);
+}
+
+async function cleanupGenerationHistory(fs, nodes, currentOwnerPath) {
+  let cleaned = true;
+  for (const node of nodes) {
+    if (node.ownerPath === currentOwnerPath) continue;
+    if (!(await cleanupGenerationNode(fs, node.ownerPath))) cleaned = false;
+  }
+  return cleaned;
+}
+
+function generationMatchesTerminal(terminal, generation) {
+  return Boolean(
+    terminal &&
+    terminal.exists &&
+    !terminal.error &&
+    terminal.ownerPath === generation.ownerPath &&
+    lockOwnersMatch(terminal.owner, generation.owner),
+  );
+}
+
+function terminalContainsGeneration(terminal, generation) {
+  return Boolean(
+    terminal &&
+    !terminal.error &&
+    terminal.nodes?.some((node) =>
+      node.ownerPath === generation.ownerPath &&
+      lockOwnersMatch(node.owner, generation.owner),
+    ),
+  );
+}
+
+async function cleanupUnreachableGenerationCandidate(fs, generation) {
+  let cleaned = true;
+  if (generation.predecessor) {
+    const candidateLinkPath = generationNextPath(
+      generation.predecessor.ownerPath,
+    );
+    const linked = await readLockOwner(fs, candidateLinkPath);
+    if (linked.error) {
+      cleaned = false;
+    } else if (lockOwnersMatch(linked.record, generation.owner)) {
+      cleaned = await removeGenerationFile(fs, candidateLinkPath);
+    }
+  }
+  return (
+    await cleanupGenerationCandidate(
+      fs,
+      generation.ownerPath,
+      generation.pendingPath,
+    )
+  ) && cleaned;
+}
+
+async function cleanupPendingGenerationCandidate(
+  fs,
+  generationDirectory,
+  pendingPath,
+  ownerFileName,
+  isProcessAlive,
+) {
+  const pending = await readLockOwner(fs, pendingPath);
+  if (!pending.exists) return GENERATION_RESIDUE_CLEAN;
+  if (
+    pending.error ||
+    !isReclaimableLockOwner(pending.record) ||
+    ownerFileName !== generationOwnerFileName(pending.record.lockId)
+  ) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+
+  const ownerPath = generationOwnerPath(
+    generationDirectory,
+    pending.record.lockId,
+  );
+  let owner = await readLockOwner(fs, ownerPath);
+  if (
+    owner.error ||
+    (owner.exists && !lockOwnersMatch(owner.record, pending.record))
+  ) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+
+  const generation = {
+    owner: pending.record,
+    ownerPath,
+    pendingPath,
+  };
+  let terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (terminal.error) return GENERATION_RESIDUE_FAILED;
+  if (terminalContainsGeneration(terminal, generation)) {
+    return generationResidueResult(
+      await removeGenerationFile(fs, pendingPath),
+    );
+  }
+
+  let released = await hasGenerationReleaseMarker(fs, ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, pending.record.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+
+  const currentPending = await readLockOwner(fs, pendingPath);
+  if (!currentPending.exists) return GENERATION_RESIDUE_CLEAN;
+  if (
+    currentPending.error ||
+    !lockOwnersMatch(currentPending.record, pending.record)
+  ) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+  owner = await readLockOwner(fs, ownerPath);
+  if (
+    owner.error ||
+    (owner.exists && !lockOwnersMatch(owner.record, pending.record))
+  ) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+
+  terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (terminal.error) return GENERATION_RESIDUE_FAILED;
+  if (terminalContainsGeneration(terminal, generation)) {
+    return generationResidueResult(
+      await removeGenerationFile(fs, pendingPath),
+    );
+  }
+
+  released = await hasGenerationReleaseMarker(fs, ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, pending.record.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+  if (!owner.exists) {
+    return generationResidueResult(
+      await removeGenerationFile(fs, pendingPath),
+    );
+  }
+  return generationResidueResult(
+    await cleanupGenerationNode(fs, ownerPath),
+  );
+}
+
+async function rollbackCompactingGeneration(
+  fs,
+  generationDirectory,
+  terminal,
+  generation,
+) {
+  if (!generationMatchesTerminal(terminal, generation) || terminal.nodes.length < 2) {
+    return false;
+  }
+  const predecessor = terminal.nodes[terminal.nodes.length - 2];
+  const rollbackGeneration = {
+    ...generation,
+    predecessor: {
+      owner: predecessor.owner,
+      ownerPath: predecessor.ownerPath,
+    },
+  };
+  if (!(
+    await removeGenerationFile(
+      fs,
+      temporaryGenerationRootPath(
+        generationDirectory,
+        generation.owner.lockId,
+      ),
+    )
+  )) {
+    return false;
+  }
+  return cleanupUnreachableGenerationCandidate(fs, rollbackGeneration);
+}
+
+async function recoverGenerationCompactingMarker(
+  fs,
+  generationDirectory,
+  terminal,
+  isProcessAlive,
+) {
+  const generation = {
+    owner: terminal.owner,
+    ownerPath: terminal.ownerPath,
+    pendingPath: generationPendingPath(terminal.ownerPath),
+  };
+  let marker = await readGenerationCompactingMarker(fs, generation);
+  if (marker.error) return GENERATION_RESIDUE_FAILED;
+  if (!marker.exists) return GENERATION_RESIDUE_CLEAN;
+
+  let released = await hasGenerationReleaseMarker(fs, generation.ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, generation.owner.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+
+  const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!generationMatchesTerminal(currentTerminal, generation)) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+  marker = await readGenerationCompactingMarker(fs, generation);
+  if (marker.error) return GENERATION_RESIDUE_FAILED;
+  if (!marker.exists) return GENERATION_RESIDUE_CLEAN;
+
+  released = await hasGenerationReleaseMarker(fs, generation.ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, generation.owner.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+  if (currentTerminal.nodes.length === 1) {
+    return generationResidueResult(
+      await removeGenerationFile(
+        fs,
+        generationCompactingPath(generation.ownerPath),
+      ),
+    );
+  }
+  return (await rollbackCompactingGeneration(
+    fs,
+    generationDirectory,
+    currentTerminal,
+    generation,
+  )) ? GENERATION_RESIDUE_BLOCKED : GENERATION_RESIDUE_FAILED;
+}
+
+async function cleanupUnreachableCompactingGeneration(
+  fs,
+  generationDirectory,
+  compactingPath,
+  ownerFileName,
+  isProcessAlive,
+) {
+  const marker = await readLockOwner(fs, compactingPath);
+  if (!marker.exists) return GENERATION_RESIDUE_CLEAN;
+  if (
+    marker.error ||
+    !isReclaimableLockOwner(marker.record) ||
+    ownerFileName !== generationOwnerFileName(marker.record.lockId)
+  ) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+
+  const ownerPath = generationOwnerPath(
+    generationDirectory,
+    marker.record.lockId,
+  );
+  const generation = {
+    owner: marker.record,
+    ownerPath,
+    pendingPath: generationPendingPath(ownerPath),
+  };
+  let owner = await readLockOwner(fs, ownerPath);
+  if (owner.error || (owner.exists && !lockOwnersMatch(owner.record, marker.record))) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+
+  let terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (terminal.error) return GENERATION_RESIDUE_FAILED;
+  if (terminalContainsGeneration(terminal, generation)) {
+    if (!generationMatchesTerminal(terminal, generation)) {
+      return GENERATION_RESIDUE_FAILED;
+    }
+    return recoverGenerationCompactingMarker(
+      fs,
+      generationDirectory,
+      terminal,
+      isProcessAlive,
+    );
+  }
+
+  let released = await hasGenerationReleaseMarker(fs, ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, marker.record.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+
+  const currentMarker = await readGenerationCompactingMarker(fs, generation);
+  if (currentMarker.error) return GENERATION_RESIDUE_FAILED;
+  if (!currentMarker.exists) return GENERATION_RESIDUE_CLEAN;
+  owner = await readLockOwner(fs, ownerPath);
+  if (owner.error || (owner.exists && !lockOwnersMatch(owner.record, marker.record))) {
+    return GENERATION_RESIDUE_FAILED;
+  }
+  terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (terminal.error) return GENERATION_RESIDUE_FAILED;
+  if (terminalContainsGeneration(terminal, generation)) {
+    if (!generationMatchesTerminal(terminal, generation)) {
+      return GENERATION_RESIDUE_FAILED;
+    }
+    return recoverGenerationCompactingMarker(
+      fs,
+      generationDirectory,
+      terminal,
+      isProcessAlive,
+    );
+  }
+  released = await hasGenerationReleaseMarker(fs, ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, marker.record.pid))) {
+    return GENERATION_RESIDUE_BLOCKED;
+  }
+  if (!owner.exists) {
+    return generationResidueResult(
+      await removeGenerationFile(fs, compactingPath),
+    );
+  }
+  return generationResidueResult(
+    await cleanupGenerationNode(fs, ownerPath),
+  );
+}
+
+async function cleanupUnreachableGenerationResidue(
+  fs,
+  generationDirectory,
+  isProcessAlive,
+) {
+  const terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (terminal.error) return GENERATION_RESIDUE_FAILED;
+
+  let fileNames;
+  try {
+    fileNames = await fs.readdir(generationDirectory);
+  } catch {
+    return GENERATION_RESIDUE_FAILED;
+  }
+  const knownFileNames = new Set(fileNames);
+  const pendingOwnerFileNames = new Set();
+  for (const fileName of fileNames) {
+    const ownerFileName = generationArtifactOwnerFileName(
+      fileName,
+      GENERATION_PENDING_SUFFIX,
+    );
+    if (!ownerFileName) continue;
+    pendingOwnerFileNames.add(ownerFileName);
+    const pendingState = await cleanupPendingGenerationCandidate(
+      fs,
+      generationDirectory,
+      path.join(generationDirectory, fileName),
+      ownerFileName,
+      isProcessAlive,
+    );
+    if (pendingState !== GENERATION_RESIDUE_CLEAN) {
+      return pendingState;
+    }
+  }
+  for (const fileName of fileNames) {
+    const ownerFileName = generationArtifactOwnerFileName(
+      fileName,
+      GENERATION_COMPACTING_SUFFIX,
+    );
+    if (!ownerFileName) continue;
+    const compactingState = await cleanupUnreachableCompactingGeneration(
+      fs,
+      generationDirectory,
+      path.join(generationDirectory, fileName),
+      ownerFileName,
+      isProcessAlive,
+    );
+    if (compactingState !== GENERATION_RESIDUE_CLEAN) {
+      return compactingState;
+    }
+  }
+  for (const fileName of fileNames) {
+    if (isTemporaryGenerationRootFileName(fileName)) {
+      const temporaryRootPath = path.join(generationDirectory, fileName);
+      const temporaryOwner = await readLockOwner(fs, temporaryRootPath);
+      if (
+        temporaryOwner.error ||
+        !isReclaimableLockOwner(temporaryOwner.record)
+      ) {
+        return GENERATION_RESIDUE_FAILED;
+      }
+      const ownerPath = generationOwnerPath(
+        generationDirectory,
+        temporaryOwner.record.lockId,
+      );
+      const released = await hasGenerationReleaseMarker(fs, ownerPath);
+      if (!released && !(await isConfirmedDead(isProcessAlive, temporaryOwner.record.pid))) {
+        return GENERATION_RESIDUE_BLOCKED;
+      }
+      if (!(await removeGenerationFile(fs, temporaryRootPath))) {
+        return GENERATION_RESIDUE_FAILED;
+      }
+      continue;
+    }
+    for (const suffix of ['.next', GENERATION_RELEASED_SUFFIX]) {
+      const ownerFileName = generationArtifactOwnerFileName(fileName, suffix);
+      if (
+        ownerFileName &&
+        !knownFileNames.has(ownerFileName) &&
+        !(await removeGenerationFile(fs, path.join(generationDirectory, fileName)))
+      ) {
+        return GENERATION_RESIDUE_FAILED;
+      }
+    }
+  }
+
+  const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+  if (currentTerminal.error) return GENERATION_RESIDUE_FAILED;
+  const reachableOwnerPaths = new Set(
+    currentTerminal.nodes.map((node) => node.ownerPath),
+  );
+  for (const fileName of fileNames) {
+    if (!isGenerationOwnerFileName(fileName)) continue;
+
+    if (pendingOwnerFileNames.has(fileName)) continue;
+    const ownerPath = path.join(generationDirectory, fileName);
+    if (reachableOwnerPaths.has(ownerPath)) continue;
+    const owner = await readLockOwner(fs, ownerPath);
+    if (!owner.exists) continue;
+    if (owner.error || !isReclaimableLockOwner(owner.record)) {
+      return GENERATION_RESIDUE_FAILED;
+    }
+
+    const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+    if (currentTerminal.error) return GENERATION_RESIDUE_FAILED;
+    if (terminalContainsGeneration(currentTerminal, {
+      owner: owner.record,
+      ownerPath,
+    })) continue;
+
+    if (!(await cleanupGenerationNode(fs, ownerPath))) return GENERATION_RESIDUE_FAILED;
+  }
+  return GENERATION_RESIDUE_CLEAN;
+}
+
+async function confirmGenerationTerminalAvailable(
+  fs,
+  generationDirectory,
+  terminal,
+  isProcessAlive,
+) {
+  let released = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
+  if (released) return { terminal, released: true };
+  if (!(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) return null;
+
+  const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!generationMatchesTerminal(currentTerminal, terminal)) return null;
+  terminal = currentTerminal;
+  released = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
+  if (!released && !(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) {
+    return null;
+  }
+  return { terminal, released };
+}
+
+async function finishCommittedCompactingGeneration(
+  fs,
+  generationDirectory,
+  generation,
+  historyNodes,
+) {
+  const historyCleaned = await cleanupGenerationHistory(
+    fs,
+    historyNodes,
+    generation.ownerPath,
+  );
+  const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!generationMatchesTerminal(currentTerminal, generation)) {
+    generation.cleanupFailed = true;
+    return generation;
+  }
+  if (!historyCleaned || !(
+    await removeGenerationFile(
+      fs,
+      generationCompactingPath(generation.ownerPath),
+    )
+  )) {
+    generation.cleanupFailed = true;
+  }
+  return generation;
+}
+
+async function recoverRenameFailureForCompactingGeneration(
+  fs,
+  generationDirectory,
+  generation,
+  historyNodes,
+) {
+  const temporaryRootPath = temporaryGenerationRootPath(
+    generationDirectory,
+    generation.owner.lockId,
+  );
+  if (!(
+    await removeGenerationFile(fs, temporaryRootPath)
+  )) {
+    generation.cleanupFailed = true;
+    return generation;
+  }
+
+  const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!generationMatchesTerminal(currentTerminal, generation)) {
+    generation.cleanupFailed = true;
+    return generation;
+  }
+  if (currentTerminal.nodes.length === 1) {
+    return finishCommittedCompactingGeneration(
+      fs,
+      generationDirectory,
+      generation,
+      historyNodes,
+    );
+  }
+  if (await rollbackCompactingGeneration(
+    fs,
+    generationDirectory,
+    currentTerminal,
+    generation,
+  )) {
+    throw generationCleanupError();
+  }
+  generation.cleanupFailed = true;
+  return generation;
+}
+
+async function compactPublisherGeneration(fs, generationDirectory, generation) {
+  const terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!generationMatchesTerminal(terminal, generation)) {
+    if (terminal.error || !terminal.exists) {
+      generation.cleanupFailed = true;
+      return generation;
+    }
+    if (
+      !terminalContainsGeneration(terminal, generation) &&
+      !(await cleanupUnreachableGenerationCandidate(fs, generation))
+    ) {
+      generation.cleanupFailed = true;
+      return generation;
+    }
+    return null;
+  }
+  const marker = await readGenerationCompactingMarker(fs, generation);
+  if (marker.error || !marker.exists) {
+    generation.cleanupFailed = true;
+    return generation;
+  }
+
+  const temporaryRootPath = temporaryGenerationRootPath(
+    generationDirectory,
+    generation.owner.lockId,
+  );
+  try {
+    await fs.link(generation.ownerPath, temporaryRootPath);
+    await fs.rename(temporaryRootPath, generationRootPath(generationDirectory));
+  } catch {
+    return recoverRenameFailureForCompactingGeneration(
+      fs,
+      generationDirectory,
+      generation,
+      terminal.nodes,
+    );
+  }
+
+  return finishCommittedCompactingGeneration(
+    fs,
+    generationDirectory,
+    generation,
+    terminal.nodes,
+  );
+}
+
+async function createPublisherGenerationCandidate(
+  fs,
+  generationDirectory,
+  owner,
+  predecessor,
+) {
+  const ownerPath = generationOwnerPath(generationDirectory, owner.lockId);
+  const generation = {
+    owner,
+    ownerPath,
+    pendingPath: generationPendingPath(ownerPath),
+    predecessor,
+    released: false,
+  };
+  try {
+    await writeGenerationCandidate(fs, generationDirectory, owner);
+  } catch (error) {
+    if (!(await cleanupGenerationCandidate(
+      fs,
+      generation.ownerPath,
+      generation.pendingPath,
+    ))) {
+      generation.cleanupFailed = true;
+      return generation;
+    }
+    throw error;
+  }
+  return generation;
+}
+
 async function tryAcquirePublisherGeneration(
   fs,
   generationDirectory,
@@ -303,17 +1034,42 @@ async function tryAcquirePublisherGeneration(
   isProcessAlive,
 ) {
   await fs.mkdir(generationDirectory, { recursive: true, mode: 0o700 });
-  const rootPath = path.join(generationDirectory, GENERATION_ROOT_FILE_NAME);
+  const residueState = await cleanupUnreachableGenerationResidue(
+    fs,
+    generationDirectory,
+    isProcessAlive,
+  );
+  if (residueState === GENERATION_RESIDUE_BLOCKED) {
+    return null;
+  }
+  if (residueState !== GENERATION_RESIDUE_CLEAN) {
+    throw generationCleanupError();
+  }
+
+  const rootPath = generationRootPath(generationDirectory);
   let terminal = await readGenerationTerminal(fs, generationDirectory);
 
   if (!terminal.exists) {
-    const ownerPath = await writeGenerationOwner(fs, generationDirectory, owner);
+    const generation = await createPublisherGenerationCandidate(
+      fs,
+      generationDirectory,
+      owner,
+      null,
+    );
+    if (generation.cleanupFailed) return generation;
     try {
-      await fs.link(ownerPath, rootPath);
-      return { owner, ownerPath, predecessor: null, released: false };
+      await fs.link(generation.ownerPath, rootPath);
+      return completeGenerationCandidateLink(fs, generation);
     } catch (error) {
+      if (!(await cleanupGenerationCandidate(
+        fs,
+        generation.ownerPath,
+        generation.pendingPath,
+      ))) {
+        generation.cleanupFailed = true;
+        return generation;
+      }
       if (error?.code === 'EEXIST') {
-        await cleanupGenerationCandidate(fs, ownerPath);
         return null;
       }
       throw error;
@@ -321,46 +1077,74 @@ async function tryAcquirePublisherGeneration(
   }
   if (terminal.error) return null;
 
-  let predecessorReleased = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
-  if (!predecessorReleased) {
-    if (!(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) return null;
-
-    const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
-    if (
-      !currentTerminal.exists ||
-      currentTerminal.error ||
-      currentTerminal.ownerPath !== terminal.ownerPath ||
-      !lockOwnersMatch(currentTerminal.owner, terminal.owner)
-    ) {
-      return null;
-    }
-    terminal = currentTerminal;
-    predecessorReleased = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
-    if (!predecessorReleased && !(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) {
-      return null;
-    }
+  const compactionState = await recoverGenerationCompactingMarker(
+    fs,
+    generationDirectory,
+    terminal,
+    isProcessAlive,
+  );
+  if (compactionState === GENERATION_RESIDUE_BLOCKED) return null;
+  if (compactionState !== GENERATION_RESIDUE_CLEAN) {
+    throw generationCleanupError();
   }
+  terminal = await readGenerationTerminal(fs, generationDirectory);
+  if (!terminal.exists || terminal.error) return null;
 
-  const ownerPath = await writeGenerationOwner(fs, generationDirectory, owner);
+  let availableTerminal = await confirmGenerationTerminalAvailable(
+    fs,
+    generationDirectory,
+    terminal,
+    isProcessAlive,
+  );
+  if (!availableTerminal) return null;
+  terminal = availableTerminal.terminal;
+  let predecessorReleased = availableTerminal.released;
+
+  const generation = await createPublisherGenerationCandidate(
+    fs,
+    generationDirectory,
+    owner,
+    {
+      owner: terminal.owner,
+      ownerPath: terminal.ownerPath,
+      released: predecessorReleased,
+    },
+  );
+  if (generation.cleanupFailed) return generation;
+  if (!(await createGenerationCompactingMarker(fs, generation))) {
+    if (!(await cleanupGenerationCandidate(
+      fs,
+      generation.ownerPath,
+      generation.pendingPath,
+    ))) {
+      generation.cleanupFailed = true;
+      return generation;
+    }
+    throw generationCleanupError();
+  }
   try {
-    await fs.link(ownerPath, generationNextPath(terminal.ownerPath));
-    return {
-      owner,
-      ownerPath,
-      predecessor: {
-        owner: terminal.owner,
-        ownerPath: terminal.ownerPath,
-        released: predecessorReleased,
-      },
-      released: false,
-    };
+    await fs.link(
+      generation.ownerPath,
+      generationNextPath(terminal.ownerPath),
+    );
   } catch (error) {
-    if (error?.code === 'EEXIST') {
-      await cleanupGenerationCandidate(fs, ownerPath);
+    if (!(await cleanupGenerationCandidate(
+      fs,
+      generation.ownerPath,
+      generation.pendingPath,
+    ))) {
+      generation.cleanupFailed = true;
+      return generation;
+    }
+    if (error?.code === 'EEXIST' || error?.code === 'ENOENT') {
       return null;
     }
     throw error;
   }
+
+  await completeGenerationCandidateLink(fs, generation);
+  if (generation.cleanupFailed) return generation;
+  return compactPublisherGeneration(fs, generationDirectory, generation);
 }
 
 async function acquirePublisherGeneration(
@@ -702,6 +1486,10 @@ function createBridgeDiscoveryPublisher({
         if (isClosed || isSuperseded) return false;
         const generation = await ensurePublisherGeneration();
         if (!generation || isClosed || isSuperseded) return false;
+        if (generation.cleanupFailed) {
+          if (!(await releaseCurrentPublisherGeneration())) throw lockReleaseError();
+          throw generationCleanupError();
+        }
 
         let rejectedInitialDescriptor = false;
         let supersededDuringPublication = false;

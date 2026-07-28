@@ -1370,6 +1370,1064 @@ test('keeps_active_and_permission_owner_locks', async () => {
     }
   });
 });
+
+test('keeps_generation_metadata_bounded_across_many_complete_lifecycles', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+
+    for (let round = 0; round < 32; round += 1) {
+      const publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_600 + round,
+        clock: () => 10_100_000 + round,
+        instanceId: 'instance-generation-bound-' + round,
+        pid: 4_400 + round,
+        timer: createIdleTimer(),
+        token: 'generation-bound-token-' + round,
+      });
+
+      assert.equal(await publisher.ready, true);
+      assert.equal(await publisher.close(), true);
+      const entries = await fs.readdir(generationDirectory);
+      assert.ok(
+        entries.length <= 3,
+        'Generation metadata must remain bounded; found ' + entries.length + ' entries.',
+      );
+    }
+  });
+});
+
+test('does_not_accumulate_generation_metadata_when_historical_cleanup_persists', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_610,
+      clock: () => 10_150_000,
+      instanceId: 'instance-generation-cleanup-first',
+      pid: 4_430,
+      timer: createIdleTimer(),
+      token: 'generation-cleanup-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    const firstRootOwner = JSON.parse(await fs.readFile(generationRootPath, 'utf8'));
+    const firstOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + firstRootOwner.lockId + '.json',
+    );
+    const stubbornHistoryPaths = new Set([
+      firstOwnerPath,
+      firstOwnerPath + '.next',
+      firstOwnerPath + '.released',
+    ]);
+    const failingFs = {
+      ...fs,
+      async unlink(filePath) {
+        if (stubbornHistoryPaths.has(filePath)) {
+          const error = new Error('persistent-generation-cleanup-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.unlink(filePath);
+      },
+    };
+    let secondPublisher;
+    let thirdPublisher;
+    try {
+      secondPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_611,
+        clock: () => 10_150_000,
+        fs: failingFs,
+        instanceId: 'instance-generation-cleanup-second',
+        pid: 4_431,
+        timer: createIdleTimer(),
+        token: 'generation-cleanup-second-token',
+      });
+      await assert.rejects(secondPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+      await secondPublisher.close();
+
+      const entriesBeforeRetry = (await fs.readdir(generationDirectory)).sort();
+      thirdPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_612,
+        clock: () => 10_150_000,
+        fs: failingFs,
+        instanceId: 'instance-generation-cleanup-third',
+        pid: 4_432,
+        timer: createIdleTimer(),
+        token: 'generation-cleanup-third-token',
+      });
+      await assert.rejects(thirdPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+      const entriesAfterRetry = await fs.readdir(generationDirectory);
+      assert.ok(
+        entriesAfterRetry.every((entry) => entriesBeforeRetry.includes(entry)),
+        'Persistent cleanup may remove recovered intent, but must not add metadata.',
+      );
+    } finally {
+      await Promise.allSettled([thirdPublisher?.close()]);
+      await Promise.allSettled([secondPublisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('cleans_an_unlinked_generation_candidate_after_link_failure', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const failingFs = {
+      ...fs,
+      async link() {
+        const error = new Error('generation-link-failure');
+        error.code = 'EACCES';
+        throw error;
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_613,
+      clock: () => 10_160_000,
+      fs: failingFs,
+      instanceId: 'instance-generation-link-failure',
+      pid: 4_436,
+      timer: createIdleTimer(),
+      token: 'generation-link-failure-token',
+    });
+
+    await assert.rejects(publisher.ready);
+    assert.deepEqual(await fs.readdir(generationDirectory), []);
+    await publisher.close();
+  });
+});
+
+test('blocks_a_live_pending_generation_candidate_before_appending', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const pendingPid = 4_448;
+    const scannerRetryScheduled = createDeferred();
+    const pendingOwner = {
+      instanceId: 'instance-live-pending',
+      pid: pendingPid,
+      lockId: 'd9c93ca1-2b4f-4dc4-8d1f-0b3a6fa2e2b1',
+    };
+    const pendingOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + pendingOwner.lockId + '.json',
+    );
+    const pendingPath = pendingOwnerPath + '.pending';
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(pendingOwnerPath, JSON.stringify(pendingOwner), 'utf8');
+    await fs.writeFile(pendingPath, JSON.stringify(pendingOwner), 'utf8');
+
+    let generationLinkAttempts = 0;
+    const scannerFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        if (destinationPath.startsWith(generationDirectory)) {
+          generationLinkAttempts += 1;
+        }
+        return fs.link(sourcePath, destinationPath);
+      },
+    };
+    const scannerTimer = {
+      clearInterval() {},
+      clearTimeout() {},
+      setInterval() {
+        return {};
+      },
+      setTimeout() {
+        scannerRetryScheduled.resolve();
+        return {};
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let scannerPublisher;
+    let scannerReadyError = Promise.resolve();
+    try {
+      scannerPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_616,
+        clock: () => 10_165_000,
+        fs: scannerFs,
+        instanceId: 'instance-pending-bound-scanner',
+        isProcessAlive(candidatePid) {
+          return candidatePid === pendingPid;
+        },
+        pid: 4_450,
+        timer: scannerTimer,
+        token: 'pending-bound-scanner-token',
+      });
+      const scannerReady = scannerPublisher.ready;
+      scannerReadyError = scannerReady.catch((error) => error);
+      const scannerOutcome = await Promise.race([
+        scannerRetryScheduled.promise.then(() => 'retry'),
+        new Promise((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+      ]);
+      assert.equal(scannerOutcome, 'retry');
+      assert.equal(generationLinkAttempts, 0);
+      assert.deepEqual(
+        (await fs.readdir(generationDirectory)).sort(),
+        [path.basename(pendingOwnerPath), path.basename(pendingPath)].sort(),
+      );
+      assert.equal(
+        await Promise.race([
+          scannerReady.then(() => true, () => false),
+          new Promise((resolve) => setTimeout(() => resolve(false), 20)),
+        ]),
+        false,
+      );
+    } finally {
+      await Promise.allSettled([scannerPublisher?.close()]);
+      await scannerReadyError;
+    }
+  });
+});
+
+test('releases_an_abandoned_prelink_candidate_and_reclaims_it', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const candidatePid = 4_451;
+    const failingFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        if (destinationPath.endsWith('.next')) {
+          const error = new Error('candidate-link-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.link(sourcePath, destinationPath);
+      },
+      async unlink() {
+        const error = new Error('candidate-cleanup-failure');
+        error.code = 'EACCES';
+        throw error;
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_614,
+      clock: () => 10_165_000,
+      instanceId: 'instance-prelink-first',
+      pid: 4_449,
+      timer: createIdleTimer(),
+      token: 'prelink-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    let failingPublisher;
+    let successorPublisher;
+    try {
+      failingPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_615,
+        clock: () => 10_165_000,
+        fs: failingFs,
+        instanceId: 'instance-prelink-failing',
+        pid: candidatePid,
+        timer: createIdleTimer(),
+        token: 'prelink-failing-token',
+      });
+      await assert.rejects(failingPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+
+      const candidateMarker = (await fs.readdir(generationDirectory))
+        .find((fileName) => fileName.endsWith('.compacting'));
+      assert.ok(candidateMarker);
+      const candidateOwnerFileName = candidateMarker.slice(
+        0,
+        -'.compacting'.length,
+      );
+      const candidateOwnerPath = path.join(
+        generationDirectory,
+        candidateOwnerFileName,
+      );
+      await fs.access(candidateOwnerPath);
+      await fs.access(candidateOwnerPath + '.pending');
+      await fs.access(candidateOwnerPath + '.compacting');
+      await fs.access(candidateOwnerPath + '.released');
+
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_616,
+        clock: () => 10_165_000,
+        instanceId: 'instance-prelink-successor',
+        isProcessAlive(candidatePidToCheck) {
+          return candidatePidToCheck !== candidatePid;
+        },
+        pid: 4_450,
+        timer: createIdleTimer(),
+        token: 'prelink-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      await assert.rejects(fs.access(candidateOwnerPath), { code: 'ENOENT' });
+      await assert.rejects(fs.access(candidateOwnerPath + '.pending'), { code: 'ENOENT' });
+      await assert.rejects(fs.access(candidateOwnerPath + '.compacting'), { code: 'ENOENT' });
+      await assert.rejects(fs.access(candidateOwnerPath + '.released'), { code: 'ENOENT' });
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+      await Promise.allSettled([failingPublisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('releases_a_generation_when_root_compaction_rename_fails', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const secondPid = 4_437;
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_614,
+      clock: () => 10_170_000,
+      instanceId: 'instance-root-rename-first',
+      pid: 4_438,
+      timer: createIdleTimer(),
+      token: 'root-rename-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    const failingFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        if (destinationPath === generationRootPath) {
+          const error = new Error('root-compaction-rename-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.rename(sourcePath, destinationPath);
+      },
+    };
+    let secondPublisher;
+    let successorPublisher;
+    try {
+      secondPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_615,
+        clock: () => 10_170_000,
+        fs: failingFs,
+        instanceId: 'instance-root-rename-second',
+        pid: secondPid,
+        timer: createIdleTimer(),
+        token: 'root-rename-second-token',
+      });
+      await assert.rejects(secondPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_616,
+        clock: () => 10_170_000,
+        instanceId: 'instance-root-rename-successor',
+        isProcessAlive(candidatePid) {
+          return candidatePid === secondPid;
+        },
+        pid: 4_439,
+        timer: createIdleTimer(),
+        token: 'root-rename-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+      await Promise.allSettled([secondPublisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('rolls_back_a_generation_after_explicit_root_compaction_rename_failure', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_622,
+      clock: () => 10_171_000,
+      instanceId: 'instance-root-rollback-first',
+      pid: 4_451,
+      timer: createIdleTimer(),
+      token: 'root-rollback-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+    const rootOwnerBeforeFailure = await fs.readFile(generationRootPath, 'utf8');
+    const entriesBeforeFailure = (await fs.readdir(generationDirectory)).sort();
+
+    const failingFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        if (destinationPath === generationRootPath) {
+          const error = new Error('explicit-root-compaction-rename-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.rename(sourcePath, destinationPath);
+      },
+    };
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_623,
+        clock: () => 10_171_000,
+        fs: failingFs,
+        instanceId: 'instance-root-rollback-failing',
+        pid: 4_452,
+        timer: createIdleTimer(),
+        token: 'root-rollback-failing-token',
+      });
+      await assert.rejects(publisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+
+      assert.equal(
+        await fs.readFile(generationRootPath, 'utf8'),
+        rootOwnerBeforeFailure,
+      );
+      assert.deepEqual(
+        (await fs.readdir(generationDirectory)).sort(),
+        entriesBeforeFailure,
+      );
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('keeps_the_new_root_when_rename_reports_failure_after_commit', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_624,
+      clock: () => 10_172_000,
+      instanceId: 'instance-root-commit-first',
+      pid: 4_453,
+      timer: createIdleTimer(),
+      token: 'root-commit-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+    const previousRootOwner = JSON.parse(
+      await fs.readFile(generationRootPath, 'utf8'),
+    );
+    const previousOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + previousRootOwner.lockId + '.json',
+    );
+
+    const commitThenThrowFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        const result = await fs.rename(sourcePath, destinationPath);
+        if (destinationPath === generationRootPath) {
+          const error = new Error('rename-reported-after-commit');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return result;
+      },
+    };
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_625,
+        clock: () => 10_172_000,
+        fs: commitThenThrowFs,
+        instanceId: 'instance-root-commit-second',
+        pid: 4_454,
+        timer: createIdleTimer(),
+        token: 'root-commit-second-token',
+      });
+      assert.equal(await publisher.ready, true);
+
+      const compactedOwner = JSON.parse(
+        await fs.readFile(generationRootPath, 'utf8'),
+      );
+      assert.equal(compactedOwner.instanceId, 'instance-root-commit-second');
+      assert.equal(compactedOwner.pid, 4_454);
+      const compactedOwnerPath = path.join(
+        generationDirectory,
+        'owner.' + compactedOwner.lockId + '.json',
+      );
+      await fs.access(compactedOwnerPath);
+      await assert.rejects(fs.access(previousOwnerPath), { code: 'ENOENT' });
+      await assert.rejects(
+        fs.access(compactedOwnerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('recovers_a_released_compacting_terminal_after_root_commit', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const terminalOwner = {
+      instanceId: 'instance-recovery-root-terminal',
+      pid: 4_455,
+      lockId: '9a92864f-5f84-4f92-b8eb-a0e5b20c0911',
+    };
+    const terminalOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + terminalOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(terminalOwnerPath, JSON.stringify(terminalOwner), 'utf8');
+    await fs.link(terminalOwnerPath, generationRootPath);
+    await fs.writeFile(
+      terminalOwnerPath + '.compacting',
+      JSON.stringify(terminalOwner),
+      'utf8',
+    );
+    await fs.writeFile(terminalOwnerPath + '.released', '', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let successorPublisher;
+    try {
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_626,
+        clock: () => 10_172_000,
+        instanceId: 'instance-recovery-root-successor',
+        isProcessAlive: () => false,
+        pid: 4_456,
+        timer: createIdleTimer(),
+        token: 'recovery-root-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      const rootOwner = JSON.parse(await fs.readFile(generationRootPath, 'utf8'));
+      assert.equal(rootOwner.instanceId, 'instance-recovery-root-successor');
+      await assert.rejects(fs.access(terminalOwnerPath), { code: 'ENOENT' });
+      await assert.rejects(
+        fs.access(terminalOwnerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+    }
+  });
+});
+
+test('rolls_back_a_released_compacting_successor_before_retrying', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const predecessorOwner = {
+      instanceId: 'instance-recovery-predecessor',
+      pid: 4_457,
+      lockId: 'b8b8fc2d-9ed8-4f1b-9d93-1a3ce5cfa011',
+    };
+    const candidateOwner = {
+      instanceId: 'instance-recovery-linked-candidate',
+      pid: 4_458,
+      lockId: 'c1ab7db8-3185-4d32-83ca-3fc0cd9e6111',
+    };
+    const predecessorOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + predecessorOwner.lockId + '.json',
+    );
+    const candidateOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + candidateOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      predecessorOwnerPath,
+      JSON.stringify(predecessorOwner),
+      'utf8',
+    );
+    await fs.writeFile(
+      candidateOwnerPath,
+      JSON.stringify(candidateOwner),
+      'utf8',
+    );
+    await fs.link(predecessorOwnerPath, generationRootPath);
+    await fs.link(candidateOwnerPath, predecessorOwnerPath + '.next');
+    await fs.writeFile(
+      candidateOwnerPath + '.compacting',
+      JSON.stringify(candidateOwner),
+      'utf8',
+    );
+    await fs.writeFile(candidateOwnerPath + '.released', '', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let successorPublisher;
+    try {
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_627,
+        clock: () => 10_172_000,
+        instanceId: 'instance-recovery-linked-successor',
+        isProcessAlive: () => false,
+        pid: 4_459,
+        timer: createIdleTimer(),
+        token: 'recovery-linked-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      const rootOwner = JSON.parse(await fs.readFile(generationRootPath, 'utf8'));
+      assert.equal(rootOwner.instanceId, 'instance-recovery-linked-successor');
+      await assert.rejects(fs.access(candidateOwnerPath), { code: 'ENOENT' });
+      await assert.rejects(
+        fs.access(candidateOwnerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(
+        fs.access(candidateOwnerPath + '.released'),
+        { code: 'ENOENT' },
+      );
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+    }
+  });
+});
+
+test('reclaims_a_released_pending_compaction_intent_before_first_root', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const abandonedOwner = {
+      instanceId: 'instance-recovery-pending-candidate',
+      pid: 4_460,
+      lockId: 'd2c0a53e-4f17-45fd-b08c-eec470ea7111',
+    };
+    const abandonedOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + abandonedOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      abandonedOwnerPath,
+      JSON.stringify(abandonedOwner),
+      'utf8',
+    );
+    await fs.writeFile(
+      abandonedOwnerPath + '.pending',
+      JSON.stringify(abandonedOwner),
+      'utf8',
+    );
+    await fs.writeFile(
+      abandonedOwnerPath + '.compacting',
+      JSON.stringify(abandonedOwner),
+      'utf8',
+    );
+    await fs.writeFile(abandonedOwnerPath + '.released', '', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let successorPublisher;
+    try {
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_628,
+        clock: () => 10_172_000,
+        instanceId: 'instance-recovery-pending-successor',
+        isProcessAlive: () => false,
+        pid: 4_461,
+        timer: createIdleTimer(),
+        token: 'recovery-pending-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      await assert.rejects(fs.access(abandonedOwnerPath), { code: 'ENOENT' });
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.pending'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.released'),
+        { code: 'ENOENT' },
+      );
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+    }
+  });
+});
+
+test('releases_a_generation_when_post_compaction_read_fails', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_617,
+      clock: () => 10_175_000,
+      instanceId: 'instance-root-read-first',
+      pid: 4_440,
+      timer: createIdleTimer(),
+      token: 'root-read-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    let rootWasCompacted = false;
+    const failingFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        const result = await fs.rename(sourcePath, destinationPath);
+        if (destinationPath === generationRootPath) rootWasCompacted = true;
+        return result;
+      },
+      async readFile(filePath, ...args) {
+        if (rootWasCompacted && filePath === generationRootPath) {
+          const error = new Error('post-compaction-root-read-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.readFile(filePath, ...args);
+      },
+    };
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_618,
+        clock: () => 10_175_000,
+        fs: failingFs,
+        instanceId: 'instance-root-read-second',
+        pid: 4_441,
+        timer: createIdleTimer(),
+        token: 'root-read-second-token',
+      });
+      await assert.rejects(publisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+
+      const compactedRootOwner = JSON.parse(await fs.readFile(generationRootPath, 'utf8'));
+      const compactedOwnerPath = path.join(
+        generationDirectory,
+        'owner.' + compactedRootOwner.lockId + '.json',
+      );
+      await fs.access(compactedOwnerPath + '.released');
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('does_not_append_after_persistent_root_compaction_rename_failure', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_617,
+      clock: () => 10_180_000,
+      instanceId: 'instance-root-rename-persistent-first',
+      pid: 4_440,
+      timer: createIdleTimer(),
+      token: 'root-rename-persistent-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    const failingFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        if (destinationPath === generationRootPath) {
+          const error = new Error('persistent-root-compaction-rename-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.rename(sourcePath, destinationPath);
+      },
+    };
+    let secondPublisher;
+    let thirdPublisher;
+    try {
+      secondPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_618,
+        clock: () => 10_180_000,
+        fs: failingFs,
+        instanceId: 'instance-root-rename-persistent-second',
+        pid: 4_441,
+        timer: createIdleTimer(),
+        token: 'root-rename-persistent-second-token',
+      });
+      await assert.rejects(secondPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+      const entriesBeforeRetry = (await fs.readdir(generationDirectory)).sort();
+
+      thirdPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_619,
+        clock: () => 10_180_000,
+        fs: failingFs,
+        instanceId: 'instance-root-rename-persistent-third',
+        pid: 4_442,
+        timer: createIdleTimer(),
+        token: 'root-rename-persistent-third-token',
+      });
+      await assert.rejects(thirdPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+      assert.deepEqual(
+        (await fs.readdir(generationDirectory)).sort(),
+        entriesBeforeRetry,
+      );
+    } finally {
+      await Promise.allSettled([thirdPublisher?.close()]);
+      await Promise.allSettled([secondPublisher?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('removes_a_live_unreachable_generation_candidate_before_acquiring_root', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const staleOwner = {
+      instanceId: 'instance-live-unreachable-candidate',
+      pid: 4_443,
+      lockId: 'a14b5bc8-26f1-4bb1-8b16-5930ecb274da',
+    };
+    const staleOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + staleOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(staleOwnerPath, JSON.stringify(staleOwner), 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_620,
+      clock: () => 10_190_000,
+      instanceId: 'instance-live-unreachable-successor',
+      isProcessAlive: () => true,
+      pid: 4_444,
+      timer: createIdleTimer(),
+      token: 'live-unreachable-successor-token',
+    });
+
+    await publisher.ready;
+    await assert.rejects(fs.access(staleOwnerPath), { code: 'ENOENT' });
+    await publisher.close();
+  });
+});
+
+test('fences_a_slow_compactor_before_any_later_generation_append', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const candidatePid = 4_446;
+    const candidateRootRenameStarted = createDeferred();
+    const permitCandidateRootRename = createDeferred();
+    const scannerRetryScheduled = createDeferred();
+    let candidateRootRenameWasHeld = false;
+    let scannerGenerationLinks = 0;
+    let scannerRootRenames = 0;
+    let scannerReadCompactingMarker = false;
+    const candidateFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        if (
+          !candidateRootRenameWasHeld &&
+          destinationPath === generationRootPath
+        ) {
+          candidateRootRenameWasHeld = true;
+          candidateRootRenameStarted.resolve();
+          await permitCandidateRootRename.promise;
+        }
+        return fs.rename(sourcePath, destinationPath);
+      },
+    };
+    const scannerFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        if (destinationPath.startsWith(generationDirectory)) {
+          scannerGenerationLinks += 1;
+        }
+        return fs.link(sourcePath, destinationPath);
+      },
+      async readFile(filePath, ...args) {
+        if (filePath.endsWith('.compacting')) {
+          scannerReadCompactingMarker = true;
+        }
+        return fs.readFile(filePath, ...args);
+      },
+      async rename(sourcePath, destinationPath) {
+        if (destinationPath === generationRootPath) {
+          scannerRootRenames += 1;
+        }
+        return fs.rename(sourcePath, destinationPath);
+      },
+    };
+    const scannerTimer = {
+      clearInterval() {},
+      clearTimeout() {},
+      setInterval() {
+        return {};
+      },
+      setTimeout() {
+        scannerRetryScheduled.resolve();
+        return {};
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_636,
+      clock: () => 10_210_000,
+      instanceId: 'instance-unreachable-cleanup-first',
+      pid: 4_445,
+      timer: createIdleTimer(),
+      token: 'unreachable-cleanup-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+    const rootOwnerBeforeCompaction = await fs.readFile(generationRootPath, 'utf8');
+
+    let candidatePublisher;
+    let scannerPublisher;
+    let candidateReadyError = Promise.resolve();
+    let scannerReadyError = Promise.resolve();
+    try {
+      candidatePublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_637,
+        clock: () => 10_210_000,
+        fs: candidateFs,
+        instanceId: 'instance-unreachable-cleanup-candidate',
+        isProcessAlive(candidatePidToCheck) {
+          return candidatePidToCheck === candidatePid;
+        },
+        pid: candidatePid,
+        timer: createIdleTimer(),
+        token: 'unreachable-cleanup-candidate-token',
+      });
+      const candidateReady = candidatePublisher.ready;
+      candidateReadyError = candidateReady.catch((error) => error);
+      await candidateRootRenameStarted.promise;
+
+      scannerPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_638,
+        clock: () => 10_210_000,
+        fs: scannerFs,
+        instanceId: 'instance-unreachable-cleanup-scanner',
+        isProcessAlive(candidatePidToCheck) {
+          return candidatePidToCheck === candidatePid;
+        },
+        pid: 4_447,
+        timer: scannerTimer,
+        token: 'unreachable-cleanup-scanner-token',
+      });
+      const scannerReady = scannerPublisher.ready;
+      scannerReadyError = scannerReady.catch((error) => error);
+      await scannerRetryScheduled.promise;
+      assert.equal(scannerReadCompactingMarker, true);
+      assert.equal(scannerGenerationLinks, 0);
+      assert.equal(scannerRootRenames, 0);
+      assert.equal(
+        await fs.readFile(generationRootPath, 'utf8'),
+        rootOwnerBeforeCompaction,
+      );
+      assert.equal(
+        await Promise.race([
+          scannerReady.then(() => true, () => false),
+          new Promise((resolve) => setTimeout(() => resolve(false), 20)),
+        ]),
+        false,
+      );
+
+      permitCandidateRootRename.resolve();
+      assert.equal(await candidateReady, true);
+    } finally {
+      permitCandidateRootRename.resolve();
+      await Promise.allSettled([scannerPublisher?.close()]);
+      await Promise.allSettled([candidatePublisher?.close()]);
+      await scannerReadyError;
+      await candidateReadyError;
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
 test('coalesces_refresh_ticks_while_publication_is_in_flight', async () => {
   await withTempAppData(async (appData) => {
     const timer = createControllableTimer();
