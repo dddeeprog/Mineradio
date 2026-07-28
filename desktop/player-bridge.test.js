@@ -804,3 +804,65 @@ test('preserves_safe_renderer_receipt_error_code_without_error_details', async (
     /private-token|private-stack|authorization/i,
   );
 });
+
+test('projects_command_results_to_explicit_public_dto', async () => {
+  const dispatched = [];
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => 'attempt-1',
+    setTimeoutFn: () => ({}),
+    clearTimeoutFn: () => {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const request = bridge.enqueueCommand({
+    requestId: 'dto-result',
+    command: 'play',
+    payload: {},
+  });
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'dto-result',
+      attempt: dispatched[0].attempt,
+      ok: true,
+      result: {
+        accepted: true,
+        apiKey: 'private-api-key',
+        coverUrl: 'https://image.example/cover.jpg',
+        name: 'Safe command result',
+        password: 'private-password',
+        playbackState: {
+          progress: 0.5,
+          unknownNested: { sessionId: 'private-nested-session' },
+          variants: [{ apiKey: 'private-variant-key', name: 'fallback' }],
+        },
+        privateKey: 'private-key',
+        progress: 0.75,
+        sessionId: 'private-session',
+        unknown: { deep: { token: 'private-deep-token' } },
+      },
+    }),
+    true,
+  );
+
+  const response = await request;
+  assert.deepEqual(response, {
+    requestId: 'dto-result',
+    ok: true,
+    result: {
+      accepted: true,
+      coverUrl: 'https://image.example/cover.jpg',
+      name: 'Safe command result',
+      playbackState: {
+        progress: 0.5,
+        variants: [{ name: 'fallback' }],
+      },
+      progress: 0.75,
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /private-api-key|private-password|private-key|private-session|private-deep|private-nested/i,
+  );
+});

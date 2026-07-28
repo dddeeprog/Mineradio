@@ -75,6 +75,44 @@ const PUBLIC_VALUE_KEYS = new Set([
   'volume',
 ]);
 
+const COMMAND_RESULT_BOOLEAN_KEYS = new Set([
+  'accepted',
+  'current',
+  'enabled',
+  'moved',
+  'muted',
+  'paused',
+  'playing',
+  'repeat',
+  'seeked',
+  'shuffle',
+]);
+const COMMAND_RESULT_NUMBER_KEYS = new Set([
+  'currenttime',
+  'duration',
+  'index',
+  'position',
+  'progress',
+  'rate',
+  'seconds',
+  'volume',
+]);
+const COMMAND_RESULT_TEXT_KEYS = new Set([
+  'album',
+  'artist',
+  'id',
+  'mode',
+  'name',
+  'status',
+  'title',
+  'trackid',
+]);
+const COMMAND_RESULT_SECTION_KEYS = new Set([
+  'playbackstate',
+  'state',
+  'track',
+]);
+
 function normalizeKey(key) {
   return String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
@@ -150,27 +188,40 @@ function projectPublicValue(value, allowUrl = false) {
   return projected;
 }
 
-function projectCommandResult(value, allowUrl = false) {
-  if (value === undefined) return DROP_VALUE;
-  if (value == null || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return !allowUrl && isExternalUrl(value) ? DROP_VALUE : value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) {
-    const projected = [];
-    for (const item of value) {
-      const next = projectCommandResult(item, allowUrl);
-      if (next !== DROP_VALUE) projected.push(next);
-    }
-    return projected;
-  }
-  if (typeof value !== 'object') return null;
+function projectCommandResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const projected = {};
   for (const key of Object.keys(value).sort()) {
     const normalizedKey = normalizeKey(key);
-    if (isSensitiveTransportKey(key)) continue;
-    const next = projectCommandResult(value[key], normalizedKey === 'coverurl');
-    if (next !== DROP_VALUE) projected[key] = next;
+    const rawValue = value[key];
+    if (COMMAND_RESULT_BOOLEAN_KEYS.has(normalizedKey)) {
+      if (typeof rawValue === 'boolean') projected[key] = rawValue;
+      continue;
+    }
+    if (COMMAND_RESULT_NUMBER_KEYS.has(normalizedKey)) {
+      if (
+        Number.isFinite(rawValue)
+        && (normalizedKey !== 'progress' || (rawValue >= 0 && rawValue <= 1))
+      ) projected[key] = rawValue;
+      continue;
+    }
+    if (COMMAND_RESULT_TEXT_KEYS.has(normalizedKey)) {
+      if (typeof rawValue === 'string' && rawValue.length <= 512) projected[key] = rawValue;
+      continue;
+    }
+    if (normalizedKey === 'coverurl') {
+      if (typeof rawValue === 'string' && /^https?:\/\/[^\s]+$/i.test(rawValue)) projected[key] = rawValue;
+      continue;
+    }
+    if (
+      !COMMAND_RESULT_SECTION_KEYS.has(normalizedKey)
+      || !rawValue
+      || typeof rawValue !== 'object'
+      || Array.isArray(rawValue)
+    ) continue;
+    const section = projectPublicValue(rawValue);
+    if (Object.keys(section).length > 0) projected[key] = section;
   }
   return projected;
 }
