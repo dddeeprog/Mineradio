@@ -150,6 +150,37 @@ function projectPublicValue(value, allowUrl = false) {
   return projected;
 }
 
+function projectCommandResult(value, allowUrl = false) {
+  if (value === undefined) return DROP_VALUE;
+  if (value == null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return !allowUrl && isExternalUrl(value) ? DROP_VALUE : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) {
+    const projected = [];
+    for (const item of value) {
+      const next = projectCommandResult(item, allowUrl);
+      if (next !== DROP_VALUE) projected.push(next);
+    }
+    return projected;
+  }
+  if (typeof value !== 'object') return null;
+
+  const projected = {};
+  for (const key of Object.keys(value).sort()) {
+    const normalizedKey = normalizeKey(key);
+    if (isSensitiveTransportKey(key)) continue;
+    const next = projectCommandResult(value[key], normalizedKey === 'coverurl');
+    if (next !== DROP_VALUE) projected[key] = next;
+  }
+  return projected;
+}
+
+function projectCommandError(error, fallbackCode) {
+  const code = error && typeof error === 'object' && !Array.isArray(error) ? error.code : null;
+  if (typeof code === 'string' && /^[a-z][a-z0-9-]{0,63}$/i.test(code)) return { code };
+  return { code: fallbackCode };
+}
+
 function normalizeSection(section) {
   if (!section || typeof section !== 'object' || Array.isArray(section)) return null;
   return projectPublicValue(section);
@@ -301,9 +332,7 @@ function createPlayerBridge({
   }
 
   function normalizeCommandError(error, fallbackCode) {
-    const normalized = normalizeSection(error);
-    if (normalized && Object.keys(normalized).length > 0) return normalized;
-    return { code: fallbackCode };
+    return projectCommandError(error, fallbackCode);
   }
 
   function commandFailure(requestId, code) {
@@ -458,7 +487,7 @@ function createPlayerBridge({
       : {
         requestId,
         ok: true,
-        result: cloneValue(receipt?.result),
+        result: projectCommandResult(receipt?.result),
       };
     return completeCommand(activeCommand, response);
   }

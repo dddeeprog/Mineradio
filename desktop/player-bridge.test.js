@@ -664,3 +664,143 @@ test('dispose_clears_timers_and_completes_pending_commands', async () => {
   );
   assert.equal(dispatched.length, 1);
 });
+
+test('projects_sensitive_command_results_without_media_or_credentials', async () => {
+  const dispatched = [];
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => 'attempt-1',
+    setTimeoutFn() {
+      return {};
+    },
+    clearTimeoutFn() {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const request = bridge.enqueueCommand({
+    requestId: 'safe-result',
+    command: 'play',
+    payload: {},
+  });
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'safe-result',
+      attempt: dispatched[0].attempt,
+      ok: true,
+      result: {
+        accepted: true,
+        accountId: 'private-account',
+        authToken: 'private-token',
+        coverUrl: 'https://image.example/cover.jpg',
+        headers: { cookie: 'private-cookie' },
+        playbackState: {
+          progress: 0.5,
+          variants: [
+            'https://audio.example/signed.mp3?token=private',
+            'blob:https://audio.example/private',
+            'data:audio/mpeg;base64,private-audio',
+            { name: 'fallback', source: 'https://audio.example/fallback.mp3' },
+          ],
+        },
+      },
+    }),
+    true,
+  );
+
+  const response = await request;
+  assert.deepEqual(response, {
+    requestId: 'safe-result',
+    ok: true,
+    result: {
+      accepted: true,
+      coverUrl: 'https://image.example/cover.jpg',
+      playbackState: {
+        progress: 0.5,
+        variants: [{ name: 'fallback' }],
+      },
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /private-account|private-token|private-cookie|audio\.example|data:audio/i,
+  );
+});
+
+test('preserves_safe_dispatcher_error_code_without_error_details', async () => {
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => 'attempt-1',
+    setTimeoutFn() {
+      return {};
+    },
+    clearTimeoutFn() {},
+    dispatchCommand() {
+      throw {
+        authToken: 'private-token',
+        code: 'not-permitted',
+        headers: { authorization: 'Bearer private-token' },
+        stack: 'private-stack',
+      };
+    },
+  });
+
+  const response = await bridge.enqueueCommand({
+    requestId: 'dispatch-failure',
+    command: 'play',
+    payload: {},
+  });
+  assert.deepEqual(response, {
+    requestId: 'dispatch-failure',
+    ok: false,
+    error: { code: 'not-permitted' },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /private-token|private-stack|authorization/i,
+  );
+});
+
+test('preserves_safe_renderer_receipt_error_code_without_error_details', async () => {
+  const dispatched = [];
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => 'attempt-1',
+    setTimeoutFn() {
+      return {};
+    },
+    clearTimeoutFn() {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const request = bridge.enqueueCommand({
+    requestId: 'receipt-failure',
+    command: 'play',
+    payload: {},
+  });
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'receipt-failure',
+      attempt: dispatched[0].attempt,
+      ok: false,
+      error: {
+        authToken: 'private-token',
+        code: 'not-permitted',
+        headers: { authorization: 'Bearer private-token' },
+        stack: 'private-stack',
+      },
+    }),
+    true,
+  );
+
+  const response = await request;
+  assert.deepEqual(response, {
+    requestId: 'receipt-failure',
+    ok: false,
+    error: { code: 'not-permitted' },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /private-token|private-stack|authorization/i,
+  );
+});
