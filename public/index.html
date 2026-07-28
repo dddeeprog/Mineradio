@@ -17,6 +17,8 @@
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="playback-session-state.js"></script>
+<script src="platform-search-state.js"></script>
+<script src="platform-search-ui.js"></script>
 <script src="folia-theme-state.js"></script>
 <script src="folia-fx-state.js"></script>
 <script src="folia-native-lyric-state.js"></script>
@@ -130,10 +132,13 @@ try {
       <input id="search-input" type="text" placeholder="搜索歌曲、歌手..." autocomplete="off" spellcheck="false">
     </div>
     <div id="search-mode-tabs" class="search-mode-tabs" role="tablist" aria-label="Search mode">
-      <button id="search-mode-song" class="active" type="button" onclick="setSearchMode('song')" aria-selected="true">All</button>
-      <button id="search-mode-netease" type="button" onclick="setSearchMode('netease')" aria-selected="false">NE</button>
+      <button id="search-mode-song" class="active" type="button" onclick="setSearchMode('song')" aria-selected="true">全部</button>
+      <button id="search-mode-netease" type="button" onclick="setSearchMode('netease')" aria-selected="false">网易云</button>
       <button id="search-mode-qq" type="button" onclick="setSearchMode('qq')" aria-selected="false">QQ</button>
-      <button id="search-mode-podcast" type="button" onclick="setSearchMode('podcast')" aria-selected="false">Podcast</button>
+      <button id="search-mode-kugou" type="button" onclick="setSearchMode('kugou')" aria-selected="false">酷狗</button>
+      <button id="search-mode-qishui" type="button" onclick="setSearchMode('qishui')" aria-selected="false">汽水</button>
+      <button id="search-mode-spotify" type="button" onclick="setSearchMode('spotify')" aria-selected="false">Spotify</button>
+      <button id="search-mode-podcast" type="button" onclick="setSearchMode('podcast')" aria-selected="false">播客</button>
     </div>
     <div id="search-results"></div>
   </div>
@@ -17452,6 +17457,9 @@ function songDurationLabel(song) {
 function songSourceLabel(song) {
   if (!song) return '未知';
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return 'QQ 音乐';
+  if (song.provider === 'kugou' || song.source === 'kugou' || song.type === 'kugou') return '酷狗音乐';
+  if (song.provider === 'qishui' || song.source === 'qishui' || song.type === 'qishui') return '汽水音乐';
+  if (song.provider === 'spotify' || song.source === 'spotify' || song.type === 'spotify') return 'Spotify';
   if (song.type === 'local') return '本地上传';
   if (song.type === 'podcast' || song.source === 'podcast') return '网易云播客';
   return '网易云音乐';
@@ -19659,7 +19667,10 @@ async function toggleLikeSong(song) {
   }
 }
 function toggleLikeCurrent() { toggleLikeSong(currentCoverSong()); }
-function toggleLikeSearchResult(i) { if (playlist[i]) toggleLikeSong(playlist[i]); }
+function toggleLikeSearchResult(i) {
+  var song = playlist[i];
+  if (song && searchResultActionState(song).like) toggleLikeSong(song);
+}
 function toggleLikeQueueIndex(i) { if (playQueue[i]) toggleLikeSong(playQueue[i]); }
 function toggleLikeDetailSong(song) { toggleLikeSong(song); }
 function openCollectModal(song) {
@@ -19674,7 +19685,10 @@ function openCollectModal(song) {
   refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
 }
 function openCollectModalForCurrent() { openCollectModal(currentCoverSong()); }
-function collectSearchResult(i) { if (playlist[i]) openCollectModal(playlist[i]); }
+function collectSearchResult(i) {
+  var song = playlist[i];
+  if (song && searchResultActionState(song).collect) openCollectModal(song);
+}
 function collectQueueIndex(i) { if (playQueue[i]) openCollectModal(playQueue[i]); }
 function collectDetailSong(song) { openCollectModal(song); }
 function closeCollectModal() {
@@ -19816,6 +19830,14 @@ var SEARCH_HISTORY_STORE_KEY = 'mineradio-search-history';
 var $input = document.getElementById('search-input');
 var $results = document.getElementById('search-results');
 var $loading = document.getElementById('loading-overlay');
+var activePlatformSearchSession = null;
+var platformSearchController = window.MineradioPlatformSearchUI.createController({
+  stateApi: window.MineradioPlatformSearch,
+  requestJson: apiJson,
+  onUpdate: function(session, meta) {
+    renderIncrementalSearchSession(session, meta);
+  }
+});
 function syncSearchAreaResultState() {
   var searchArea = document.getElementById('search-area');
   if (!searchArea || !$results) return;
@@ -19834,6 +19856,8 @@ function searchResultKey(q, mode) {
 }
 function clearSearchResults() {
   searchRequestSeq++;
+  platformSearchController.cancel();
+  activePlatformSearchSession = null;
   searchLastResultQuery = '';
   playlist = [];
   podcastResults = [];
@@ -19892,35 +19916,29 @@ function runSearchHistory(q) {
   $input.focus();
 }
 function updateSearchModeTabs() {
-  var songBtn = document.getElementById('search-mode-song');
-  var neteaseBtn = document.getElementById('search-mode-netease');
-  var qqBtn = document.getElementById('search-mode-qq');
-  var podcastBtn = document.getElementById('search-mode-podcast');
-  if (songBtn) {
-    songBtn.classList.toggle('active', searchMode === 'song');
-    songBtn.setAttribute('aria-selected', searchMode === 'song' ? 'true' : 'false');
-  }
-  if (neteaseBtn) {
-    neteaseBtn.classList.toggle('active', searchMode === 'netease');
-    neteaseBtn.setAttribute('aria-selected', searchMode === 'netease' ? 'true' : 'false');
-  }
-  if (qqBtn) {
-    qqBtn.classList.toggle('active', searchMode === 'qq');
-    qqBtn.setAttribute('aria-selected', searchMode === 'qq' ? 'true' : 'false');
-  }
-  if (podcastBtn) {
-    podcastBtn.classList.toggle('active', searchMode === 'podcast');
-    podcastBtn.setAttribute('aria-selected', searchMode === 'podcast' ? 'true' : 'false');
-  }
+  var modes = ['song'].concat(window.MineradioPlatformSearch.PROVIDER_ORDER).concat(['podcast']);
+  modes.forEach(function(mode) {
+    var btn = document.getElementById('search-mode-' + mode);
+    if (!btn) return;
+    btn.classList.toggle('active', searchMode === mode);
+    btn.setAttribute('aria-selected', searchMode === mode ? 'true' : 'false');
+  });
   if ($input) {
-    $input.placeholder = searchMode === 'podcast'
-      ? '搜索播客、电台...'
-      : (searchMode === 'qq' ? '搜索 QQ 音乐...' : (searchMode === 'netease' ? '搜索网易云音乐...' : '搜索歌曲、歌手...'));
+    var placeholders = {
+      podcast: '搜索播客、电台...',
+      netease: '搜索网易云音乐...',
+      qq: '搜索 QQ 音乐...',
+      kugou: '搜索酷狗音乐...',
+      qishui: '搜索汽水音乐...',
+      spotify: '搜索 Spotify...'
+    };
+    $input.placeholder = placeholders[searchMode] || '搜索歌曲、歌手...';
   }
   requestAnimationFrame(updateSearchPillGlassDisplacementMap);
 }
 function setSearchMode(mode) {
-  mode = (mode === 'podcast' || mode === 'netease' || mode === 'qq') ? mode : 'song';
+  var allowed = ['song', 'podcast'].concat(window.MineradioPlatformSearch.PROVIDER_ORDER);
+  mode = allowed.indexOf(mode) >= 0 ? mode : 'song';
   if (searchMode === mode) return;
   searchMode = mode;
   updateSearchModeTabs();
@@ -19981,10 +19999,15 @@ function listRenderItems(items, limit) {
     items: out
   };
 }
-function searchLoadMoreHtml(shown, total) {
-  return total > shown
-    ? '<button type="button" class="fx-mini-btn ghost search-load-more" data-search-load-more="1">加载更多 ' + shown + '/' + total + '</button>'
-    : '';
+function searchLoadMoreHtml(shown, total, options) {
+  options = options || {};
+  if (total > shown) {
+    return '<button type="button" class="fx-mini-btn ghost search-load-more" data-search-load-more="1">加载更多 ' + shown + '/' + total + '</button>';
+  }
+  if (options.remoteHasMore) {
+    return '<button type="button" class="fx-mini-btn ghost search-load-more" data-search-load-more="1">' + (options.loading ? '正在加载更多…' : '加载更多平台结果') + '</button>';
+  }
+  return '';
 }
 function growSearchResultRenderLimit() {
   searchResultRenderLimit += SEARCH_RESULT_BATCH_SIZE;
@@ -20110,6 +20133,9 @@ $input.addEventListener('input', function(){
   clearTimeout(searchTimer);
   var q = $input.value.trim();
   if (!q) {
+    searchRequestSeq++;
+    platformSearchController.cancel();
+    activePlatformSearchSession = null;
     if (searchMode === 'podcast') loadPodcastHot();
     else renderSearchHistory();
     return;
@@ -20152,7 +20178,8 @@ $results.addEventListener('click', function(e){
   if (searchLoadMore) {
     e.preventDefault();
     e.stopPropagation();
-    growSearchResultRenderLimit();
+    if (playlist.length > searchResultRenderLimit) growSearchResultRenderLimit();
+    else loadNextPlatformSearchPage();
     return;
   }
   var clearBtn = e.target && e.target.closest ? e.target.closest('[data-clear-history]') : null;
@@ -20179,19 +20206,28 @@ document.addEventListener('click', function(e){
 updateSearchModeTabs();
 
 function songProviderKey(song) {
-  if (song && (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq')) return 'qq';
+  var provider = song && (song.provider || song.source || song.type);
+  if (window.MineradioPlatformSearch.PROVIDER_ORDER.indexOf(provider) >= 0) return provider;
   return 'netease';
 }
 function songSourceTagHtml(song) {
   var key = songProviderKey(song);
-  var label = key === 'qq' ? 'QQ' : 'NE';
+  var labels = { netease:'NE', qq:'QQ', kugou:'KG', qishui:'QS', spotify:'SP' };
+  var label = labels[key] || 'NE';
   return '<span class="tag-source ' + key + '">' + label + '</span>';
+}
+function searchResultActionState(song) {
+  if (window.MineradioPlatformSearch && typeof window.MineradioPlatformSearch.actionState === 'function') {
+    return window.MineradioPlatformSearch.actionState(song);
+  }
+  var playable = songProviderKey(song) === 'netease' || songProviderKey(song) === 'qq';
+  return { play:playable, queue:playable, like:false, collect:false, metadataOnly:!playable };
 }
 function searchResultMetaText(song) {
   var bits = [];
   if (song.artist) bits.push(song.artist);
   if (song.album) bits.push(song.album);
-  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 播放需会话/授权');
+  if (searchResultActionState(song).metadataOnly) bits.push('仅供搜索匹配');
   return bits.join('  ·  ') || songSourceLabel(song);
 }
 function searchResultMetaHtml(song, index) {
@@ -20199,9 +20235,11 @@ function searchResultMetaHtml(song, index) {
   var artist = String(song.artist || '').trim();
   var bits = [];
   if (song.album) bits.push(song.album);
-  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 播放需会话/授权');
+  var actions = searchResultActionState(song);
+  if (actions.metadataOnly) bits.push('仅供搜索匹配');
   var tail = bits.length ? (' · ' + escHtml(bits.join('  ·  '))) : '';
   if (!artist) return escHtml(searchResultMetaText(song));
+  if (actions.metadataOnly) return escHtml(artist) + tail;
   return '<button class="search-artist-link" type="button" onclick="event.stopPropagation();openSearchResultArtist(' + index + ')">' + escHtml(artist) + '</button>' + tail;
 }
 function openSearchResultArtist(index) {
@@ -20318,55 +20356,118 @@ function mergeSongSearchResults(neteaseSongs, qqSongs, limit, q) {
   out.sort(function(a, b){ return (b._searchScore || 0) - (a._searchScore || 0); });
   return out.slice(0, limit);
 }
-async function fetchMusicSearchResults(q, mode) {
-  if (mode === 'qq') {
-    var qqOnly = await apiJson('/api/qq/search?keywords=' + encodeURIComponent(q) + '&limit=12');
-    return mergeSongSearchResults([], qqOnly.songs || [], 18, q);
+function renderPlatformSearchStatus(session) {
+  if (!session) return '';
+  var items = window.MineradioPlatformSearch.statusItems(session);
+  if (!items.length) return '';
+  return '<div class="platform-search-status" role="status" aria-live="polite">' +
+    items.map(function(item) {
+      var status = item.status || 'idle';
+      var text = '';
+      if (status === 'loading') text = '搜索中';
+      else if (status === 'loading-more') text = '加载中';
+      else if (status === 'success') text = item.count + ' 首';
+      else if (status === 'empty') text = '无结果';
+      else if (status === 'error') text = item.errorCode === 'SPOTIFY_AUTH_REQUIRED' ? '需连接' : '失败';
+      else text = '等待';
+      return '<span class="platform-search-provider ' + status + '">' +
+        '<span class="platform-search-provider-name">' + escHtml(item.label) + '</span>' +
+        '<span class="platform-search-provider-state">' + escHtml(text) + '</span>' +
+      '</span>';
+    }).join('') +
+  '</div>';
+}
+function platformSearchIsFinished(session) {
+  var items = window.MineradioPlatformSearch.statusItems(session);
+  return items.every(function(item) {
+    return item.status === 'success' || item.status === 'empty' || item.status === 'error';
+  });
+}
+function platformSearchEmptyHtml(session) {
+  if (!session || !session.providers.length) {
+    return '<div class="search-empty">当前平台搜索能力不可用</div>';
   }
-  if (mode === 'netease') {
-    var neOnly = await apiJson('/api/search?keywords=' + encodeURIComponent(q) + '&limit=18');
-    return mergeSongSearchResults(neOnly.songs || [], [], 18, q);
+  if (!platformSearchIsFinished(session)) {
+    return '<div class="search-empty">正在搜索 “' + escHtml(session.query) + '”…</div>';
   }
-  var result = await Promise.allSettled([
-    apiJson('/api/search?keywords=' + encodeURIComponent(q) + '&limit=14'),
-    apiJson('/api/qq/search?keywords=' + encodeURIComponent(q) + '&limit=12')
-  ]);
-  var neteaseSongs = result[0].status === 'fulfilled' ? ((result[0].value && result[0].value.songs) || []) : [];
-  var qqSongs = result[1].status === 'fulfilled' ? ((result[1].value && result[1].value.songs) || []) : [];
-  if (result[1].status === 'rejected') console.warn('QQ search failed:', result[1].reason);
-  return mergeSongSearchResults(neteaseSongs, qqSongs, 18, q);
+  return '<div class="search-empty">没有找到相关歌曲</div>';
+}
+function renderIncrementalSearchSession(session, meta) {
+  if (!session || session.key !== searchResultKey($input.value.trim(), searchMode)) return;
+  activePlatformSearchSession = session;
+  searchLastResultQuery = session.key;
+  renderSongSearchResults(session.songs, {
+    preserveLimit: true,
+    incremental: true
+  });
+}
+function loadNextPlatformSearchPage() {
+  var session = activePlatformSearchSession;
+  if (!session || !window.MineradioPlatformSearch.hasMore(session)) return;
+  platformSearchController.loadMore().catch(function(error) {
+    console.warn('[PlatformSearchMore]', error);
+  });
 }
 function renderSongSearchResults(songs) {
   var opts = arguments.length > 1 && arguments[1] ? arguments[1] : {};
   if (!opts.preserveLimit) resetSearchResultRenderLimit();
   playlist = songs || [];
+  var previousScrollTop = opts.incremental ? $results.scrollTop : 0;
   var rendered = listRenderItems(playlist, searchResultRenderLimit);
-  $results.innerHTML = rendered.items.map(function(row){
+  var statusHtml = renderPlatformSearchStatus(activePlatformSearchSession);
+  var rowsHtml = rendered.items.map(function(row){
     var s = row.item;
     var i = row.index;
+    var actions = window.MineradioPlatformSearch.actionState(s);
     var vipTag = (s.fee === 1) ? '<span class="tag-vip">VIP</span>' : '';
     var sourceTag = songSourceTagHtml(s);
     var sourceClass = songProviderKey(s) + '-source';
+    var rowClass = actions.metadataOnly ? ' metadata-only' : '';
     var thumb = songCoverSrc(s, 80);
     var imgTag = thumb
       ? '<img src="' + thumb + '" alt="" loading="lazy" onerror="this.style.opacity=0.2">'
       : '<div style="width:40px;height:40px;border-radius:6px;background:rgba(255,255,255,0.06);flex-shrink:0"></div>';
-    return '<div class="search-result ' + sourceClass + '">' +
-      '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0" onclick="playSearchResult(' + i + ')">' +
+    var primaryAction = actions.play
+      ? ' onclick="playSearchResult(' + i + ')" role="button" tabindex="0" title="播放"'
+      : ' aria-disabled="true" title="仅供搜索匹配"';
+    var likeAction = actions.like
+      ? '<button class="song-action-btn' + (isSongLiked(s) ? ' liked' : '') + '" data-like-index="' + i + '" title="' + (isSongLiked(s) ? '取消红心' : '红心喜欢') + '" onclick="event.stopPropagation();toggleLikeSearchResult(' + i + ')">' + heartIconSvg() + '</button>'
+      : '';
+    var collectAction = actions.collect
+      ? '<button class="song-action-btn" title="收藏到歌单" onclick="event.stopPropagation();collectSearchResult(' + i + ')">' + playlistPlusIconSvg() + '</button>'
+      : '';
+    var queueAction = actions.queue
+      ? '<button class="add-btn" title="下一首播放" onclick="event.stopPropagation();queueSearchResult(' + i + ')">+</button>'
+      : '';
+    return '<div class="search-result ' + sourceClass + rowClass + '">' +
+      '<div class="search-result-main"' + primaryAction + '>' +
         imgTag +
         '<div class="search-result-info">' +
           '<div class="search-result-title">' + escHtml(s.name) + sourceTag + vipTag + '</div>' +
           '<div class="search-result-meta">' + searchResultMetaHtml(s, i) + '</div>' +
         '</div>' +
       '</div>' +
-      '<button class="song-action-btn' + (isSongLiked(s) ? ' liked' : '') + '" data-like-index="' + i + '" title="' + (isSongLiked(s) ? '取消红心' : '红心喜欢') + '" onclick="event.stopPropagation();toggleLikeSearchResult(' + i + ')">' + heartIconSvg() + '</button>' +
-      '<button class="song-action-btn" title="收藏到歌单" onclick="event.stopPropagation();collectSearchResult(' + i + ')">' + playlistPlusIconSvg() + '</button>' +
-      '<button class="add-btn" title="下一首播放" onclick="event.stopPropagation();queueSearchResult(' + i + ')">+</button>' +
+      likeAction + collectAction + queueAction +
     '</div>';
-  }).join('') + searchLoadMoreHtml(rendered.window.count, rendered.window.total);
+  }).join('');
+  var remoteHasMore = activePlatformSearchSession
+    && window.MineradioPlatformSearch.hasMore(activePlatformSearchSession);
+  var loadingMore = activePlatformSearchSession
+    && window.MineradioPlatformSearch.statusItems(activePlatformSearchSession).some(function(item) {
+      return item.status === 'loading-more';
+    });
+  var emptyHtml = playlist.length ? '' : platformSearchEmptyHtml(activePlatformSearchSession);
+  $results.innerHTML = statusHtml + rowsHtml + emptyHtml + searchLoadMoreHtml(
+    rendered.window.count,
+    rendered.window.total,
+    { remoteHasMore:remoteHasMore, loading:loadingMore }
+  );
   $results.classList.add('show');
-  syncLikeStatusForSongs(playlist);
-  if (window.gsap) animateListItems($results, '.search-result', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
+  if (opts.incremental) $results.scrollTop = previousScrollTop;
+  syncLikeStatusForSongs(playlist.filter(function(song) {
+    return searchResultActionState(song).like;
+  }));
+  if (window.gsap && !opts.incremental) animateListItems($results, '.search-result', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
 }
 
 async function doSearch(q, opts) {
@@ -20382,22 +20483,37 @@ async function doSearch(q, opts) {
     return;
   }
   var requestSeq = ++searchRequestSeq;
+  var mode = searchMode;
+  activePlatformSearchSession = null;
+  resetSearchResultRenderLimit();
+  $results.scrollTop = 0;
+  $results.innerHTML = '<div class="search-empty">正在搜索 “' + escHtml(q) + '”…</div>';
+  $results.classList.add('show');
   try {
-    var mode = searchMode;
-    var songs = await fetchMusicSearchResults(q, mode);
-    if (requestSeq !== searchRequestSeq || $input.value.trim() !== q) return;
-    if (!songs.length) {
-      playlist = [];
-      searchLastResultQuery = '';
-      $results.innerHTML = '<div class="search-empty">没有找到相关歌曲</div>';
-      $results.classList.add('show');
-      return;
+    var result = await platformSearchController.search({
+      query: q,
+      mode: mode,
+      maxResults: 200
+    });
+    if (result.stale || requestSeq !== searchRequestSeq || searchMode !== mode || $input.value.trim() !== q) return;
+    activePlatformSearchSession = result.session;
+    renderSongSearchResults(result.session.songs, { preserveLimit: true, incremental: true });
+    if (result.session.songs.length) rememberSearchQuery(q);
+    if (opts.autoPlayFirst) {
+      for (var i = 0; i < result.session.songs.length; i++) {
+        if (searchResultActionState(result.session.songs[i]).play) {
+          playSearchResult(i);
+          break;
+        }
+      }
     }
-    searchLastResultQuery = searchResultKey(q, mode);
-    rememberSearchQuery(q);
-    renderSongSearchResults(songs);
-    if (opts.autoPlayFirst) playSearchResult(0);
-  } catch (err) { console.error('Search:', err); }
+  } catch (err) {
+    console.error('Search:', err);
+    if (requestSeq === searchRequestSeq) {
+      $results.innerHTML = '<div class="search-empty">搜索暂时失败，请稍后重试</div>';
+      $results.classList.add('show');
+    }
+  }
 }
 
 // ============================================================
@@ -20763,6 +20879,10 @@ function queueSongNext(song) {
 }
 function queueSearchResult(i) {
   var song = playlist[i]; if (!song) return;
+  if (!searchResultActionState(song).queue) {
+    showToast('该平台结果仅供搜索匹配');
+    return;
+  }
   queueSongNext(song);
   showToast('已设为下一首: ' + song.name);
 }
@@ -20794,6 +20914,10 @@ function moveQueueIndexToTop(idx) {
 }
 function playSearchResult(i) {
   var song = playlist[i]; if (!song) return;
+  if (!searchResultActionState(song).play) {
+    showToast('该平台结果仅供搜索匹配');
+    return;
+  }
   homeForcedOpen = false;
   homeSuppressed = false;
   setHomeControlsLocked(false);

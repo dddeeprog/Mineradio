@@ -23,6 +23,16 @@ Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必
 - 引入方式：使用 `build/vendor-pretext.js` 从 Folia 固定依赖树生成浏览器 IIFE。
 - 许可证：MIT，完整文本见随包许可证文件。
 
+## XxHuberrr / Mineradio
+
+- 项目名称：Mineradio
+- 上游仓库：`https://github.com/XxHuberrr/Mineradio`
+- 固定 commit：`4abaa190de42c632365ae4244e041bad16443224`
+- 改编位置：`desktop/main.js`、`server.js`、`server/platform/`、`server/routes/platform-search.js`、`public/platform-search-state.js`、`public/platform-search-ui.js`。
+- 改编范围：稳定用户数据目录、平台能力与账号隔离模型，以及酷狗、汽水和 Spotify 的只读目录搜索适配。
+- 许可证：GNU General Public License v3.0 only，完整文本见仓库根目录 `LICENSE`。
+- 功能边界：新增搜索适配仅返回公开目录元数据，不移植上游的音频解密、本地会话发现、账号写入或播放绕过逻辑。
+
 ## 发布包注意事项
 
 - 发布安装包或压缩包前，必须确认包含或明确提供 Mineradio 与 Folia 对应源码获取方式。

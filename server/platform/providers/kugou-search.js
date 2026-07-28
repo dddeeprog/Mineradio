@@ -43,9 +43,9 @@ function kugouCoverUrl(value) {
 
 function mapKugouItem(item) {
   item = item && typeof item === 'object' ? item : {};
-  const singerNames = String(item.SingerName || '')
+  const singerNames = stripKugouHtml(item.SingerName || '')
     .split(/、|\/|,| feat\.? /i)
-    .map(stripKugouHtml)
+    .map(name => name.trim())
     .filter(Boolean);
   const singerIds = Array.isArray(item.SingerId) ? item.SingerId : [];
   const hash = String(item.FileHash || '').trim();

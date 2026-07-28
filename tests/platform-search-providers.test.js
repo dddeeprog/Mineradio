@@ -97,7 +97,7 @@ test('Kugou adapter uses the bounded public catalogue request and metadata model
           lists: [{
             FileHash: 'KUGOU-HASH',
             SongName: '<em>Signal</em>',
-            SingerName: 'Artist A、Artist B',
+            SingerName: '<em>Artist A</em>、Artist B',
             AlbumName: 'Album',
             AlbumID: 12,
             MixSongID: 34,
