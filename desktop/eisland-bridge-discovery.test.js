@@ -336,3 +336,211 @@ test('refreshes_every_1000ms_with_5000ms_expiry_and_closes_idempotently', async 
     assert.deepEqual(await fs.readdir(descriptorDirectory), ['eisland-bridge-v1.json']);
   });
 });
+test('does_not_overwrite_later_publisher_during_gated_refresh', async () => {
+  await withTempAppData(async (appData) => {
+    const timer = {
+      intervals: [],
+      clearInterval() {},
+      setInterval(callback) {
+        const handle = { callback };
+        this.intervals.push(handle);
+        return handle;
+      },
+      fire() {
+        return this.intervals[0].callback();
+      },
+    };
+    let renameCount = 0;
+    const refreshRenameStarted = createDeferred();
+    const permitRefreshRename = createDeferred();
+    const gatedFs = {
+      ...fs,
+      async rename(fromPath, toPath) {
+        renameCount += 1;
+        if (renameCount === 2) {
+          refreshRenameStarted.resolve();
+          await permitRefreshRename.promise;
+        }
+        return fs.rename(fromPath, toPath);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const oldPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_573,
+      clock: () => 6_000_000,
+      fs: gatedFs,
+      instanceId: 'instance-refresh-old',
+      pid: 4_327,
+      timer,
+      token: 'refresh-old-token',
+    });
+    await oldPublisher.ready;
+
+    const refreshing = timer.fire();
+    await refreshRenameStarted.promise;
+    const newPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_574,
+      clock: () => 6_000_000,
+      instanceId: 'instance-refresh-new',
+      pid: 4_328,
+      timer: createIdleTimer(),
+      token: 'refresh-new-token',
+    });
+    const newPublisherFinishedBeforeRefresh = await Promise.race([
+      newPublisher.ready.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    assert.equal(newPublisherFinishedBeforeRefresh, false);
+
+    permitRefreshRename.resolve();
+    await Promise.all([refreshing, newPublisher.ready]);
+
+    const descriptorPath = path.join(appData, 'Mineradio', 'eisland-bridge-v1.json');
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_574,
+      token: 'refresh-new-token',
+      instanceId: 'instance-refresh-new',
+      pid: 4_328,
+      expiresAtMs: 6_005_000,
+    });
+  });
+});
+test('does_not_delete_later_publisher_during_gated_close', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorPath = path.join(appData, 'Mineradio', 'eisland-bridge-v1.json');
+    const closeUnlinkStarted = createDeferred();
+    const permitCloseUnlink = createDeferred();
+    const gatedFs = {
+      ...fs,
+      async unlink(filePath) {
+        if (filePath === descriptorPath) {
+          closeUnlinkStarted.resolve();
+          await permitCloseUnlink.promise;
+        }
+        return fs.unlink(filePath);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const oldPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_575,
+      clock: () => 7_000_000,
+      fs: gatedFs,
+      instanceId: 'instance-close-old',
+      pid: 4_329,
+      timer: createIdleTimer(),
+      token: 'close-old-token',
+    });
+    await oldPublisher.ready;
+
+    const closing = oldPublisher.close();
+    await closeUnlinkStarted.promise;
+    const newPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_576,
+      clock: () => 7_000_000,
+      instanceId: 'instance-close-new',
+      pid: 4_330,
+      timer: createIdleTimer(),
+      token: 'close-new-token',
+    });
+    const newPublisherFinishedBeforeClose = await Promise.race([
+      newPublisher.ready.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    assert.equal(newPublisherFinishedBeforeClose, false);
+
+    permitCloseUnlink.resolve();
+    await Promise.all([closing, newPublisher.ready]);
+
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_576,
+      token: 'close-new-token',
+      instanceId: 'instance-close-new',
+      pid: 4_330,
+      expiresAtMs: 7_005_000,
+    });
+  });
+});
+test('sanitizes_and_closes_owned_temporary_descriptor_after_cleanup_failure', async () => {
+  await withTempAppData(async (appData) => {
+    const failureToken = 'temporary-cleanup-failure-token';
+    let allowTemporaryCleanup = false;
+    let temporaryUnlinkAttempts = 0;
+    const failingFs = {
+      ...fs,
+      async rename() {
+        throw new Error(failureToken);
+      },
+      async unlink(filePath) {
+        if (filePath.endsWith('.tmp') && !allowTemporaryCleanup) {
+          temporaryUnlinkAttempts += 1;
+          throw new Error(failureToken);
+        }
+        return fs.unlink(filePath);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_577,
+      clock: () => 8_000_000,
+      fs: failingFs,
+      instanceId: 'instance-temporary-cleanup',
+      pid: 4_331,
+      timer: createIdleTimer(),
+      token: failureToken,
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
+      return true;
+    });
+
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const temporaryNames = (await fs.readdir(descriptorDirectory)).filter((name) =>
+      name.endsWith('.tmp'),
+    );
+    assert.equal(temporaryNames.length, 1);
+    const temporaryPath = path.join(descriptorDirectory, temporaryNames[0]);
+    assert.doesNotMatch(await fs.readFile(temporaryPath, 'utf8'), new RegExp(failureToken));
+    assert.ok(temporaryUnlinkAttempts >= 2);
+
+    allowTemporaryCleanup = true;
+    await publisher.close();
+    assert.deepEqual(await fs.readdir(descriptorDirectory), []);
+  });
+});
+test('normalizes_mkdir_failure_without_leaking_token', async () => {
+  await withTempAppData(async (appData) => {
+    const failureToken = 'mkdir-failure-token';
+    const failingFs = {
+      ...fs,
+      async mkdir() {
+        throw new Error(failureToken);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_578,
+      clock: () => 9_000_000,
+      fs: failingFs,
+      instanceId: 'instance-mkdir-failure',
+      pid: 4_332,
+      timer: createIdleTimer(),
+      token: failureToken,
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(error?.message, 'Bridge discovery descriptor publication failed.');
+      assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
+      return true;
+    });
+    await Promise.all([publisher.close(), publisher.close()]);
+  });
+});
