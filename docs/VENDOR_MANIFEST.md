@@ -11,6 +11,14 @@
 | `public/vendor/pretext-0.0.7.LICENSE` | @chenglou/pretext license text | 0.0.7 | `https://github.com/chenglou/pretext` | MIT | `E9355CB16457E81ACD97DAC2E50F2F8BBF2A9A464025F9C46DB3680CF9598846` |
 | `public/vendor/three.r128.min.js` | Three.js | r128 / 0.128.0 | `https://github.com/mrdoob/three.js` / `https://threejs.org/` | MIT | `9274BBCEC8D96168626C732B5D31C775AA8CFB7EAA0599BEC0C175908A2C1CE2` |
 
+## 上游源码改编记录
+
+此表记录没有直接复制到 `public/vendor/`、但实现时参考并改编了其源码的上游项目。
+
+| 上游项目 | 固定 commit | 参考文件 | 本地改编范围 | 许可证 |
+| --- | --- | --- | --- | --- |
+| `https://github.com/XxHuberrr/Mineradio` | `4abaa19` | `desktop/main.js`、`server.js` | 稳定用户数据目录、平台能力模型、账号隔离概念 | GPL-3.0-only |
+
 ## 更新流程
 
 1. 从上游发布源获取新文件，不从未知 CDN 复制。

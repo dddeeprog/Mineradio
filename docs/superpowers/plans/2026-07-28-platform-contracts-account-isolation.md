@@ -38,7 +38,7 @@
 - Modify: `desktop/main.js:1678-1680`
 - Modify: `package.json:8`
 
-- [ ] **Step 1: 写稳定目录与迁移选择的失败测试**
+- [x] **Step 1: 写稳定目录与迁移选择的失败测试**
 
 ```js
 const assert = require('node:assert/strict');
@@ -86,13 +86,13 @@ test('migration copies only approved files and never replaces a newer target', (
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run: `node --test desktop/app-paths.test.js`
 
 Expected: FAIL with `Cannot find module './app-paths'`.
 
-- [ ] **Step 3: 实现最小稳定目录与白名单迁移 API**
+- [x] **Step 3: 实现最小稳定目录与白名单迁移 API**
 
 ```js
 'use strict';
@@ -165,7 +165,7 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 4: 扩展测试覆盖无效文件、未知目录和复制较新白名单文件**
+- [x] **Step 4: 扩展测试覆盖无效文件、未知目录和复制较新白名单文件**
 
 验证迁移器：
 
@@ -178,13 +178,13 @@ module.exports = {
 - 复制使用同目录临时文件、`fsync`、`renameSync` 和复制后校验；失败时删除临时文件并保留原目标。
 - Windows 上通过受控目录继承当前用户 ACL，不调用跨 shell 权限命令。
 
-- [ ] **Step 5: 运行 Task 1 测试**
+- [x] **Step 5: 运行 Task 1 测试**
 
 Run: `node --test desktop/app-paths.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 6: 接入 `desktop/main.js`**
+- [x] **Step 6: 接入 `desktop/main.js`**
 
 在 `desktop/main.js` 顶部常量建立后、任何 `app.getPath('userData')` 或 session 创建前调用 `configureStableAppPaths(app)`，保留返回值为 `APP_PATHS`。旧目录候选由 `appData` 下的固定历史名称生成，不能为了发现旧目录先读取 `userData`。服务端环境改用：
 
@@ -197,13 +197,13 @@ process.env.MINERADIO_LISTEN_SYNC_FILE = APP_PATHS.listenJournal;
 
 仅迁移 `APP_OWNED_DATA_FILES`，不能移动本地音乐文件、用户选择的缓存目录或未知文件。
 
-- [ ] **Step 7: 运行桌面相关回归**
+- [x] **Step 7: 运行桌面相关回归**
 
 Run: `node --test desktop/app-paths.test.js desktop/shell-integration.test.js desktop/shell-state.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```powershell
 git add desktop/app-paths.js desktop/app-paths.test.js desktop/main.js package.json
@@ -217,7 +217,7 @@ git commit -m "feat: establish stable app data paths"
 - Create: `desktop/credential-store.test.js`
 - Modify: `package.json:8`
 
-- [ ] **Step 1: 写凭证加密、读取和删除的失败测试**
+- [x] **Step 1: 写凭证加密、读取和删除的失败测试**
 
 ```js
 const assert = require('node:assert/strict');
@@ -262,13 +262,13 @@ test('credential store degrades to memory only when encryption is unavailable', 
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run: `node --test desktop/credential-store.test.js`
 
 Expected: FAIL with `Cannot find module './credential-store'`.
 
-- [ ] **Step 3: 实现最小凭证存储**
+- [x] **Step 3: 实现最小凭证存储**
 
 实现以下 API：
 
@@ -294,7 +294,7 @@ createCredentialStore({
 - `safeStorage` 不可用时进入明确的 `memory-only` 模式：本次运行可以登录，但不写任何明文或可逆密文，重启后要求重新登录。
 - 降级状态通过脱敏快照返回，不能静默伪装成持久化成功。
 
-- [ ] **Step 4: 补齐降级和损坏数据测试**
+- [x] **Step 4: 补齐降级和损坏数据测试**
 
 覆盖：
 
@@ -304,13 +304,13 @@ createCredentialStore({
 - 删除最后一个平台移除文件。
 - 错误对象、快照和序列化日志不包含 Cookie、Token 或 OAuth code。
 
-- [ ] **Step 5: 运行凭证测试**
+- [x] **Step 5: 运行凭证测试**
 
 Run: `node --test desktop/credential-store.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add desktop/credential-store.js desktop/credential-store.test.js package.json
@@ -324,7 +324,7 @@ git commit -m "feat: add protected provider credential store"
 - Create: `tests/platform-capabilities.test.js`
 - Modify: `package.json:8`
 
-- [ ] **Step 1: 写能力矩阵失败测试**
+- [x] **Step 1: 写能力矩阵失败测试**
 
 ```js
 const assert = require('node:assert/strict');
@@ -350,10 +350,14 @@ test('metadata-only providers never advertise playback or writes', () => {
   });
 });
 
-test('write availability requires both support and an authenticated account', () => {
+test('write availability requires support, implementation and an authenticated account', () => {
   const loggedOut = providerCapability(createCapabilitySnapshot(), 'netease');
   const loggedIn = providerCapability(createCapabilitySnapshot({
     netease: { loggedIn: true, accountId: '1001', nickname: 'Tomato' },
+  }, {
+    enabledCapabilities: {
+      netease: ['albumCollect'],
+    },
   }), 'netease');
 
   assert.equal(loggedOut.capabilities.albumCollect, true);
@@ -362,15 +366,15 @@ test('write availability requires both support and an authenticated account', ()
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run: `node --test tests/platform-capabilities.test.js`
 
 Expected: FAIL with `Cannot find module '../server/platform/capabilities'`.
 
-- [ ] **Step 3: 实现静态支持与动态可用性分离**
+- [x] **Step 3: 实现静态支持与动态可用性分离**
 
-`createCapabilitySnapshot(statusByProvider)` 返回：
+`createCapabilitySnapshot(statusByProvider, options)` 返回：
 
 ```js
 {
@@ -403,13 +407,16 @@ Expected: FAIL with `Cannot find module '../server/platform/capabilities'`.
 规则：
 
 - `capabilities` 只表示产品是否实现，不能随登录状态变化。
-- `availability` 表示当前是否可执行。
+- `availability` 表示当前是否可执行，必须同时满足产品支持、对应实现已通过验收以及当前账号条件。
+- `options.enabledCapabilities` 是服务端受控实现开关；默认只开启当前已存在并通过测试的网易云和 QQ 能力，不能由请求参数或前端提升。
+- 酷狗、汽水和 Spotify 的产品能力可以声明 `search: true`，但真实搜索适配器验收前默认 `availability.search` 必须为 `false`；后续由服务端显式开启。
+- 尚未迁完的网易云 `albumDetail/albumCollect/playlistSubscribe/commentsLike/commentsCreate` 可以在产品能力中声明为支持，但在对应路由验收前 `availability` 必须为 `false`。
 - 网易云和 QQ 保留当前播放能力。
 - 酷狗、汽水、Spotify 的 `playback/sourceMatch/albumCollect/playlistWrite/commentsLike/commentsCreate/recentPlayReport/listenDurationReport` 固定为 `false`。
 - 账号对象只保留 `loggedIn/accountId/nickname/avatar/membership`，丢弃所有未知字段。
 - 写能力的可用性必须同时满足支持和登录；只读搜索不要求登录。
 
-- [ ] **Step 4: 补齐能力快照测试**
+- [x] **Step 4: 补齐能力快照测试**
 
 覆盖：
 
@@ -419,13 +426,13 @@ Expected: FAIL with `Cannot find module '../server/platform/capabilities'`.
 - 原始 Cookie、Token 和 refresh token 不出现在快照。
 - 返回值修改不会污染下一次快照。
 
-- [ ] **Step 5: 运行能力测试**
+- [x] **Step 5: 运行能力测试**
 
 Run: `node --test tests/platform-capabilities.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add server/platform/capabilities.js tests/platform-capabilities.test.js package.json
@@ -440,7 +447,7 @@ git commit -m "feat: declare provider capability boundaries"
 - Create: `tests/platform-account-cache.test.js`
 - Modify: `package.json:8`
 
-- [ ] **Step 1: 写跨账号隔离失败测试**
+- [x] **Step 1: 写跨账号隔离失败测试**
 
 ```js
 const assert = require('node:assert/strict');
@@ -508,13 +515,13 @@ test('account switch clears the old scope before publishing the new account', as
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run: `node --test tests/platform-account-cache.test.js`
 
 Expected: FAIL with `Cannot find module '../server/platform/account-cache'`.
 
-- [ ] **Step 3: 实现最小账号缓存**
+- [x] **Step 3: 实现最小账号缓存**
 
 公开 API：
 
@@ -548,7 +555,7 @@ snapshot()
 - `logout()` 使用同一清理顺序并发布未登录状态。
 - 任一清理钩子失败时不发布新账号，返回脱敏错误并保持平台处于 `switching` 状态，交由登录中心重试或显式恢复。
 
-- [ ] **Step 4: 补齐边界测试**
+- [x] **Step 4: 补齐边界测试**
 
 覆盖：
 
@@ -561,13 +568,13 @@ snapshot()
 - 并发切换按调用顺序执行，不能让较早请求覆盖较新账号。
 - session 清理、请求去重清理和缓存清理全部发生在发布之前。
 
-- [ ] **Step 5: 运行账号缓存测试**
+- [x] **Step 5: 运行账号缓存测试**
 
 Run: `node --test tests/platform-account-cache.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add server/platform/account-cache.js server/platform/account-context.js tests/platform-account-cache.test.js package.json
@@ -584,7 +591,7 @@ git commit -m "feat: isolate provider caches by account"
 - Modify: `server/security.js:3-17`
 - Modify: `package.json:8`
 
-- [ ] **Step 1: 写平台路由失败测试**
+- [x] **Step 1: 写平台路由失败测试**
 
 ```js
 const assert = require('node:assert/strict');
@@ -612,13 +619,13 @@ test('platform route returns a sanitized capability snapshot', async () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run: `node --test tests/platform-routes.test.js`
 
 Expected: FAIL with `Cannot find module '../server/routes/platform'`.
 
-- [ ] **Step 3: 实现只读路由**
+- [x] **Step 3: 实现只读路由**
 
 ```js
 function createPlatformRoutes(deps) {
@@ -647,7 +654,7 @@ function createPlatformRoutes(deps) {
 
 默认依赖使用 `server/platform/capabilities.js`，测试可以注入。
 
-- [ ] **Step 4: 在 `server.js` 注册路由**
+- [x] **Step 4: 在 `server.js` 注册路由**
 
 新增账号状态聚合函数：
 
@@ -666,7 +673,7 @@ async function getPlatformAccountStatuses() {
 
 平台路由放在现有网易云/QQ 路由之前，避免后续统一搜索路径冲突。
 
-- [ ] **Step 5: 补充安全和集成测试**
+- [x] **Step 5: 补充安全和集成测试**
 
 在 `tests/security.test.js` 验证：
 
@@ -679,13 +686,13 @@ assert.equal(isMethodAllowedForRoute('/api/platform/capabilities', 'POST'), fals
 
 在 `tests/smoke.test.js` 验证 `server.js` 已创建并调度 `platformRoutes`。
 
-- [ ] **Step 6: 运行平台和服务端测试**
+- [x] **Step 6: 运行平台和服务端测试**
 
 Run: `node --test tests/platform-capabilities.test.js tests/platform-account-cache.test.js tests/platform-routes.test.js tests/security.test.js tests/server-modules.test.js tests/smoke.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 7: 将所有新增生产模块加入显式语法检查**
+- [x] **Step 7: 将所有新增生产模块加入显式语法检查**
 
 `package.json` 的 `check` 必须新增：
 
@@ -698,13 +705,13 @@ node --check server/platform/account-context.js
 node --check server/routes/platform.js
 ```
 
-- [ ] **Step 8: 运行显式语法检查**
+- [x] **Step 8: 运行显式语法检查**
 
 Run: `npm run check`
 
 Expected: exit 0，且输出命令包含以上六个文件。
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```powershell
 git add server/routes/platform.js server.js server/security.js tests/platform-routes.test.js tests/security.test.js tests/smoke.test.js package.json
@@ -718,7 +725,7 @@ git commit -m "feat: expose sanitized platform capabilities"
 - Modify: `docs/VENDOR_MANIFEST.md`
 - Modify: `docs/superpowers/plans/2026-07-28-platform-contracts-account-isolation.md`
 
-- [ ] **Step 1: 记录改编来源**
+- [x] **Step 1: 记录改编来源**
 
 记录：
 
@@ -730,25 +737,25 @@ git commit -m "feat: expose sanitized platform capabilities"
 
 不能覆盖现有 Folia、Pretext 或其它 vendor 条目。
 
-- [ ] **Step 2: 运行语法检查**
+- [x] **Step 2: 运行语法检查**
 
 Run: `npm run check`
 
 Expected: exit 0.
 
-- [ ] **Step 3: 运行全量测试**
+- [x] **Step 3: 运行全量测试**
 
 Run: `npm test`
 
 Expected: all tests pass; baseline is 588 tests and the total increases by this batch's tests.
 
-- [ ] **Step 4: 检查 diff**
+- [x] **Step 4: 检查 diff**
 
 Run: `git diff --check`
 
 Expected: no output.
 
-- [ ] **Step 5: 检查安全边界**
+- [x] **Step 5: 检查安全边界**
 
 Run:
 
@@ -758,7 +765,7 @@ rg -n "MUSIC_U=|refreshToken|accessToken|clientSecret" desktop server tests
 
 Expected: only fixtures, parser keys, or explicit redaction checks; no production logging of credential values.
 
-- [ ] **Step 6: 提交文档和验收记录**
+- [x] **Step 6: 提交文档和验收记录**
 
 ```powershell
 git add NOTICE.md docs/VENDOR_MANIFEST.md docs/superpowers/plans/2026-07-28-platform-contracts-account-isolation.md
