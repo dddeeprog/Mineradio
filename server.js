@@ -65,6 +65,11 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createSearchAggregator } = require('./server/platform/search-aggregator');
+const { createKugouSearchAdapter } = require('./server/platform/providers/kugou-search');
+const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
+const { createQishuiSearchAdapter } = require('./server/platform/providers/qishui-search');
+const { createSpotifySearchAdapter } = require('./server/platform/providers/spotify-search');
 const { createAppStatusRoutes } = require('./server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
@@ -72,6 +77,7 @@ const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
 const { createFoliaThemeRoutes } = require('./server/routes/folia-theme');
 const { createNeteaseRoutes } = require('./server/routes/netease');
 const { createPlatformRoutes } = require('./server/routes/platform');
+const { createPlatformSearchRoutes } = require('./server/routes/platform-search');
 const { createPodcastRoutes } = require('./server/routes/podcast');
 const { createProxyRoutes } = require('./server/routes/proxy');
 const { createQQRoutes } = require('./server/routes/qq');
@@ -1410,9 +1416,14 @@ async function requireLogin(res) {
 // ---------- 业务: 搜索 ----------
 //   优先用 cloudsearch (新接口, 字段更全, picUrl 更稳定)
 //   对于仍然缺失封面的歌曲, 用 song_detail 批量补齐
-async function handleSearch(keywords, limit) {
+async function handleSearch(keywords, limit, offset) {
   console.log('[Search]', keywords, 'limit:', limit);
-  const result = await cloudsearch({ keywords, limit, cookie: userCookie });
+  const result = await cloudsearch({
+    keywords,
+    limit,
+    offset: Math.max(0, Number(offset) || 0),
+    cookie: userCookie,
+  });
   const songs = result.body && result.body.result && result.body.result.songs ? result.body.result.songs : [];
 
   let mapped = songs.map(s => {
@@ -2731,6 +2742,38 @@ const appStatusRoutes = createAppStatusRoutes({
   appVersionPayload,
   getLoginInfo,
 });
+const platformSearchAdapters = {
+  netease: createLegacySearchAdapter({
+    provider: 'netease',
+    search: handleSearch,
+    supportsOffset: true,
+    playbackAvailable: true,
+  }),
+  qq: createLegacySearchAdapter({
+    provider: 'qq',
+    search: handleQQSearch,
+    maxFetch: 80,
+    playbackAvailable: true,
+  }),
+  kugou: createKugouSearchAdapter({
+    requestJson,
+    userAgent: UA,
+  }),
+  qishui: createQishuiSearchAdapter({
+    requestJson,
+  }),
+  spotify: createSpotifySearchAdapter({
+    requestJson,
+  }),
+};
+const runPlatformSearch = createSearchAggregator({
+  providers: platformSearchAdapters,
+  timeoutMs: 8000,
+});
+const platformSearchRoutes = createPlatformSearchRoutes({
+  sendJSON,
+  search: runPlatformSearch,
+});
 const platformRoutes = createPlatformRoutes({
   sendJSON,
   getAccountStatuses: getPlatformAccountStatuses,
@@ -2899,6 +2942,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await platformRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await platformSearchRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 

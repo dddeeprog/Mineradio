@@ -48,6 +48,21 @@ test('platform capability route is GET-only', () => {
   );
 });
 
+test('unified platform search route is GET-only', () => {
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/search', 'GET'),
+    true,
+  );
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/search', 'POST'),
+    false,
+  );
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/search', 'DELETE'),
+    false,
+  );
+});
+
 test('remote media URL validation rejects local network targets', () => {
   assert.doesNotThrow(() => assertAllowedRemoteMediaUrl('https://music.163.com/song/media/outer/url?id=1.mp3'));
   assert.doesNotThrow(() => assertAllowedRemoteMediaUrl('https://y.qq.com/music/photo_new/T002R300x300M000abc.jpg'));

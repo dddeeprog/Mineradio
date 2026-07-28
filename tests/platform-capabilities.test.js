@@ -138,7 +138,7 @@ test('default availability only enables implemented capabilities and preserves l
   assert.equal(loggedIn.availability.listenDurationReport, false);
 });
 
-test('unwired provider search requires the server implementation allowlist', () => {
+test('metadata-only provider search is enabled after the adapters are wired', () => {
   const statuses = {
     kugou: {
       loggedIn: true,
@@ -160,20 +160,11 @@ test('unwired provider search requires the server implementation allowlist', () 
     },
   };
   const defaultSnapshot = createCapabilitySnapshot(statuses);
-  const enabledSnapshot = createCapabilitySnapshot(statuses, {
-    enabledCapabilities: {
-      kugou: ['search'],
-      qishui: ['search'],
-      spotify: ['search'],
-    },
-  });
 
   for (const provider of ['kugou', 'qishui', 'spotify']) {
-    const unavailable = providerCapability(defaultSnapshot, provider);
-    const enabled = providerCapability(enabledSnapshot, provider);
-    assert.equal(unavailable.capabilities.search, true, provider);
-    assert.equal(unavailable.availability.search, false, provider);
-    assert.equal(enabled.availability.search, true, provider);
+    const capability = providerCapability(defaultSnapshot, provider);
+    assert.equal(capability.capabilities.search, true, provider);
+    assert.equal(capability.availability.search, true, provider);
   }
 });
 

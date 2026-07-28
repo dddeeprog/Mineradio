@@ -78,6 +78,29 @@ test('platform capability route is registered before provider routes', () => {
   assert.ok(platformDispatch < qqDispatch);
 });
 
+test('unified platform search is assembled before legacy provider routes', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
+  const unifiedDispatch = server.indexOf(
+    'platformSearchRoutes.handleRoute(pn, req, res, url)',
+  );
+  const neteaseDispatch = server.indexOf(
+    'neteaseRoutes.handleRoute(pn, req, res, url)',
+  );
+  const qqDispatch = server.indexOf(
+    'qqRoutes.handleRoute(pn, req, res, url)',
+  );
+
+  assert.match(server, /createSearchAggregator/);
+  assert.match(server, /createPlatformSearchRoutes/);
+  assert.match(server, /createKugouSearchAdapter/);
+  assert.match(server, /createQishuiSearchAdapter/);
+  assert.match(server, /createSpotifySearchAdapter/);
+  assert.match(server, /const platformSearchRoutes = createPlatformSearchRoutes\(/);
+  assert.notEqual(unifiedDispatch, -1);
+  assert.ok(unifiedDispatch < neteaseDispatch);
+  assert.ok(unifiedDispatch < qqDispatch);
+});
+
 test('playback session restore script is wired', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 

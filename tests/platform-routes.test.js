@@ -107,23 +107,23 @@ test('platform route fails soft with a complete logged-out snapshot', async () =
   assert.equal(JSON.stringify(response.body).includes('status-secret'), false);
 });
 
-test('request data cannot enable server-disabled provider capabilities', async () => {
+test('request data cannot enable metadata-provider playback or writes', async () => {
   const harness = createResponseHarness({
     getAccountStatuses: async () => ({
       kugou: {
         loggedIn: true,
-        enabledCapabilities: ['search'],
-        availability: { search: true },
+        enabledCapabilities: ['playback', 'playlistWrite'],
+        availability: { playback: true, playlistWrite: true },
       },
       qishui: {
         loggedIn: true,
-        enabledCapabilities: ['search'],
-        availability: { search: true },
+        enabledCapabilities: ['playback', 'playlistWrite'],
+        availability: { playback: true, playlistWrite: true },
       },
       spotify: {
         loggedIn: true,
-        enabledCapabilities: ['search'],
-        availability: { search: true },
+        enabledCapabilities: ['playback', 'playlistWrite'],
+        availability: { playback: true, playlistWrite: true },
       },
     }),
   });
@@ -131,22 +131,22 @@ test('request data cannot enable server-disabled provider capabilities', async (
     method: 'GET',
     body: {
       enabledCapabilities: {
-        kugou: ['search'],
-        qishui: ['search'],
-        spotify: ['search'],
+        kugou: ['playback', 'playlistWrite'],
+        qishui: ['playback', 'playlistWrite'],
+        spotify: ['playback', 'playlistWrite'],
       },
     },
     enabledCapabilities: {
-      kugou: ['search'],
-      qishui: ['search'],
-      spotify: ['search'],
+      kugou: ['playback', 'playlistWrite'],
+      qishui: ['playback', 'playlistWrite'],
+      spotify: ['playback', 'playlistWrite'],
     },
   };
   const url = new URL(
     'http://localhost/api/platform/capabilities'
-      + '?enabledCapabilities[kugou]=search'
-      + '&enabledCapabilities[qishui]=search'
-      + '&enabledCapabilities[spotify]=search',
+      + '?enabledCapabilities[kugou]=playback'
+      + '&enabledCapabilities[qishui]=playlistWrite'
+      + '&enabledCapabilities[spotify]=playback',
   );
 
   await harness.routes.handleRoute(
@@ -159,7 +159,10 @@ test('request data cannot enable server-disabled provider capabilities', async (
   for (const provider of ['kugou', 'qishui', 'spotify']) {
     const capability = providerCapability(harness.response().body, provider);
     assert.equal(capability.capabilities.search, true, provider);
-    assert.equal(capability.availability.search, false, provider);
+    assert.equal(capability.availability.search, true, provider);
+    assert.equal(capability.capabilities.playback, false, provider);
+    assert.equal(capability.availability.playback, false, provider);
+    assert.equal(capability.availability.playlistWrite, false, provider);
   }
 });
 

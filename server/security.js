@@ -4,6 +4,7 @@ const LOOPBACK_HOST = '127.0.0.1';
 
 const GET_ONLY_ROUTES = new Set([
   '/api/platform/capabilities',
+  '/api/platform/search',
 ]);
 
 const POST_ONLY_ROUTES = new Set([

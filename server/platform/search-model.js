@@ -156,38 +156,67 @@ function putNumber(target, key, value) {
 }
 
 function providerDataFor(provider, raw, sourceId, album) {
+  const nested = isRecord(raw.providerData) ? raw.providerData : {};
   const data = {};
   if (provider === 'netease') {
     data.id = sourceId;
-    putString(data, 'albumId', [album.id]);
-    putNumber(data, 'fee', raw.fee);
+    putString(data, 'albumId', [album.id, nested.albumId]);
+    putNumber(data, 'fee', hasOwn(raw, 'fee') ? raw.fee : nested.fee);
   } else if (provider === 'qq') {
-    putString(data, 'mid', [raw.mid, raw.songmid, sourceId]);
-    putString(data, 'mediaMid', [raw.mediaMid, raw.media_mid]);
-    putString(data, 'qqId', [raw.qqId, raw.songId, raw.songid]);
-    putString(data, 'albumId', [album.id]);
-    putNumber(data, 'fee', raw.fee);
+    putString(data, 'mid', [raw.mid, raw.songmid, nested.mid, sourceId]);
+    putString(data, 'mediaMid', [
+      raw.mediaMid,
+      raw.media_mid,
+      nested.mediaMid,
+    ]);
+    putString(data, 'qqId', [
+      raw.qqId,
+      raw.songId,
+      raw.songid,
+      nested.qqId,
+    ]);
+    putString(data, 'albumId', [album.id, nested.albumId]);
+    putNumber(data, 'fee', hasOwn(raw, 'fee') ? raw.fee : nested.fee);
   } else if (provider === 'kugou') {
-    putString(data, 'hash', [raw.hash, raw.fileHash, sourceId]);
-    putString(data, 'albumId', [raw.albumId, raw.album_id, album.id]);
+    putString(data, 'hash', [
+      raw.hash,
+      raw.fileHash,
+      nested.hash,
+      sourceId,
+    ]);
+    putString(data, 'albumId', [
+      raw.albumId,
+      raw.album_id,
+      album.id,
+      nested.albumId,
+    ]);
     putString(data, 'albumAudioId', [
       raw.albumAudioId,
       raw.album_audio_id,
       raw.mixSongId,
+      nested.albumAudioId,
     ]);
-    putNumber(data, 'fee', raw.fee);
+    putNumber(data, 'fee', hasOwn(raw, 'fee') ? raw.fee : nested.fee);
   } else if (provider === 'qishui') {
     data.providerSongId = sourceId;
-    putNumber(data, 'rank', firstString([raw.qishuiRank, raw.rank]));
+    putNumber(data, 'rank', firstString([
+      raw.qishuiRank,
+      raw.rank,
+      nested.rank,
+    ]));
   } else if (provider === 'spotify') {
     data.spotifyId = sourceId;
-    putString(data, 'uri', [raw.uri, raw.spotifyUri]);
+    putString(data, 'uri', [raw.uri, raw.spotifyUri, nested.uri]);
     putString(data, 'externalUrl', [
       raw.spotifyUrl,
       raw.externalUrl,
       isRecord(raw.external_urls) && raw.external_urls.spotify,
+      nested.externalUrl,
     ]);
     if (typeof raw.explicit === 'boolean') data.explicit = raw.explicit;
+    else if (typeof nested.explicit === 'boolean') {
+      data.explicit = nested.explicit;
+    }
   }
   return data;
 }
