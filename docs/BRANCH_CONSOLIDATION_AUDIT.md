@@ -148,7 +148,7 @@
 | `da5a018` | `docs: add desktop overlays batch2 plan` | 非产品审计/计划文件 | 仅桌面 overlay 批次计划。 |
 | `8f48927` | `test: add desktop overlay state helpers` | 当前等价实现 | 当前 `desktop/overlay-state.js` 及测试覆盖 state helper。 |
 | `fef347a` | `feat: dedupe desktop lyrics main state` | 当前等价实现 | 当前 main 以稳定签名去重桌面歌词更新。 |
-| `39a1ade` | `feat: add desktop overlay renderer controls` | 真实缺口 | 唯一缺口：桌面 overlay 多行/对齐 payload 与 renderer、锁定控制、壁纸启用 UI 尚未完整迁入；本 Task 不实施。 |
+| `39a1ade` | `feat: add desktop overlay renderer controls` | 当前等价实现 | Task 10 已迁移桌面歌词布局控制、renderer 多行/对齐与锁定控制、壁纸 UI，以及有界的 overlay 调度器。 |
 | `cc108ea` | `docs: add local assets batch3 plan` | 非产品审计/计划文件 | 仅本地资产批次计划。 |
 | `5e2acf2` | `test: add local asset helper` | 当前等价实现 | 当前 `desktop/local-assets.js` 与测试覆盖本地资产 helper。 |
 | `b913567` | `feat: expose local asset desktop api` | 当前等价实现 | 当前 desktop API 使用授权根、协议 URL 与受限读取。 |

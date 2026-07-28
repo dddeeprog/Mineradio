@@ -19,6 +19,7 @@
       --lyric-feather:5.5%;
       --lyric-fit-x:1;
       --lyric-scroll-x:0px;
+      --lyric-align:center;
       --lyric-edge-width:92px;
       --lyric-mask-edge-width:92px;
       --lyric-vertical-feather:46px;
@@ -61,7 +62,7 @@
       padding:1.24em var(--lyric-edge-width) 1.34em;
       box-sizing:border-box;
       overflow:hidden;
-      text-align:center;
+      text-align:var(--lyric-align);
       pointer-events:none;
       isolation:isolate;
       -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 var(--lyric-mask-edge-width),#000 calc(100% - var(--lyric-mask-edge-width)),transparent 100%);
@@ -74,7 +75,7 @@
     .lyric-scroll{
       display:inline-block;
       transform:translate3d(var(--lyric-scroll-x),0,0) scaleX(var(--lyric-fit-x));
-      transform-origin:center;
+      transform-origin:var(--lyric-align);
       will-change:transform;
       backface-visibility:hidden;
     }
@@ -89,8 +90,8 @@
       font-weight:var(--lyric-weight);
       line-height:var(--lyric-line-height);
       letter-spacing:var(--lyric-letter-spacing);
-      text-align:center;
-      white-space:nowrap;
+      text-align:var(--lyric-align);
+      white-space:pre-line;
       overflow:visible;
       text-overflow:clip;
       padding:.20em .12em .34em;
@@ -155,7 +156,7 @@
     .lock-icon::before{content:"";position:absolute;left:2px;bottom:1px;width:9px;height:7px;border:1.7px solid var(--lyric-highlight);border-radius:2px;box-sizing:border-box}
     .lock-icon::after{content:"";position:absolute;left:3px;top:0;width:7px;height:8px;border:1.7px solid var(--lyric-highlight);border-bottom:0;border-radius:7px 7px 0 0;box-sizing:border-box}
     body.unlocked .lock-icon::after{left:7px;transform:rotate(24deg);transform-origin:left bottom}
-    .lyrics-close{
+    .lyrics-tool-btn{
       display:none;
       align-items:center;
       justify-content:center;
@@ -172,9 +173,10 @@
       text-shadow:0 0 12px var(--lyric-primary);
       -webkit-app-region:no-drag;
     }
-    .lyrics-close:hover{color:#fff}
-    body.unlocked .lyrics-close{display:flex}
-    body.unlocked .stage.hint-visible .lock-hint{pointer-events:auto;-webkit-app-region:no-drag}
+    .lyrics-tool-btn:hover{color:#fff}
+    body.unlocked .lyrics-tool-btn{display:flex}
+    body.locked .lyrics-lock-toggle{display:flex}
+    body.unlocked .stage.hint-visible .lock-hint,body.locked .stage.hint-visible .lock-hint{pointer-events:auto;-webkit-app-region:no-drag}
     .stage.hint-visible .lock-hint{opacity:.94;transform:translateX(-50%) translateY(0) scale(1)}
     @keyframes lyr-in{
       0%{opacity:0;transform:translate3d(0,32px,-120px) rotateX(24deg) rotateY(-18deg) scale(.78);filter:blur(12px)}
@@ -188,7 +190,7 @@
   <div class="wrap">
     <div id="stage" class="stage">
       <div id="lyricViewport" class="lyric-viewport"><div id="lyricScroller" class="lyric-scroll"><div id="line" class="line" data-text="Mineradio">Mineradio</div></div></div>
-      <div id="lockHint" class="lock-hint"><span class="lock-icon"></span><span id="lockText">&#20013;&#38190;&#35299;&#38145;</span><button id="closeLyricsBtn" class="lyrics-close" type="button" aria-label="Close desktop lyrics">&#20851;&#38381;&#26700;&#38754;&#27468;&#35789;</button></div>
+      <div id="lockHint" class="lock-hint"><span class="lock-icon"></span><span id="lockText">&#20013;&#38190;&#35299;&#38145;</span><button id="lockToggleBtn" class="lyrics-tool-btn lyrics-lock-toggle" type="button" aria-label="Toggle desktop lyrics lock">&#35299;&#38145;</button><button id="closeLyricsBtn" class="lyrics-tool-btn lyrics-close" type="button" aria-label="Close desktop lyrics">&#20851;&#38381;&#26700;&#38754;&#27468;&#35789;</button></div>
     </div>
   </div>
   <script>
@@ -200,6 +202,7 @@
     var line = document.getElementById('line');
     var lockHint = document.getElementById('lockHint');
     var lockText = document.getElementById('lockText');
+    var lockToggleBtn = document.getElementById('lockToggleBtn');
     var closeLyricsBtn = document.getElementById('closeLyricsBtn');
     var dpr = 1;
     var lastText = '';
@@ -227,7 +230,7 @@
       size:1,opacity:.92,clickThrough:true,lyricGlowParticles:false,cinema:true,highlightFollow:false,frameRate:60,
       lyricGlow:true,lyricGlowBeat:true,lyricGlowStrength:.35,highBloom:0,beatGlow:0,beatPulse:0,bass:0,feather:.055,
       fontFamily:'Inter,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif',
-      fontWeight:900,letterSpacing:0,lineHeight:1,lyricScale:1,
+      fontWeight:900,letterSpacing:0,lineHeight:1,lyricScale:1,rows:'double',align:'center',
       colors:{primary:'#f6fdff',secondary:'#a8f6ff',highlight:'#fff0b8',glow:'#9cffdf'},
       displayColors:{primary:'#f6fdff',secondary:'#a8f6ff',highlight:'#fff0b8',glow:'#9cffdf'}
     };
@@ -251,6 +254,13 @@
       var n = Number(value);
       if (!isFinite(n)) n = fallback;
       return Math.max(min, Math.min(max, n));
+    }
+    function normalizeRows(value) {
+      return String(value || '') === 'single' ? 'single' : 'double';
+    }
+    function normalizeAlign(value) {
+      var align = String(value || '');
+      return /^(left|center|right)$/.test(align) ? align : 'center';
     }
     function rand(seed){ return Math.abs(Math.sin(seed * 9283.173) * 43758.5453) % 1; }
     function isLocked(){ return state.clickThrough !== false; }
@@ -569,11 +579,18 @@
     function measureLineWidth(fontSize) {
       ctx.save();
       ctx.font = state.fontWeight + ' ' + fontSize + 'px ' + state.fontFamily;
-      var text = line.textContent || 'Mineradio';
-      var width = ctx.measureText(text).width;
+      var rows = String(line.textContent || 'Mineradio').split(/\n/).filter(Boolean);
+      if (!rows.length) rows = ['Mineradio'];
+      var width = 1;
+      rows.forEach(function(text){
+        var rowWidth = ctx.measureText(text).width + Math.max(0, Array.from(text).length - 1) * fontSize * state.letterSpacing;
+        width = Math.max(width, rowWidth);
+      });
       ctx.restore();
-      width += Math.max(0, Array.from(text).length - 1) * fontSize * state.letterSpacing;
       return Math.max(1, width);
+    }
+    function currentLyricLineCount() {
+      return Math.max(1, String(line.textContent || '').split(/\n/).filter(Boolean).length);
     }
     function lyricScrollInitialHoldMs() {
       return Math.round(clamp(state.progressSpan * 130, 140, 520, 320));
@@ -596,6 +613,7 @@
         state.fontWeight,
         state.letterSpacing,
         state.lineHeight,
+        state.align,
         innerWidth,
         innerHeight
       ].join('|');
@@ -612,7 +630,7 @@
       var maxScrollableWidth = readableWidth * 1.76;
       for (var i = 0; i < 24; i++) {
         var width = measureLineWidth(size);
-        var height = size * state.lineHeight;
+        var height = size * state.lineHeight * currentLyricLineCount();
         if ((width <= maxScrollableWidth && height <= maxHeight) || size <= minSize) break;
         size = Math.max(minSize, size - Math.max(1.25, size * .062));
       }
@@ -690,6 +708,7 @@
       document.body.classList.toggle('locked', locked);
       document.body.classList.toggle('unlocked', !locked);
       if (lockText) lockText.textContent = locked ? '\u4e2d\u952e\u89e3\u9501' : '\u4e2d\u952e\u9501\u5b9a';
+      if (lockToggleBtn) lockToggleBtn.textContent = locked ? '\u89e3\u9501' : '\u9501\u5b9a';
     }
     function setPointerCapture(active) {
       active = !!active;
@@ -725,7 +744,13 @@
       if (motion.beatGlow != null) state.beatGlow = motion.beatGlow;
       if (motion.beatPulse != null) state.beatPulse = motion.beatPulse;
       if (motion.bass != null) state.bass = motion.bass;
-      var text = String(state.text || 'Mineradio').replace(/\s+/g, ' ').trim() || 'Mineradio';
+      var text = String(state.text || 'Mineradio')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .map(function(line){ return line.replace(/[ \t]+/g, ' ').trim(); })
+        .filter(Boolean)
+        .slice(0, normalizeRows(state.rows) === 'single' ? 1 : 2)
+        .join('\n') || 'Mineradio';
       baseFontSize = Math.round(58 * clamp(state.size, .72, 1.55, 1));
       state.progress = clamp(state.progress, 0, 1, 0);
       state.progressSpan = clamp(state.progressSpan, .75, 18, 4.8);
@@ -733,6 +758,8 @@
       state.fontWeight = Math.round(clamp(state.fontWeight, 500, 900, 900) / 50) * 50;
       state.letterSpacing = clamp(state.letterSpacing, -.04, .18, 0);
       state.lineHeight = clamp(state.lineHeight, .86, 1.35, 1);
+      state.rows = normalizeRows(state.rows);
+      state.align = normalizeAlign(state.align);
       state.frameRate = normalizeFrameRate(state.frameRate);
       state.lyricGlowStrength = clamp(state.lyricGlowStrength, 0, .85, .35);
       state.highBloom = clamp(state.highBloom, 0, 1.45, 0);
@@ -759,6 +786,7 @@
       setRootVar('--lyric-font', state.fontFamily || 'Inter,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif');
       setRootVar('--lyric-weight', String(state.fontWeight));
       setRootVar('--lyric-line-height', String(state.lineHeight));
+      setRootVar('--lyric-align', state.align);
       setRootVar('--lyric-feather', (state.feather * 100).toFixed(2) + '%');
       document.body.classList.toggle('show', !!state.enabled);
       document.body.classList.toggle('paused', !state.playing);
@@ -1144,6 +1172,7 @@
     window.addEventListener('pointerdown', function(evt){
       if (!pointInStage(evt)) return;
       if (closeLyricsBtn && closeLyricsBtn.contains(evt.target)) return;
+      if (lockToggleBtn && lockToggleBtn.contains(evt.target)) return;
       if (evt.button === 1) {
         evt.preventDefault();
         hideInteractionHint();
@@ -1176,6 +1205,14 @@
     window.addEventListener('auxclick', function(evt){
       if (evt.button === 1 && pointInStage(evt)) evt.preventDefault();
     });
+    if (lockToggleBtn) {
+      lockToggleBtn.addEventListener('click', function(evt){
+        evt.preventDefault();
+        evt.stopPropagation();
+        setLocked(!isLocked());
+        setHintVisible(true);
+      });
+    }
     if (closeLyricsBtn) {
       closeLyricsBtn.addEventListener('click', function(evt){
         evt.preventDefault();
