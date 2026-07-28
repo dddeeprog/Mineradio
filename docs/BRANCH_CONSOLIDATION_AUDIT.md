@@ -170,6 +170,19 @@
 
 Task 10 合同测试锁定以下当前能力：在线/歌单/本地来源导航和 QQ/通用在线 URL 路由；本地库、媒体资产、节奏缓存、桌面本地资产、shell 与 overlay state 模块；`public/folia-native/runtime.js` 存在且已退役的 `build/folia-stage.js` 不存在；`check`、`test`、`test:visual`、`verify:artifacts`、`build:win:dir` 脚本可用。
 
+## Task 11 - 统一分支最终验证（2026-07-28）
+
+- 基础门禁：`npm run check` 通过；`npm test` 为 588/588。
+- 定向回归：security/routes/comment 测试为 40/40；cache/perf helper 测试为 15/15。
+- 视觉回归：`npm run test:visual` 为 16/16。
+- 参考硬件模式：`MINERADIO_REFERENCE_HARDWARE=1 npm run test:visual` 为 16/16，但实际 WebGL renderer 是 SwiftShader/software，`referenceGpuMatched` 为 `false`，`performanceTargetsValidated` 为 `false`，`targetValidation` 为 `software functional-only`；本次只证明软件渲染功能通过，**未验证硬件 FPS 目标**。
+- Windows 构建：首次 `build:win:dir` 失败是因为辅助 worktree 缺少 `node_modules/electron`；`package-lock.json` 已锁定 Electron 42.4.1，执行 `npm ci` 恢复本地依赖且未产生受跟踪源码或 lock 文件变更。随后 `build:win:dir` 与 `build:win` 均通过。
+- 产物验证：`npm run verify:artifacts` 已验证 `dist/Mineradio-1.1.0-Setup.exe`，SHA256 为 `6A311119709031C692B1D840B40C3067AAAF587DA699DF0D17B331B77F30F00A`。Authenticode 状态仅因当前宿主中 `Microsoft.PowerShell.Security` 受重复 TypeData 成员影响而无法加载，记录为 `Unavailable`；该结果**不构成已签名或未签名结论**。
+- 评审：Task 10B 的 spec review 与 code-quality review 均已批准。
+- 仓库卫生：验证完成后 `git diff --check` 通过，工作树干净。
+
+结论：Task 10B 的功能、回归、视觉和 Windows 产物验证均已完成；参考硬件模式实际使用软件渲染，因此硬件性能目标仍不在本轮已验证范围内。
+
 ## 迁移纪律
 
 1. 每项能力必须先确认当前实现、来源证据和最小回归测试，再做单一能力迁移。
