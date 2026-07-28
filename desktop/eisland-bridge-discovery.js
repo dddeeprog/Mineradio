@@ -7,6 +7,11 @@ const DESCRIPTOR_PROTOCOL = 'mineradio-bridge/v1';
 const DESCRIPTOR_TTL_MS = 5_000;
 const REFRESH_INTERVAL_MS = 1_000;
 const DESCRIPTOR_LOCK_FILE_NAME = `.${DESCRIPTOR_FILE_NAME}.lock`;
+const GENERATION_DIRECTORY_NAME = `.${DESCRIPTOR_FILE_NAME}.generations`;
+const GENERATION_ROOT_FILE_NAME = 'root';
+const GENERATION_OWNER_PREFIX = 'owner.';
+const GENERATION_OWNER_SUFFIX = '.json';
+const GENERATION_RELEASED_SUFFIX = '.released';
 const LOCK_ACQUIRE_ATTEMPTS = 10;
 const LOCK_RELEASE_ATTEMPTS = 3;
 const LOCK_RETRY_MS = 10;
@@ -204,6 +209,251 @@ async function cleanupQuarantinedLocks(fs, quarantinePaths) {
   quarantinePaths.clear();
 }
 
+function generationDirectoryPath(appData) {
+  return path.join(appData, GENERATION_DIRECTORY_NAME);
+}
+
+function generationOwnerFileName(lockId) {
+  return `${GENERATION_OWNER_PREFIX}${lockId}${GENERATION_OWNER_SUFFIX}`;
+}
+
+function generationOwnerPath(generationDirectory, lockId) {
+  return path.join(generationDirectory, generationOwnerFileName(lockId));
+}
+
+function generationNextPath(ownerPath) {
+  return `${ownerPath}.next`;
+}
+
+function generationReleasedPath(ownerPath) {
+  return `${ownerPath}${GENERATION_RELEASED_SUFFIX}`;
+}
+
+async function readGenerationFromLink(fs, generationDirectory, linkPath) {
+  const linked = await readLockOwner(fs, linkPath);
+  if (!linked.exists) return { exists: false };
+  if (linked.error || !isReclaimableLockOwner(linked.record)) {
+    return { exists: true, error: true };
+  }
+
+  const ownerPath = generationOwnerPath(generationDirectory, linked.record.lockId);
+  const owner = await readLockOwner(fs, ownerPath);
+  if (
+    !owner.exists ||
+    owner.error ||
+    !lockOwnersMatch(owner.record, linked.record)
+  ) {
+    return { exists: true, error: true };
+  }
+  return { exists: true, owner: linked.record, ownerPath };
+}
+
+async function readGenerationTerminal(fs, generationDirectory) {
+  const rootPath = path.join(generationDirectory, GENERATION_ROOT_FILE_NAME);
+  let current = await readGenerationFromLink(fs, generationDirectory, rootPath);
+  if (!current.exists || current.error) return current;
+
+  const seenLockIds = new Set();
+  while (current.exists) {
+    if (seenLockIds.has(current.owner.lockId)) {
+      return { exists: true, error: true };
+    }
+    seenLockIds.add(current.owner.lockId);
+
+    const next = await readGenerationFromLink(
+      fs,
+      generationDirectory,
+      generationNextPath(current.ownerPath),
+    );
+    if (!next.exists || next.error) return next.exists ? next : current;
+    current = next;
+  }
+  return current;
+}
+
+async function writeGenerationOwner(fs, generationDirectory, owner) {
+  const ownerPath = generationOwnerPath(generationDirectory, owner.lockId);
+  await fs.writeFile(ownerPath, JSON.stringify(owner), {
+    encoding: 'utf8',
+    flag: 'wx',
+    mode: 0o600,
+  });
+  return ownerPath;
+}
+
+async function cleanupGenerationCandidate(fs, ownerPath) {
+  try {
+    await fs.unlink(ownerPath);
+  } catch {}
+}
+
+async function hasGenerationReleaseMarker(fs, ownerPath) {
+  try {
+    await fs.readFile(generationReleasedPath(ownerPath), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryAcquirePublisherGeneration(
+  fs,
+  generationDirectory,
+  owner,
+  isProcessAlive,
+) {
+  await fs.mkdir(generationDirectory, { recursive: true, mode: 0o700 });
+  const rootPath = path.join(generationDirectory, GENERATION_ROOT_FILE_NAME);
+  let terminal = await readGenerationTerminal(fs, generationDirectory);
+
+  if (!terminal.exists) {
+    const ownerPath = await writeGenerationOwner(fs, generationDirectory, owner);
+    try {
+      await fs.link(ownerPath, rootPath);
+      return { owner, ownerPath, predecessor: null, released: false };
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        await cleanupGenerationCandidate(fs, ownerPath);
+        return null;
+      }
+      throw error;
+    }
+  }
+  if (terminal.error) return null;
+
+  let predecessorReleased = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
+  if (!predecessorReleased) {
+    if (!(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) return null;
+
+    const currentTerminal = await readGenerationTerminal(fs, generationDirectory);
+    if (
+      !currentTerminal.exists ||
+      currentTerminal.error ||
+      currentTerminal.ownerPath !== terminal.ownerPath ||
+      !lockOwnersMatch(currentTerminal.owner, terminal.owner)
+    ) {
+      return null;
+    }
+    terminal = currentTerminal;
+    predecessorReleased = await hasGenerationReleaseMarker(fs, terminal.ownerPath);
+    if (!predecessorReleased && !(await isConfirmedDead(isProcessAlive, terminal.owner.pid))) {
+      return null;
+    }
+  }
+
+  const ownerPath = await writeGenerationOwner(fs, generationDirectory, owner);
+  try {
+    await fs.link(ownerPath, generationNextPath(terminal.ownerPath));
+    return {
+      owner,
+      ownerPath,
+      predecessor: {
+        owner: terminal.owner,
+        ownerPath: terminal.ownerPath,
+        released: predecessorReleased,
+      },
+      released: false,
+    };
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      await cleanupGenerationCandidate(fs, ownerPath);
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function acquirePublisherGeneration(
+  fs,
+  generationDirectory,
+  instanceId,
+  isProcessAlive,
+  pid,
+  timer,
+  lockRetryWaiters,
+  shouldCancel,
+) {
+  let retries = 0;
+  while (retries < LOCK_ACQUIRE_ATTEMPTS) {
+    if (shouldCancel()) return null;
+    const generation = await tryAcquirePublisherGeneration(
+      fs,
+      generationDirectory,
+      createLockOwner(instanceId, pid),
+      isProcessAlive,
+    );
+    if (generation) return generation;
+
+    retries += 1;
+    if (retries === LOCK_ACQUIRE_ATTEMPTS) throw lockAcquireError();
+    const shouldRetry = await waitForLockRetry(timer, lockRetryWaiters);
+    if (!shouldRetry || shouldCancel()) return null;
+  }
+  throw lockAcquireError();
+}
+
+async function releasePublisherGeneration(fs, generation) {
+  if (!generation || generation.released) return true;
+  try {
+    await fs.writeFile(generationReleasedPath(generation.ownerPath), '', {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') return false;
+  }
+  generation.released = true;
+  return true;
+}
+
+function hasValidDescriptorOwner(descriptor) {
+  return Boolean(
+    descriptor &&
+    typeof descriptor.instanceId === 'string' &&
+    descriptor.instanceId.length > 0 &&
+    isPositiveProcessId(descriptor.pid),
+  );
+}
+
+async function canReplaceDescriptor(
+  descriptor,
+  instanceId,
+  pid,
+  clock,
+  generation,
+  isProcessAlive,
+) {
+  if (!descriptor) return true;
+  if (hasDescriptorOwner(descriptor, instanceId, pid)) return true;
+  if (
+    generation?.predecessor?.released &&
+    hasDescriptorOwner(
+      descriptor,
+      generation.predecessor.owner.instanceId,
+      generation.predecessor.owner.pid,
+    )
+  ) {
+    return true;
+  }
+  if (!hasValidDescriptorOwner(descriptor)) return false;
+
+  let now;
+  try {
+    now = clock();
+  } catch {
+    return false;
+  }
+  if (
+    !Number.isFinite(now) ||
+    !Number.isFinite(descriptor.expiresAtMs) ||
+    descriptor.expiresAtMs > now
+  ) {
+    return false;
+  }
+  return isConfirmedDead(isProcessAlive, descriptor.pid);
+}
+
 function waitForRetry(timer) {
   return new Promise((resolve) => {
     if (typeof timer.setTimeout !== 'function') {
@@ -386,7 +636,10 @@ function createBridgeDiscoveryPublisher({
 } = {}) {
   const descriptorDirectory = path.join(appData, 'Mineradio');
   const descriptorPath = path.join(descriptorDirectory, DESCRIPTOR_FILE_NAME);
+  const generationDirectory = generationDirectoryPath(appData);
+  let publisherGeneration;
   let hasPublished = false;
+  let isSuperseded = false;
   let isClosed = false;
   let refreshTimer;
   let closePromise;
@@ -395,25 +648,91 @@ function createBridgeDiscoveryPublisher({
   const lockRetryWaiters = new Set();
   const temporaryPaths = new Set();
 
+  async function ensurePublisherGeneration() {
+    if (publisherGeneration && !publisherGeneration.released) {
+      return publisherGeneration;
+    }
+    const generation = await acquirePublisherGeneration(
+      fs,
+      generationDirectory,
+      instanceId,
+      isProcessAlive,
+      pid,
+      timer,
+      lockRetryWaiters,
+      () => isClosed || isSuperseded,
+    );
+    if (generation) publisherGeneration = generation;
+    return generation;
+  }
+
+  async function releaseCurrentPublisherGeneration() {
+    return releasePublisherGeneration(fs, publisherGeneration);
+  }
+
+  function stopRefreshTimer() {
+    if (refreshTimer === undefined) return undefined;
+
+    const timerToClear = refreshTimer;
+    refreshTimer = undefined;
+    try {
+      timer.clearInterval(timerToClear);
+      return undefined;
+    } catch {
+      return timerOperationError();
+    }
+  }
+
+  async function relinquishSupersededGeneration() {
+    isSuperseded = true;
+    const refreshError = stopRefreshTimer();
+    let released = false;
+    try {
+      released = await releaseCurrentPublisherGeneration();
+    } catch {}
+    if (refreshError) throw refreshError;
+    if (!released) throw lockReleaseError();
+  }
+
   function publish() {
     if (inFlightPublication) return inFlightPublication;
 
     const nextPublication = publication.then(async () => {
       try {
-        if (isClosed) return false;
-        return await withDescriptorLock(
+        if (isClosed || isSuperseded) return false;
+        const generation = await ensurePublisherGeneration();
+        if (!generation || isClosed || isSuperseded) return false;
+
+        let rejectedInitialDescriptor = false;
+        let supersededDuringPublication = false;
+        const published = await withDescriptorLock(
           fs,
           descriptorDirectory,
           timer,
           lockRetryWaiters,
-          () => isClosed,
+          () => isClosed || isSuperseded,
           createLockOwner(instanceId, pid),
           isProcessAlive,
           async () => {
-            if (isClosed) return false;
+            if (isClosed || isSuperseded) return false;
+            const existing = await readDescriptor(fs, descriptorPath);
             if (hasPublished) {
-              const existing = await readDescriptor(fs, descriptorPath);
-              if (!hasDescriptorOwner(existing, instanceId, pid)) return false;
+              if (!hasDescriptorOwner(existing, instanceId, pid)) {
+                supersededDuringPublication = true;
+                return false;
+              }
+            } else if (!(
+              await canReplaceDescriptor(
+                existing,
+                instanceId,
+                pid,
+                clock,
+                generation,
+                isProcessAlive,
+              )
+            )) {
+              rejectedInitialDescriptor = true;
+              return false;
             }
 
             const descriptor = {
@@ -437,6 +756,13 @@ function createBridgeDiscoveryPublisher({
             return true;
           },
         );
+        if (supersededDuringPublication) isSuperseded = true;
+        if (supersededDuringPublication && !isClosed) {
+          await relinquishSupersededGeneration();
+        } else if (rejectedInitialDescriptor && !isClosed) {
+          if (!(await releaseCurrentPublisherGeneration())) throw lockReleaseError();
+        }
+        return published;
       } catch (error) {
         throw normalizeDiscoveryError(error);
       }
@@ -472,19 +798,12 @@ function createBridgeDiscoveryPublisher({
       } catch {
         closeError = timerOperationError();
       }
-      if (refreshTimer !== undefined) {
-        const timerToClear = refreshTimer;
-        refreshTimer = undefined;
-        try {
-          timer.clearInterval(timerToClear);
-        } catch {
-          if (!closeError) closeError = timerOperationError();
-        }
-      }
+      const refreshError = stopRefreshTimer();
+      if (refreshError && !closeError) closeError = refreshError;
 
       await publication;
       let removedDescriptor = false;
-      if (hasPublished) {
+      if (hasPublished && !isSuperseded) {
         try {
           removedDescriptor = await withDescriptorLock(
             fs,
@@ -515,6 +834,13 @@ function createBridgeDiscoveryPublisher({
       } catch (error) {
         if (!closeError) closeError = normalizeDiscoveryError(error);
       }
+      try {
+        if (!(await releaseCurrentPublisherGeneration()) && !closeError) {
+          closeError = lockReleaseError();
+        }
+      } catch {
+        if (!closeError) closeError = lockReleaseError();
+      }
       if (closeError) throw closeError;
       return removedDescriptor;
     };
@@ -527,7 +853,7 @@ function createBridgeDiscoveryPublisher({
   }
 
   const ready = publish().then((published) => {
-    if (published && !isClosed) {
+    if (published && !isClosed && !isSuperseded) {
       try {
         refreshTimer = timer.setInterval(
           () => publish().catch(() => false),

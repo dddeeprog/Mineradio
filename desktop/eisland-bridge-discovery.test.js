@@ -139,6 +139,40 @@ test('writes_exact_descriptor_schema', async () => {
   });
 });
 
+test('does_not_overwrite_fresh_active_external_descriptor_on_initial_publish', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const externalDescriptor = {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_591,
+      token: 'external-active-token',
+      instanceId: 'external-active-instance',
+      pid: 50_005,
+      expiresAtMs: 9_205_000,
+    };
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(descriptorPath, JSON.stringify(externalDescriptor), 'utf8');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_592,
+      clock: () => 9_200_000,
+      instanceId: 'instance-active-descriptor-candidate',
+      isProcessAlive(candidatePid) {
+        assert.equal(candidatePid, externalDescriptor.pid);
+        return true;
+      },
+      pid: 4_347,
+      timer: createIdleTimer(),
+      token: 'candidate-active-descriptor-token',
+    });
+
+    assert.equal(await publisher.ready, false);
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), externalDescriptor);
+    assert.equal(await publisher.close(), false);
+  });
+});
 test('publishes_atomically_without_partial_json', async () => {
   await withTempAppData(async (appData) => {
     const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
@@ -146,9 +180,16 @@ test('publishes_atomically_without_partial_json', async () => {
 
     const descriptorDirectory = path.join(appData, 'Mineradio');
     const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
-    const priorDescriptor = JSON.stringify({ previous: 'complete-json' });
+    const priorDescriptor = {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_567,
+      token: 'expired-prior-token',
+      instanceId: 'expired-prior-instance',
+      pid: 50_007,
+      expiresAtMs: 1_999_999,
+    };
     await fs.mkdir(descriptorDirectory, { recursive: true });
-    await fs.writeFile(descriptorPath, priorDescriptor, 'utf8');
+    await fs.writeFile(descriptorPath, JSON.stringify(priorDescriptor), 'utf8');
 
     const tempClosed = createDeferred();
     const permitRename = createDeferred();
@@ -172,6 +213,10 @@ test('publishes_atomically_without_partial_json', async () => {
       clock: () => 2_000_000,
       fs: gatedFs,
       instanceId: 'instance-atomic',
+      isProcessAlive(candidatePid) {
+        assert.equal(candidatePid, priorDescriptor.pid);
+        return false;
+      },
       pid: 4_322,
       timer: createIdleTimer(),
       token: 'atomic-test-token',
@@ -186,9 +231,7 @@ test('publishes_atomically_without_partial_json', async () => {
     const tempPath = await tempClosed.promise;
     assert.equal(path.dirname(tempPath), descriptorDirectory);
     assert.notEqual(tempPath, descriptorPath);
-    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
-      previous: 'complete-json',
-    });
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), priorDescriptor);
     assert.deepEqual(JSON.parse(await fs.readFile(tempPath, 'utf8')), {
       protocol: 'mineradio-bridge/v1',
       bridgePort: 34_568,
@@ -399,7 +442,97 @@ test('refreshes_every_1000ms_with_5000ms_expiry_and_closes_idempotently', async 
     assert.deepEqual(await fs.readdir(descriptorDirectory), ['eisland-bridge-v1.json']);
   });
 });
-test('does_not_overwrite_later_publisher_during_gated_refresh', async () => {
+test('releases_superseded_generation_and_stops_refresh_without_deleting_foreign_descriptor', async () => {
+  await withTempAppData(async (appData) => {
+    const timer = createControllableTimer();
+    const successorTimer = createControllableTimer();
+    const firstPid = 4_329;
+    const foreignDescriptor = {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_591,
+      token: 'foreign-token',
+      instanceId: 'foreign-instance',
+      pid: 50_006,
+      expiresAtMs: 9_999_000,
+    };
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(
+      descriptorDirectory,
+      'eisland-bridge-v1.json',
+    );
+    const descriptorLockPath = path.join(
+      descriptorDirectory,
+      '.eisland-bridge-v1.json.lock',
+    );
+    let descriptorLockWriteAttempts = 0;
+    const guardedFs = {
+      ...fs,
+      async writeFile(filePath, ...args) {
+        if (filePath === descriptorLockPath) descriptorLockWriteAttempts += 1;
+        return fs.writeFile(filePath, ...args);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_573,
+      clock: () => 10_000_000,
+      fs: guardedFs,
+      instanceId: 'instance-superseded',
+      pid: firstPid,
+      timer,
+      token: 'superseded-token',
+    });
+    await publisher.ready;
+    await fs.writeFile(descriptorPath, JSON.stringify(foreignDescriptor), 'utf8');
+
+    let successor;
+    try {
+      assert.equal(await timer.fireInterval(), false);
+      assert.equal(timer.intervals[0].cleared, true);
+      assert.equal(timer.intervals[0].clearCount, 1);
+      assert.deepEqual(
+        JSON.parse(await fs.readFile(descriptorPath, 'utf8')),
+        foreignDescriptor,
+      );
+      await publisher.close();
+      assert.equal(descriptorLockWriteAttempts, 2);
+      assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), foreignDescriptor);
+
+      successor = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_592,
+        clock: () => 10_000_000,
+        instanceId: 'instance-superseded-successor',
+        isProcessAlive: (candidatePid) => candidatePid === firstPid,
+        pid: 4_330,
+        timer: successorTimer,
+        token: 'superseded-successor-token',
+      });
+      const successorReady = await Promise.race([
+        successor.ready.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+      ]);
+      assert.equal(successorReady, true);
+      assert.deepEqual(
+        JSON.parse(await fs.readFile(descriptorPath, 'utf8')),
+        {
+          protocol: 'mineradio-bridge/v1',
+          bridgePort: 34_592,
+          token: 'superseded-successor-token',
+          instanceId: 'instance-superseded-successor',
+          pid: 4_330,
+          expiresAtMs: 10_005_000,
+        },
+      );
+    } finally {
+      await Promise.allSettled([successor?.close()]);
+      await Promise.allSettled([publisher.close()]);
+    }
+  });
+});
+
+test('does_not_allow_later_publisher_to_take_over_until_old_publisher_closes', async () => {
   await withTempAppData(async (appData) => {
     const timer = {
       intervals: [],
@@ -413,6 +546,7 @@ test('does_not_overwrite_later_publisher_during_gated_refresh', async () => {
         return this.intervals[0].callback();
       },
     };
+    const newTimer = createControllableTimer();
     let renameCount = 0;
     const refreshRenameStarted = createDeferred();
     const permitRefreshRename = createDeferred();
@@ -439,37 +573,51 @@ test('does_not_overwrite_later_publisher_during_gated_refresh', async () => {
       token: 'refresh-old-token',
     });
     await oldPublisher.ready;
+    let newPublisher;
 
-    const refreshing = timer.fire();
-    await refreshRenameStarted.promise;
-    const newPublisher = createBridgeDiscoveryPublisher({
-      appData,
-      bridgePort: 34_574,
-      clock: () => 6_000_000,
-      instanceId: 'instance-refresh-new',
-      isProcessAlive: () => true,
-      pid: 4_328,
-      timer: createIdleTimer(),
-      token: 'refresh-new-token',
-    });
-    const newPublisherFinishedBeforeRefresh = await Promise.race([
-      newPublisher.ready.then(() => true),
-      new Promise((resolve) => setTimeout(() => resolve(false), 50)),
-    ]);
-    assert.equal(newPublisherFinishedBeforeRefresh, false);
+    try {
+      const refreshing = timer.fire();
+      await refreshRenameStarted.promise;
+      newPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_574,
+        clock: () => 6_000_000,
+        instanceId: 'instance-refresh-new',
+        isProcessAlive: () => true,
+        pid: 4_328,
+        timer: newTimer,
+        token: 'refresh-new-token',
+      });
+      const newReady = newPublisher.ready;
+      await waitForTimeout(newTimer, 1);
 
-    permitRefreshRename.resolve();
-    await Promise.all([refreshing, newPublisher.ready]);
+      permitRefreshRename.resolve();
+      await refreshing;
+      await newTimer.fireTimeout();
+      const newPublisherFinishedBeforeClose = await Promise.race([
+        newReady.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+      ]);
+      assert.equal(newPublisherFinishedBeforeClose, false);
+      await waitForTimeout(newTimer, 2);
 
-    const descriptorPath = path.join(appData, 'Mineradio', 'eisland-bridge-v1.json');
-    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
-      protocol: 'mineradio-bridge/v1',
-      bridgePort: 34_574,
-      token: 'refresh-new-token',
-      instanceId: 'instance-refresh-new',
-      pid: 4_328,
-      expiresAtMs: 6_005_000,
-    });
+      await oldPublisher.close();
+      await newTimer.fireTimeout();
+      await newReady;
+
+      const descriptorPath = path.join(appData, 'Mineradio', 'eisland-bridge-v1.json');
+      assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+        protocol: 'mineradio-bridge/v1',
+        bridgePort: 34_574,
+        token: 'refresh-new-token',
+        instanceId: 'instance-refresh-new',
+        pid: 4_328,
+        expiresAtMs: 6_005_000,
+      });
+    } finally {
+      permitRefreshRename.resolve();
+      await Promise.allSettled([oldPublisher.close(), newPublisher?.close()]);
+    }
   });
 });
 test('does_not_delete_later_publisher_during_gated_close', async () => {
@@ -1068,6 +1216,91 @@ test('recovers_after_quarantine_move_failure_for_dead_lock', async () => {
 
     await publisher.close();
     assert.deepEqual(await fs.readdir(descriptorDirectory), [path.basename(quarantinePath)]);
+  });
+});
+test('fences_dead_lock_reclaim_before_second_publisher_enters_critical_section', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    const deadOwner = {
+      instanceId: 'fence-dead-owner',
+      pid: 50_004,
+      lockId: 'd12b5e87-020f-44a6-a07e-7dca3c7b58da',
+    };
+    const firstValidationReached = createDeferred();
+    const permitFirstValidation = createDeferred();
+    const secondCriticalSectionReached = createDeferred();
+    const permitSecondCriticalSection = createDeferred();
+    const firstPid = 4_345;
+    let firstLivenessChecks = 0;
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(lockPath, JSON.stringify(deadOwner), 'utf8');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_589,
+      clock: () => 9_100_000,
+      instanceId: 'instance-fence-first',
+      isProcessAlive(candidatePid) {
+        assert.equal(candidatePid, deadOwner.pid);
+        firstLivenessChecks += 1;
+        if (firstLivenessChecks === 2) {
+          firstValidationReached.resolve();
+          return permitFirstValidation.promise.then(() => false);
+        }
+        return false;
+      },
+      pid: firstPid,
+      timer: createIdleTimer(),
+      token: 'fence-first-token',
+    });
+    const firstReady = firstPublisher.ready;
+    let secondPublisher;
+    let secondReady;
+
+    try {
+      await firstValidationReached.promise;
+      const secondFs = {
+        ...fs,
+        async rename(sourcePath, destinationPath) {
+          if (destinationPath === descriptorPath) {
+            secondCriticalSectionReached.resolve();
+            await permitSecondCriticalSection.promise;
+          }
+          return fs.rename(sourcePath, destinationPath);
+        },
+      };
+      secondPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_590,
+        clock: () => 9_100_000,
+        fs: secondFs,
+        instanceId: 'instance-fence-second',
+        isProcessAlive(candidatePid) {
+          if (candidatePid === firstPid) return true;
+          assert.equal(candidatePid, deadOwner.pid);
+          return false;
+        },
+        pid: 4_346,
+        timer: createIdleTimer(),
+        token: 'fence-second-token',
+      });
+      secondReady = secondPublisher.ready;
+      const secondEnteredBeforeFirstCompleted = await Promise.race([
+        secondCriticalSectionReached.promise.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+      ]);
+
+      assert.equal(secondEnteredBeforeFirstCompleted, false);
+      permitFirstValidation.resolve();
+      await firstReady;
+    } finally {
+      permitFirstValidation.resolve();
+      permitSecondCriticalSection.resolve();
+      await Promise.allSettled([firstReady, secondReady]);
+      await Promise.allSettled([firstPublisher.close(), secondPublisher?.close()]);
+    }
   });
 });
 test('keeps_active_and_permission_owner_locks', async () => {
