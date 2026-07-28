@@ -1,41 +1,158 @@
+const { randomUUID } = require('node:crypto');
+
 const RENDERER_HEARTBEAT_MS = 1_000;
 const STATE_TTL_MS = 2_500;
 const RENDERER_COMMAND_TIMEOUT_MS = 1_500;
 const COMMAND_RESULT_CACHE_TTL_MS = 30_000;
 const COMMAND_RESULT_CACHE_MAX_ENTRIES = 256;
+const COMMAND_QUEUE_MAX_ENTRIES = 256;
+
+const DROP_VALUE = Symbol('drop-value');
+const PUBLIC_CONTAINER_KEYS = new Set([
+  'audio',
+  'colors',
+  'media',
+  'metadata',
+  'music',
+  'playback',
+  'playbackstate',
+  'player',
+  'state',
+  'stream',
+  'timing',
+  'track',
+  'transport',
+  'variants',
+]);
+const PUBLIC_VALUE_KEYS = new Set([
+  'accepted',
+  'album',
+  'albumid',
+  'artist',
+  'at',
+  'cover',
+  'coverurl',
+  'currenttime',
+  'duration',
+  'enabled',
+  'end',
+  'glow',
+  'highlight',
+  'id',
+  'index',
+  'language',
+  'level',
+  'line',
+  'lines',
+  'mode',
+  'moved',
+  'muted',
+  'name',
+  'offset',
+  'ok',
+  'paused',
+  'playing',
+  'position',
+  'primary',
+  'progress',
+  'rate',
+  'repeat',
+  'romanized',
+  'secondary',
+  'seconds',
+  'seeked',
+  'shuffle',
+  'start',
+  'status',
+  'text',
+  'time',
+  'timestamp',
+  'title',
+  'trackid',
+  'translation',
+  'translations',
+  'visible',
+  'volume',
+]);
+
+function normalizeKey(key) {
+  return String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function isExternalUrl(value) {
+  return typeof value === 'string' && /^(?:https?|blob|file):|^data:audio\//i.test(value);
+}
 
 function isMediaContextKey(key) {
-  const normalized = String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
-  return /^(audio|stream|music|media|playback|player)$/.test(normalized);
+  return /^(audio|stream|music|media|playback|player)$/.test(normalizeKey(key));
 }
 
-function isSensitiveKey(key, inMediaContext = false) {
-  const normalized = String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
-  if (normalized.includes('cookie') || normalized.includes('account')) return true;
-  if (/(audio|stream|music|play)(url|src)$/.test(normalized)) return true;
-  if (normalized === 'url') return true;
-  if (inMediaContext && ['src', 'source', 'url', 'uri', 'href'].includes(normalized)) return true;
-  return false;
+function isSensitiveTransportKey(key) {
+  const normalized = normalizeKey(key);
+  if (normalized === 'coverurl') return false;
+  if (/(cookie|account|auth|token|credential|secret|header|authorization)/.test(normalized)) return true;
+  return /(url|uri|source|src|href)$/.test(normalized);
 }
 
-function normalizeValue(value, inMediaContext = false) {
-  if (value == null || typeof value === 'string' || typeof value === 'boolean') return value;
+function sanitizeTransportValue(value, inMediaContext = false) {
+  if (value === undefined) return DROP_VALUE;
+  if (value == null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return inMediaContext && isExternalUrl(value) ? DROP_VALUE : value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.map((item) => normalizeValue(item, inMediaContext));
+  if (Array.isArray(value)) {
+    const normalized = [];
+    for (const item of value) {
+      const next = sanitizeTransportValue(item, inMediaContext);
+      if (next !== DROP_VALUE) normalized.push(next);
+    }
+    return normalized;
+  }
   if (typeof value !== 'object') return null;
 
   const normalized = {};
   for (const key of Object.keys(value).sort()) {
-    if (isSensitiveKey(key, inMediaContext)) continue;
-    const next = normalizeValue(value[key], inMediaContext || isMediaContextKey(key));
-    if (next !== undefined) normalized[key] = next;
+    if (isSensitiveTransportKey(key)) continue;
+    const next = sanitizeTransportValue(value[key], inMediaContext || isMediaContextKey(key));
+    if (next !== DROP_VALUE) normalized[key] = next;
   }
   return normalized;
 }
 
+function projectPublicValue(value, allowUrl = false) {
+  if (value === undefined) return DROP_VALUE;
+  if (value == null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return !allowUrl && isExternalUrl(value) ? DROP_VALUE : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) {
+    const projected = [];
+    for (const item of value) {
+      const next = projectPublicValue(item, allowUrl);
+      if (next !== DROP_VALUE) projected.push(next);
+    }
+    return projected;
+  }
+  if (typeof value !== 'object') return null;
+
+  const projected = {};
+  for (const key of Object.keys(value).sort()) {
+    const normalizedKey = normalizeKey(key);
+    const rawValue = value[key];
+    if (PUBLIC_CONTAINER_KEYS.has(normalizedKey)) {
+      if (!rawValue || typeof rawValue !== 'object') continue;
+      const next = projectPublicValue(rawValue);
+      if (next !== DROP_VALUE) projected[key] = next;
+      continue;
+    }
+    if (!PUBLIC_VALUE_KEYS.has(normalizedKey)) continue;
+    const next = projectPublicValue(rawValue, normalizedKey === 'coverurl');
+    if (next !== DROP_VALUE) projected[key] = next;
+  }
+  return projected;
+}
+
 function normalizeSection(section) {
   if (!section || typeof section !== 'object' || Array.isArray(section)) return null;
-  return normalizeValue(section);
+  return projectPublicValue(section);
 }
 
 function sameValue(left, right) {
@@ -43,13 +160,12 @@ function sameValue(left, right) {
 }
 
 function cloneValue(value) {
-  return normalizeValue(value);
+  return sanitizeTransportValue(value);
 }
 
 function cloneSection(section) {
-  return section == null ? null : cloneValue(section);
+  return section == null ? null : projectPublicValue(section);
 }
-
 function lyricsBelongToTrack(lyrics, track, requiresTrackBinding) {
   if (lyrics == null) return true;
   if (track == null) return false;
@@ -70,6 +186,7 @@ function createRequestConflictError(requestId) {
 function createPlayerBridge({
   clock = () => Date.now(),
   createRequestId,
+  createAttemptId,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   dispatchCommand = () => {},
@@ -83,6 +200,7 @@ function createPlayerBridge({
   let trackRevision = 0;
   let lyricsRevision = 0;
   let requiresTrackBoundLyrics = false;
+  let disposed = false;
   let activeCommand = null;
   const queuedCommands = [];
   const pendingCommands = new Map();
@@ -90,6 +208,7 @@ function createPlayerBridge({
   const makeRequestId = typeof createRequestId === 'function'
     ? createRequestId
     : () => `player-command-${clock()}-${++generatedRequestNumber}`;
+  const makeAttemptId = typeof createAttemptId === 'function' ? createAttemptId : randomUUID;
   const sendCommand = typeof dispatchCommand === 'function' ? dispatchCommand : () => {};
 
   function receiveHeartbeat(payload = {}) {
@@ -187,6 +306,14 @@ function createPlayerBridge({
     return { code: fallbackCode };
   }
 
+  function commandFailure(requestId, code) {
+    return {
+      requestId,
+      ok: false,
+      error: { code },
+    };
+  }
+
   function completeCommand(command, response) {
     if (activeCommand !== command) return false;
     if (command.timeoutHandle !== undefined && typeof clearTimeoutFn === 'function') {
@@ -201,10 +328,22 @@ function createPlayerBridge({
   }
 
   function dispatchNextCommand() {
-    if (activeCommand || queuedCommands.length === 0) return;
+    if (disposed || activeCommand || queuedCommands.length === 0) return;
 
     const command = queuedCommands.shift();
     activeCommand = command;
+    try {
+      const rawAttempt = makeAttemptId();
+      command.attempt = rawAttempt == null ? '' : String(rawAttempt);
+      if (!command.attempt) throw new TypeError('A renderer command attempt must have an ID.');
+    } catch (error) {
+      completeCommand(command, {
+        requestId: command.requestId,
+        ok: false,
+        error: { code: 'renderer-attempt-unavailable' },
+      });
+      return;
+    }
     command.timeoutHandle = setTimeoutFn(() => {
       completeCommand(command, {
         requestId: command.requestId,
@@ -216,6 +355,7 @@ function createPlayerBridge({
     try {
       const dispatchResult = sendCommand({
         requestId: command.requestId,
+        attempt: command.attempt,
         command: command.command,
         payload: cloneValue(command.payload),
       });
@@ -245,6 +385,7 @@ function createPlayerBridge({
       return Promise.reject(error);
     }
     command.signature = commandSignature(command);
+    if (disposed) return Promise.resolve(commandFailure(command.requestId, 'renderer-disposed'));
 
     pruneResultCache();
     const cached = resultCache.get(command.requestId);
@@ -260,6 +401,13 @@ function createPlayerBridge({
       if (pending.signature !== command.signature) return Promise.reject(createRequestConflictError(command.requestId));
       return pending.promise;
     }
+    if (pendingCommands.size >= COMMAND_QUEUE_MAX_ENTRIES) {
+      return Promise.resolve({
+        requestId: command.requestId,
+        ok: false,
+        error: { code: 'renderer-queue-full' },
+      });
+    }
 
     command.promise = new Promise((resolve) => {
       command.resolve = resolve;
@@ -270,9 +418,36 @@ function createPlayerBridge({
     return command.promise;
   }
 
+  function dispose() {
+    if (disposed) return false;
+    disposed = true;
+
+    const active = activeCommand;
+    activeCommand = null;
+    if (active) {
+      if (active.timeoutHandle !== undefined && typeof clearTimeoutFn === 'function') {
+        clearTimeoutFn(active.timeoutHandle);
+      }
+      pendingCommands.delete(active.requestId);
+      active.resolve(commandFailure(active.requestId, 'renderer-disposed'));
+    }
+    while (queuedCommands.length > 0) {
+      const queued = queuedCommands.shift();
+      pendingCommands.delete(queued.requestId);
+      queued.resolve(commandFailure(queued.requestId, 'renderer-disposed'));
+    }
+    pendingCommands.clear();
+    resultCache.clear();
+    return true;
+  }
   function receiveCommandReceipt(receipt) {
     const requestId = receipt?.requestId == null ? '' : String(receipt.requestId);
-    if (!activeCommand || activeCommand.requestId !== requestId) return false;
+    const attempt = receipt?.attempt == null ? '' : String(receipt.attempt);
+    if (
+      !activeCommand
+      || activeCommand.requestId !== requestId
+      || activeCommand.attempt !== attempt
+    ) return false;
 
     const response = receipt?.ok === false
       ? {
@@ -289,6 +464,7 @@ function createPlayerBridge({
   }
 
   return {
+    dispose,
     enqueueCommand,
     getState,
     receiveCommandReceipt,
@@ -297,6 +473,7 @@ function createPlayerBridge({
 }
 
 module.exports = {
+  COMMAND_QUEUE_MAX_ENTRIES,
   COMMAND_RESULT_CACHE_MAX_ENTRIES,
   COMMAND_RESULT_CACHE_TTL_MS,
   RENDERER_COMMAND_TIMEOUT_MS,

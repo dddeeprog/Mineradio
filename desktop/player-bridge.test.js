@@ -146,11 +146,13 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
 
   let now = 40_000;
   let generatedId = 0;
+  let generatedAttempt = 0;
   const dispatched = [];
   const timers = [];
   const bridge = createPlayerBridge({
     clock: () => now,
     createRequestId: () => `generated-${++generatedId}`,
+    createAttemptId: () => `attempt-${++generatedAttempt}`,
     setTimeoutFn(callback, delay) {
       const timer = { callback, delay, cleared: false };
       timers.push(timer);
@@ -180,6 +182,7 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   assert.equal(dispatched.length, 1);
   assert.deepEqual(dispatched[0], {
     requestId: 'same',
+    attempt: 'attempt-1',
     command: 'play',
     payload: { at: 0 },
   });
@@ -191,6 +194,7 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   assert.equal(
     bridge.receiveCommandReceipt({
       requestId: 'same',
+      attempt: dispatched[0].attempt,
       ok: true,
       result: { accepted: true, audioUrl: 'https://audio.example/secret.mp3' },
     }),
@@ -206,7 +210,12 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   assert.equal(dispatched.length, 2);
   assert.equal(dispatched[1].requestId, 'queued');
 
-  assert.equal(bridge.receiveCommandReceipt({ requestId: 'queued', ok: true, result: { moved: true } }), true);
+  assert.equal(bridge.receiveCommandReceipt({
+    requestId: 'queued',
+    attempt: dispatched[1].attempt,
+    ok: true,
+    result: { moved: true },
+  }), true);
   await queued;
   assert.deepEqual(
     await bridge.enqueueCommand({ requestId: 'same', command: 'play', payload: { at: 0 } }),
@@ -216,7 +225,12 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
 
   const generated = bridge.enqueueCommand({ command: 'seek', payload: { seconds: 5 } });
   assert.equal(dispatched[2].requestId, 'generated-1');
-  bridge.receiveCommandReceipt({ requestId: 'generated-1', ok: true, result: { seeked: true } });
+  bridge.receiveCommandReceipt({
+    requestId: 'generated-1',
+    attempt: dispatched[2].attempt,
+    ok: true,
+    result: { seeked: true },
+  });
   await generated;
 
   const timedOut = bridge.enqueueCommand({ requestId: 'timeout', command: 'pause', payload: {} });
@@ -230,7 +244,12 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   });
 
   const ttlRequest = bridge.enqueueCommand({ requestId: 'ttl', command: 'play', payload: {} });
-  bridge.receiveCommandReceipt({ requestId: 'ttl', ok: true, result: { accepted: true } });
+  bridge.receiveCommandReceipt({
+    requestId: 'ttl',
+    attempt: dispatched.at(-1).attempt,
+    ok: true,
+    result: { accepted: true },
+  });
   await ttlRequest;
   const dispatchesBeforeTtl = dispatched.length;
   now += COMMAND_RESULT_CACHE_TTL_MS - 1;
@@ -239,21 +258,36 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   now += 1;
   const expired = bridge.enqueueCommand({ requestId: 'ttl', command: 'play', payload: {} });
   assert.equal(dispatched.length, dispatchesBeforeTtl + 1);
-  bridge.receiveCommandReceipt({ requestId: 'ttl', ok: true, result: { accepted: true } });
+  bridge.receiveCommandReceipt({
+    requestId: 'ttl',
+    attempt: dispatched.at(-1).attempt,
+    ok: true,
+    result: { accepted: true },
+  });
   await expired;
 
   const bounded = [];
   for (let index = 0; index <= COMMAND_RESULT_CACHE_MAX_ENTRIES; index += 1) {
     const requestId = `bounded-${index}`;
     const request = bridge.enqueueCommand({ requestId, command: 'seek', payload: { position: index } });
-    bridge.receiveCommandReceipt({ requestId, ok: true, result: { position: index } });
+    bridge.receiveCommandReceipt({
+      requestId,
+      attempt: dispatched.at(-1).attempt,
+      ok: true,
+      result: { position: index },
+    });
     bounded.push(request);
   }
   await Promise.all(bounded);
 
   const evicted = bridge.enqueueCommand({ requestId: 'bounded-0', command: 'seek', payload: { position: 0 } });
   assert.equal(dispatched.at(-1).requestId, 'bounded-0');
-  bridge.receiveCommandReceipt({ requestId: 'bounded-0', ok: true, result: { position: 0 } });
+  bridge.receiveCommandReceipt({
+    requestId: 'bounded-0',
+    attempt: dispatched.at(-1).attempt,
+    ok: true,
+    result: { position: 0 },
+  });
   await evicted;
 });
 
@@ -423,4 +457,210 @@ test('keeps_bound_lyrics_when_late_unbound_lyrics_arrive', () => {
   const snapshot = bridge.getState();
   assert.deepEqual(snapshot.lyrics, confirmed.lyrics);
   assert.equal(snapshot.lyricsRevision, confirmed.lyricsRevision);
+});
+
+test('projects_safe_public_state_without_transport_or_credentials', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 110_000 });
+
+  bridge.receiveHeartbeat({
+    state: {
+      authToken: 'private-token',
+      coverUrl: 'https://image.example/cover.jpg',
+      headers: { authorization: 'Bearer private-token' },
+      mediaUrl: 'https://audio.example/song-a.mp3?token=private',
+      playbackState: {
+        playing: true,
+        progress: 0.5,
+        source: 'https://audio.example/signed-source?token=private',
+      },
+    },
+    track: {
+      authToken: 'private-token',
+      coverUrl: 'https://image.example/cover.jpg',
+      headers: { cookie: 'private-cookie' },
+      id: 'song-a',
+      mediaUrl: 'https://audio.example/song-a.mp3?token=private',
+      title: 'Song A',
+    },
+    lyrics: { trackId: 'song-a', lines: ['safe'] },
+  });
+
+  const snapshot = bridge.getState();
+  assert.deepEqual(snapshot.state, {
+    coverUrl: 'https://image.example/cover.jpg',
+    playbackState: { playing: true, progress: 0.5 },
+  });
+  assert.deepEqual(snapshot.track, {
+    coverUrl: 'https://image.example/cover.jpg',
+    id: 'song-a',
+    title: 'Song A',
+  });
+  assert.doesNotMatch(JSON.stringify(snapshot), /private-token|private-cookie|audio\.example/);
+});
+
+test('requires_attempt_to_complete_reused_request_id', async () => {
+  const { COMMAND_RESULT_CACHE_TTL_MS, createPlayerBridge } = loadPlayerBridge();
+  let now = 120_000;
+  let attemptNumber = 0;
+  const dispatched = [];
+  const timers = [];
+  const bridge = createPlayerBridge({
+    clock: () => now,
+    createAttemptId: () => `attempt-${++attemptNumber}`,
+    setTimeoutFn(callback, delay) {
+      const timer = { callback, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeoutFn(timer) {
+      timer.cleared = true;
+    },
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const first = bridge.enqueueCommand({ requestId: 'reuse', command: 'play', payload: {} });
+  assert.equal(dispatched[0].attempt, 'attempt-1');
+  timers[0].callback();
+  assert.deepEqual(await first, {
+    requestId: 'reuse',
+    ok: false,
+    error: { code: 'renderer-timeout' },
+  });
+
+  now += COMMAND_RESULT_CACHE_TTL_MS;
+  const second = bridge.enqueueCommand({ requestId: 'reuse', command: 'play', payload: {} });
+  assert.equal(dispatched[1].attempt, 'attempt-2');
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'reuse',
+      attempt: 'attempt-1',
+      ok: true,
+      result: { stale: true },
+    }),
+    false,
+  );
+
+  let secondSettled = false;
+  second.then(() => {
+    secondSettled = true;
+  });
+  await Promise.resolve();
+  assert.equal(secondSettled, false);
+
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'reuse',
+      attempt: 'attempt-2',
+      ok: true,
+      result: { current: true },
+    }),
+    true,
+  );
+  assert.deepEqual(await second, {
+    requestId: 'reuse',
+    ok: true,
+    result: { current: true },
+  });
+});
+
+test('bounds_pending_commands_with_stable_overload_result', async () => {
+  const { COMMAND_QUEUE_MAX_ENTRIES, createPlayerBridge } = loadPlayerBridge();
+  assert.equal(COMMAND_QUEUE_MAX_ENTRIES, 256);
+
+  const dispatched = [];
+  const bridge = createPlayerBridge({
+    createAttemptId: () => 'attempt',
+    setTimeoutFn() {
+      return { cleared: false };
+    },
+    clearTimeoutFn(timer) {
+      timer.cleared = true;
+    },
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const pending = [];
+  for (let index = 0; index < COMMAND_QUEUE_MAX_ENTRIES; index += 1) {
+    pending.push(bridge.enqueueCommand({
+      requestId: `queued-${index}`,
+      command: 'seek',
+      payload: { position: index },
+    }));
+  }
+
+  assert.equal(dispatched.length, 1);
+  assert.deepEqual(
+    await bridge.enqueueCommand({ requestId: 'overflow', command: 'seek', payload: { position: 999 } }),
+    {
+      requestId: 'overflow',
+      ok: false,
+      error: { code: 'renderer-queue-full' },
+    },
+  );
+  assert.equal(dispatched.length, 1);
+  bridge.dispose();
+  const disposed = await Promise.all(pending);
+  assert.equal(disposed.every((result) => result.error?.code === 'renderer-disposed'), true);
+});
+
+test('dispose_clears_timers_and_completes_pending_commands', async () => {
+  let attemptNumber = 0;
+  const dispatched = [];
+  const timers = [];
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => `attempt-${++attemptNumber}`,
+    setTimeoutFn(callback, delay) {
+      const timer = { callback, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeoutFn(timer) {
+      timer.cleared = true;
+    },
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const active = bridge.enqueueCommand({ requestId: 'active', command: 'play', payload: {} });
+  const queued = bridge.enqueueCommand({ requestId: 'queued', command: 'next', payload: {} });
+  assert.equal(dispatched.length, 1);
+  assert.equal(timers[0].cleared, false);
+
+  bridge.dispose();
+
+  assert.equal(timers[0].cleared, true);
+  assert.deepEqual(await active, {
+    requestId: 'active',
+    ok: false,
+    error: { code: 'renderer-disposed' },
+  });
+  assert.deepEqual(await queued, {
+    requestId: 'queued',
+    ok: false,
+    error: { code: 'renderer-disposed' },
+  });
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'active',
+      attempt: 'attempt-1',
+      ok: true,
+      result: { accepted: true },
+    }),
+    false,
+  );
+  assert.deepEqual(
+    await bridge.enqueueCommand({ requestId: 'after-dispose', command: 'pause', payload: {} }),
+    {
+      requestId: 'after-dispose',
+      ok: false,
+      error: { code: 'renderer-disposed' },
+    },
+  );
+  assert.equal(dispatched.length, 1);
 });
