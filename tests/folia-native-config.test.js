@@ -89,6 +89,76 @@ test('migrates legacy Folia modes and retires the removed orbit effect', () => {
   );
 });
 
+test('leaves version 1 native config migration unchanged', () => {
+  const migrated = migrateLegacyNativeLyricConfig({
+    version: 1,
+    mode: 'classic',
+    common: { scale: 1.2 },
+  }, {
+    visualMode: 'cappella',
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'monet',
+  });
+
+  assert.equal(migrated.mode, 'classic');
+  assert.equal(migrated.common.scale, 1.2);
+});
+
+test('gives explicit legacy visualMode priority over inspired presets', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    visualMode: 'cappella',
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'monet',
+  }).mode, 'cappella');
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    visualMode: 'unknown',
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'monet',
+  }).mode, 'mineradio-3d');
+});
+
+test('migrates the archived classic inspired preset without a visualMode', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'classic',
+  }).mode, 'classic');
+});
+
+test('migrates the archived partita inspired preset without a visualMode', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'partita',
+  }).mode, 'partita');
+});
+
+test('migrates the archived monet inspired preset when visualMode is empty', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    visualMode: '',
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'monet',
+  }).mode, 'monet');
+});
+
+test('migrates a supported inspired preset when its visual flag is absent', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredPreset: 'monet',
+  }).mode, 'monet');
+});
+
+test('falls back to Mineradio 3D for disabled, invalid, or missing inspired presets', () => {
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredVisual: false,
+    foliaInspiredPreset: 'monet',
+  }).mode, 'mineradio-3d');
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredVisual: true,
+    foliaInspiredPreset: 'unknown',
+  }).mode, 'mineradio-3d');
+  assert.equal(migrateLegacyNativeLyricConfig(null, {
+    foliaInspiredVisual: true,
+  }).mode, 'mineradio-3d');
+});
+
 test('patches config and exports asset ids without local paths or blob urls', () => {
   const patched = patchNativeLyricConfig({}, {
     mode: 'cappella',

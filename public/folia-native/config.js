@@ -245,8 +245,19 @@
       auto: 'mineradio-3d',
       minimal: 'mineradio-3d',
     };
+    var visualMode = legacyFoliaFx.visualMode;
+    var inspiredPreset = legacyFoliaFx.foliaInspiredPreset;
+    var hasExplicitVisualMode = visualMode != null && visualMode !== '';
+    var hasSupportedInspiredPreset = inspiredPreset === 'classic'
+      || inspiredPreset === 'partita'
+      || inspiredPreset === 'monet';
+    var mode = hasExplicitVisualMode
+      ? modeMap[visualMode] || DEFAULT_NATIVE_LYRIC_CONFIG.mode
+      : legacyFoliaFx.foliaInspiredVisual !== false && hasSupportedInspiredPreset
+        ? oneOf(inspiredPreset, MODES, DEFAULT_NATIVE_LYRIC_CONFIG.mode)
+        : DEFAULT_NATIVE_LYRIC_CONFIG.mode;
     return normalizeNativeLyricConfig({
-      mode: modeMap[legacyFoliaFx.visualMode] || 'mineradio-3d',
+      mode: mode,
       enabled: legacyFoliaFx.enabled !== false,
       common: {
         scale: legacyFoliaFx.lyricScale,
