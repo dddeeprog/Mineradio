@@ -5,12 +5,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const credentialStoreModule = require('./credential-store');
 const {
   CREDENTIAL_SCHEMA,
   SUPPORTED_CREDENTIAL_PROVIDERS,
   createCredentialStore,
   writeFileAtomic,
-} = require('./credential-store');
+} = credentialStoreModule;
 
 const TEST_NOW = '2026-07-28T12:34:56.000Z';
 
@@ -91,6 +92,18 @@ test('exports the exact supported provider contract', () => {
   assert.equal(Object.isFrozen(SUPPORTED_CREDENTIAL_PROVIDERS), true);
 });
 
+test('exports only the credential store API and required atomic write helper', () => {
+  assert.deepEqual(
+    Object.keys(credentialStoreModule).sort(),
+    [
+      'CREDENTIAL_SCHEMA',
+      'SUPPORTED_CREDENTIAL_PROVIDERS',
+      'createCredentialStore',
+      'writeFileAtomic',
+    ].sort(),
+  );
+});
+
 test('persists only encrypted envelope bytes and reads one provider', () => {
   const safeStorage = createSafeStorage();
   const disk = createMemoryDisk();
@@ -147,6 +160,25 @@ test('get returns a fresh deep copy of credential data', () => {
   assert.notStrictEqual(store.get('netease'), store.get('netease'));
 });
 
+test('preserves every recursively JSON-safe credential value', () => {
+  const disk = createMemoryDisk();
+  const store = createEncryptedStore(disk);
+  const credential = {
+    accountId: 'json-safe',
+    nullable: null,
+    string: 'value',
+    boolean: false,
+    number: -12.5,
+    array: [null, 'nested', true, 42, { deeper: ['value'] }],
+    object: { nested: { zero: 0 } },
+  };
+
+  store.set('spotify', credential);
+
+  assert.deepEqual(store.get('spotify'), credential);
+  assert.deepEqual(createEncryptedStore(disk).get('spotify'), credential);
+});
+
 test('a missing credential file starts as an empty encrypted store', () => {
   const disk = createMemoryDisk();
   const store = createEncryptedStore(disk);
@@ -158,6 +190,21 @@ test('a missing credential file starts as an empty encrypted store', () => {
     persistenceAvailable: true,
     providers: [],
   });
+  assert.equal(disk.calls.writes, 0);
+  assert.equal(disk.calls.removes, 0);
+});
+
+test('an existing empty ciphertext file is corrupt and remains untouched', () => {
+  const ciphertext = Buffer.alloc(0);
+  const disk = createMemoryDisk(ciphertext);
+
+  assert.throws(
+    () => createEncryptedStore(disk),
+    error => error.code === 'CREDENTIAL_STORE_CORRUPT'
+      && error.message === 'Credential store data is corrupt',
+  );
+  assert.deepEqual(disk.value(), ciphertext);
+  assert.equal(disk.calls.reads, 1);
   assert.equal(disk.calls.writes, 0);
   assert.equal(disk.calls.removes, 0);
 });
@@ -251,6 +298,63 @@ test('rejects credentials that are not plain objects', () => {
     );
   }
 });
+
+const INVALID_NESTED_CREDENTIALS = [
+  ['undefined object field', () => ({
+    nested: { secret: 'nested-secret', value: undefined },
+  })],
+  ['function array entry', () => ({
+    nested: ['nested-secret', () => 'value'],
+  })],
+  ['symbol value', () => ({
+    nested: { secret: 'nested-secret', value: Symbol('value') },
+  })],
+  ['bigint array entry', () => ({
+    nested: ['nested-secret', 1n],
+  })],
+  ['NaN value', () => ({
+    nested: { secret: 'nested-secret', value: Number.NaN },
+  })],
+  ['Infinity array entry', () => ({
+    nested: ['nested-secret', Number.POSITIVE_INFINITY],
+  })],
+  ['Date value', () => ({
+    nested: {
+      secret: 'nested-secret',
+      value: new Date('2026-07-28T00:00:00.000Z'),
+    },
+  })],
+  ['Buffer array entry', () => ({
+    nested: ['nested-secret', Buffer.from('buffer-secret')],
+  })],
+  ['custom prototype', () => {
+    const value = Object.create({ inherited: true });
+    value.secret = 'nested-secret';
+    return { nested: value };
+  }],
+  ['circular reference', () => {
+    const value = { secret: 'nested-secret' };
+    value.self = value;
+    return { nested: value };
+  }],
+];
+
+for (const [description, createCredential] of INVALID_NESTED_CREDENTIALS) {
+  test(`rejects nested ${description} without persisting it`, () => {
+    const disk = createMemoryDisk();
+    const store = createEncryptedStore(disk);
+
+    assert.throws(
+      () => store.set('spotify', createCredential()),
+      error => error.code === 'CREDENTIAL_STORE_INVALID_CREDENTIAL'
+        && !serializeError(error).includes('nested-secret')
+        && !serializeError(error).includes('buffer-secret'),
+    );
+    assert.equal(store.get('spotify'), null);
+    assert.equal(disk.calls.writes, 0);
+    assert.equal(disk.calls.removes, 0);
+  });
+}
 
 test('wraps decrypt failures in a stable secret-free corruption error', () => {
   const ciphertext = Buffer.from('raw-ciphertext-secret');

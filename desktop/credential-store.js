@@ -37,16 +37,84 @@ function isPlainObject(value) {
   }
 }
 
+function createInvalidCredentialError() {
+  return createCredentialStoreError(
+    'CREDENTIAL_STORE_INVALID_CREDENTIAL',
+    'Credential must be a JSON-safe plain object',
+  );
+}
+
+function cloneJsonSafeArray(value, activeObjects) {
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes('length')) {
+    throw createInvalidCredentialError();
+  }
+
+  const clone = new Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor
+      || !descriptor.enumerable
+      || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw createInvalidCredentialError();
+    }
+    clone[index] = cloneJsonSafeValue(descriptor.value, activeObjects);
+  }
+  return clone;
+}
+
+function cloneJsonSafeObject(value, activeObjects) {
+  const clone = Object.create(Object.getPrototypeOf(value));
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (typeof key !== 'string'
+      || !descriptor
+      || !descriptor.enumerable
+      || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw createInvalidCredentialError();
+    }
+    Object.defineProperty(clone, key, {
+      configurable: true,
+      enumerable: true,
+      value: cloneJsonSafeValue(descriptor.value, activeObjects),
+      writable: true,
+    });
+  }
+  return clone;
+}
+
+function cloneJsonSafeValue(value, activeObjects) {
+  if (value === null
+    || typeof value === 'string'
+    || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw createInvalidCredentialError();
+    return value;
+  }
+  if (typeof value !== 'object' || activeObjects.has(value)) {
+    throw createInvalidCredentialError();
+  }
+
+  activeObjects.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return cloneJsonSafeArray(value, activeObjects);
+    }
+    if (!isPlainObject(value)) throw createInvalidCredentialError();
+    return cloneJsonSafeObject(value, activeObjects);
+  } finally {
+    activeObjects.delete(value);
+  }
+}
+
 function cloneCredential(value) {
   try {
-    const clone = JSON.parse(JSON.stringify(value));
-    if (!isPlainObject(clone)) throw new Error('invalid credential clone');
-    return clone;
+    if (!isPlainObject(value)) throw createInvalidCredentialError();
+    return cloneJsonSafeValue(value, new Set());
   } catch (_error) {
-    throw createCredentialStoreError(
-      'CREDENTIAL_STORE_INVALID_CREDENTIAL',
-      'Credential must be a JSON-serializable plain object',
-    );
+    throw createInvalidCredentialError();
   }
 }
 
@@ -55,15 +123,6 @@ function assertSupportedProvider(provider) {
     throw createCredentialStoreError(
       'CREDENTIAL_STORE_UNSUPPORTED_PROVIDER',
       'Unsupported credential provider',
-    );
-  }
-}
-
-function assertPlainCredential(credential) {
-  if (!isPlainObject(credential)) {
-    throw createCredentialStoreError(
-      'CREDENTIAL_STORE_INVALID_CREDENTIAL',
-      'Credential must be a JSON-serializable plain object',
     );
   }
 }
@@ -202,10 +261,7 @@ function readEncryptedProviders(filePath, safeStorage, read) {
     );
   }
 
-  if (encrypted == null || (Buffer.isBuffer(encrypted) && encrypted.length === 0)) {
-    return emptyProviders();
-  }
-  if (!Buffer.isBuffer(encrypted)) throw createCorruptError();
+  if (!Buffer.isBuffer(encrypted) || encrypted.length === 0) throw createCorruptError();
 
   try {
     const decrypted = safeStorage.decryptString(Buffer.from(encrypted));
@@ -293,7 +349,6 @@ function createCredentialStore(options = {}) {
 
     set(provider, credential) {
       assertSupportedProvider(provider);
-      assertPlainCredential(credential);
       const credentialCopy = cloneCredential(credential);
       let updatedAt;
       try {
@@ -372,6 +427,5 @@ module.exports = {
   CREDENTIAL_SCHEMA,
   SUPPORTED_CREDENTIAL_PROVIDERS,
   createCredentialStore,
-  isPlainObject,
   writeFileAtomic,
 };
