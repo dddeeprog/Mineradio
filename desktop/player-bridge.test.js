@@ -87,11 +87,11 @@ test('increments_revisions_by_visibility_scope', () => {
   assert.deepEqual(revisions(), { revision: 2, trackRevision: 1, lyricsRevision: 1 });
 
   bridge.receiveHeartbeat({ state: { visible: false }, track: songB, lyrics: null });
-  assert.deepEqual(revisions(), { revision: 2, trackRevision: 2, lyricsRevision: 1 });
+  assert.deepEqual(revisions(), { revision: 2, trackRevision: 2, lyricsRevision: 2 });
   assert.equal(bridge.getState().lyrics, null);
 
   bridge.receiveHeartbeat({ state: { visible: false }, track: songB, lyrics: lyricsB });
-  assert.deepEqual(revisions(), { revision: 2, trackRevision: 2, lyricsRevision: 2 });
+  assert.deepEqual(revisions(), { revision: 2, trackRevision: 2, lyricsRevision: 3 });
 });
 
 test('heartbeats_stamp_local_time_without_bumping_content_revisions', () => {
@@ -305,4 +305,63 @@ test('does_not_accept_lyrics_without_a_current_track', () => {
   assert.equal(snapshot.track, null);
   assert.equal(snapshot.lyrics, null);
   assert.equal(snapshot.lyricsRevision, 0);
+});
+
+test('strips_nested_audio_source_fields', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 70_000 });
+
+  bridge.receiveHeartbeat({
+    state: {
+      audio: {
+        src: 'https://audio.example/song-a.mp3?token=private',
+        source: 'https://audio.example/signed-source?token=private',
+      },
+      stream: {
+        source: 'https://stream.example/song-a?token=private',
+      },
+      coverUrl: 'https://image.example/cover.jpg',
+    },
+    track: { id: 'song-a' },
+    lyrics: { trackId: 'song-a', lines: ['safe'] },
+  });
+
+  assert.deepEqual(bridge.getState().state, {
+    audio: {},
+    coverUrl: 'https://image.example/cover.jpg',
+    stream: {},
+  });
+});
+
+test('rejects_unbound_lyrics_after_a_track_change', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 80_000 });
+
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-a', title: 'Song A' },
+    lyrics: { trackId: 'song-a', lines: ['A current'] },
+  });
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-b', title: 'Song B' },
+    lyrics: null,
+  });
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-b', title: 'Song B' },
+    lyrics: { lines: ['A stale without an owner'] },
+  });
+
+  assert.equal(bridge.getState().lyrics, null);
+
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-b', title: 'Song B' },
+    lyrics: { trackId: 'song-b', lines: ['B current'] },
+  });
+  assert.deepEqual(bridge.getState().lyrics, {
+    trackId: 'song-b',
+    lines: ['B current'],
+  });
 });
