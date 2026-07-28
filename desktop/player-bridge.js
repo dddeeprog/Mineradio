@@ -188,6 +188,46 @@ function projectPublicValue(value, allowUrl = false) {
   return projected;
 }
 
+function isCommandResultCoverUrl(value) {
+  return typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value);
+}
+
+function projectCommandResultSection(value) {
+  if (value === undefined) return DROP_VALUE;
+  if (value == null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return isExternalUrl(value) ? DROP_VALUE : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) {
+    const projected = [];
+    for (const item of value) {
+      const next = projectCommandResultSection(item);
+      if (next !== DROP_VALUE) projected.push(next);
+    }
+    return projected;
+  }
+  if (typeof value !== 'object') return null;
+
+  const projected = {};
+  for (const key of Object.keys(value).sort()) {
+    const normalizedKey = normalizeKey(key);
+    const rawValue = value[key];
+    if (PUBLIC_CONTAINER_KEYS.has(normalizedKey)) {
+      if (!rawValue || typeof rawValue !== 'object') continue;
+      const next = projectCommandResultSection(rawValue);
+      if (next !== DROP_VALUE) projected[key] = next;
+      continue;
+    }
+    if (!PUBLIC_VALUE_KEYS.has(normalizedKey)) continue;
+    if (normalizedKey === 'coverurl') {
+      if (isCommandResultCoverUrl(rawValue)) projected[key] = rawValue;
+      continue;
+    }
+    const next = projectCommandResultSection(rawValue);
+    if (next !== DROP_VALUE) projected[key] = next;
+  }
+  return Object.keys(projected).length > 0 ? projected : DROP_VALUE;
+}
+
 function projectCommandResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
@@ -211,7 +251,7 @@ function projectCommandResult(value) {
       continue;
     }
     if (normalizedKey === 'coverurl') {
-      if (typeof rawValue === 'string' && /^https?:\/\/[^\s]+$/i.test(rawValue)) projected[key] = rawValue;
+      if (isCommandResultCoverUrl(rawValue)) projected[key] = rawValue;
       continue;
     }
     if (
@@ -220,8 +260,8 @@ function projectCommandResult(value) {
       || typeof rawValue !== 'object'
       || Array.isArray(rawValue)
     ) continue;
-    const section = projectPublicValue(rawValue);
-    if (Object.keys(section).length > 0) projected[key] = section;
+    const section = projectCommandResultSection(rawValue);
+    if (section !== DROP_VALUE) projected[key] = section;
   }
   return projected;
 }

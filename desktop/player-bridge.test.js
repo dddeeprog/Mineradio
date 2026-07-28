@@ -866,3 +866,63 @@ test('projects_command_results_to_explicit_public_dto', async () => {
     /private-api-key|private-password|private-key|private-session|private-deep|private-nested/i,
   );
 });
+
+test('restricts_nested_command_result_cover_urls_to_http', async () => {
+  const dispatched = [];
+  const bridge = loadPlayerBridge().createPlayerBridge({
+    createAttemptId: () => 'attempt-1',
+    setTimeoutFn: () => ({}),
+    clearTimeoutFn: () => {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+  });
+
+  const request = bridge.enqueueCommand({
+    requestId: 'nested-cover-url',
+    command: 'play',
+    payload: {},
+  });
+  assert.equal(
+    bridge.receiveCommandReceipt({
+      requestId: 'nested-cover-url',
+      attempt: dispatched[0].attempt,
+      ok: true,
+      result: {
+        playbackState: {
+          coverUrl: 'data:audio/mpeg;base64,private-audio',
+          playing: true,
+          transport: { coverUrl: 'javascript:alert(1)' },
+        },
+        state: {
+          coverUrl: 'blob:https://audio.example/private',
+          metadata: { coverUrl: 'https://image.example/nested-cover.jpg' },
+          progress: 0.5,
+        },
+        track: {
+          coverUrl: 'file:///C:/private-cover.jpg',
+          title: 'Song A',
+        },
+      },
+    }),
+    true,
+  );
+
+  const response = await request;
+  assert.deepEqual(response, {
+    requestId: 'nested-cover-url',
+    ok: true,
+    result: {
+      playbackState: { playing: true },
+      state: {
+        metadata: { coverUrl: 'https://image.example/nested-cover.jpg' },
+        progress: 0.5,
+      },
+      track: { title: 'Song A' },
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /data:audio|blob:|file:|javascript:/i,
+  );
+});
