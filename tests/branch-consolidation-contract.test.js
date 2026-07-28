@@ -4,15 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
-const indexHtml = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
 test('source navigation keeps online, playlists, local library, and online URL routes', () => {
   for (const id of ['source-nav-online', 'source-nav-playlists', 'source-nav-local']) {
-    assert.match(indexHtml, new RegExp(`id="${id}"`));
+    assert.match(html, new RegExp(`id="${id}"`));
   }
-  assert.match(indexHtml, /\/api\/qq\/song\/url/);
-  assert.match(indexHtml, /\/api\/song\/url/);
+  assert.match(html, /\/api\/qq\/song\/url/);
+  assert.match(html, /\/api\/song\/url/);
 });
 
 test('unified player retains local library and desktop state modules', () => {
@@ -31,6 +31,7 @@ test('unified player retains local library and desktop state modules', () => {
 });
 
 test('native Folia runtime remains while the retired stage build stays absent', () => {
+  assert.doesNotMatch(html, /folia-native-stage-(?:state|renderers|ui)\.js/);
   assert.equal(fs.existsSync(path.join(repoRoot, 'public', 'folia-native', 'runtime.js')), true);
   assert.equal(fs.existsSync(path.join(repoRoot, 'build', 'folia-stage.js')), false);
 });

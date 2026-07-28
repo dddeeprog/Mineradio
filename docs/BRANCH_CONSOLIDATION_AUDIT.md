@@ -121,17 +121,52 @@
 
 本节覆盖 `master..archive/pre-unify-merge-two-20260728` 中的每一个提交。分类以当前统一分支的真实能力、代码位置和回归合同为准；本 Task 只建立审计与合同，不迁移产品行为。
 
-| 归档提交 | 分类 | 审计结论 |
-| --- | --- | --- |
-| `d628697`、`9931afa`、`42394bc`、`0ce5b7e`、`8968c90`、`d3f4b67`、`1380efa`、`40b19e3`、`f13785d`、`3d377f5`、`f7b555c`、`d6f4c0a`、`2d072d5`、`8e269d2`、`67c009f`、`8a7c76b`、`db37605`、`f09dccf`、`da5a018`、`cc108ea`、`b58c6d9` | 审计、文档、chore 或 test-only；无需产品迁移 | 它们只建立审计、计划、分类器或批次记录；`42394bc` 的 `.worktrees` 忽略规则已在当前分支迁入。 |
-| `027da04`、`d18da77`、`94ff4dc`、`bb35735`、`8f48927`、`fef347a` | 桌面 shell、IPC、控制与状态已更早迁入 | 当前 `desktop/shell-state.js`、`desktop/overlay-state.js`、main/preload 连接及现有桌面测试覆盖该能力。 |
-| `5e2acf2`、`b913567` | 本地资产 API 已更早迁入并加强 | 当前 `desktop/local-assets.js` 维持受授权根目录、协议 URL 和受限读取边界。 |
-| `a9a9a4c` | 本地媒体/歌词资产能力已迁入，且有刻意安全加固 | 归档允许裸名称 direct `FileList` 条目按同 stem 关联歌词；当前要求经过验证的非空同目录路径。带真实相对路径的文件夹导入仍保留该功能。这是安全加固，不是迁移缺口。 |
-| `9bf71e7`、`aa5c967`、`f9ed0fb`、`38f7a8f` | merge-only | 仅合并前序已分类能力，没有独立产品行为需要迁移。 |
-| `2788df9`、`c337444`、`85a542e` | 本地媒体库/状态/节奏缓存已更早迁入 | 当前 `public/local-library.js`、`public/local-media-assets.js`、`public/local-beat-cache.js` 及其测试保留能力。 |
-| `bd790db`、`351019b`、`92514c4` | 已迁入或当前等价 | 在线入口、来源导航和调色板帮助能力分别由当前导航、页面路由与 `public/palette-helpers.js` 覆盖。 |
-| `5ff55d8`、`ee637d0`、`7ec1fb3` | merge-only | 仅合并已分类的在线入口、来源导航和调色板能力。 |
-| `39a1ade` | 唯一真实当前对等缺口 | 桌面覆盖层 renderer/control 行为尚未完整迁入：多行/对齐 payload 与 renderer、锁定控制、壁纸启用 UI。此 Task 只记录缺口，不实施。 |
+| 提交 | 实际主题 | 结论 | 证据/说明 |
+| --- | --- | --- | --- |
+| `d628697` | `docs: add oirge integration design` | 非产品审计/计划文件 | 仅集成设计文档。 |
+| `9931afa` | `docs: add oirge audit implementation plan` | 非产品审计/计划文件 | 仅审计实施计划。 |
+| `42394bc` | `chore: ignore local worktrees` | 非产品审计/计划文件 | `.worktrees` 忽略规则已在当前分支存在。 |
+| `0ce5b7e` | `test: add oirge audit classifiers` | 非产品审计/计划文件 | 仅审计分类器测试。 |
+| `8968c90` | `test: add oirge audit classifiers` | 非产品审计/计划文件 | 仅审计分类器测试修订。 |
+| `d3f4b67` | `fix: constrain oirge audit route extraction` | 非产品审计/计划文件 | 仅审计路由提取规则。 |
+| `1380efa` | `fix: include changed dev dependency audit` | 非产品审计/计划文件 | 仅依赖审计范围。 |
+| `40b19e3` | `fix: cover additional oirge audit markers` | 非产品审计/计划文件 | 仅审计标记覆盖。 |
+| `f13785d` | `feat: add oirge audit report tool` | 非产品审计/计划文件 | 仅审计报告工具。 |
+| `3d377f5` | `fix: prevent desktop lyrics audit pollution` | 非产品审计/计划文件 | 仅审计结果过滤。 |
+| `f7b555c` | `fix: classify desktop lyrics constants as overlays` | 非产品审计/计划文件 | 仅审计分类规则。 |
+| `d6f4c0a` | `docs: add raw oirge integration audit` | 非产品审计/计划文件 | 仅原始审计文档。 |
+| `2d072d5` | `docs: add oirge feature audit` | 非产品审计/计划文件 | 仅特性审计文档。 |
+| `8e269d2` | `docs: clarify ui state audit scope` | 非产品审计/计划文件 | 仅审计范围说明。 |
+| `67c009f` | `docs: add oirge conflict table` | 非产品审计/计划文件 | 仅冲突表。 |
+| `8a7c76b` | `docs: finalize oirge audit handoff` | 非产品审计/计划文件 | 仅审计交接记录。 |
+| `db37605` | `docs: add desktop shell batch1 plan` | 非产品审计/计划文件 | 仅桌面 shell 批次计划。 |
+| `027da04` | `test: add desktop shell state helpers` | 当前等价实现 | 当前 `desktop/shell-state.js` 及测试覆盖 shell state helper。 |
+| `d18da77` | `feat: add desktop tray shell state ipc` | 当前等价实现 | 当前 main/preload 的 tray shell IPC 已连接并受 guard 约束。 |
+| `94ff4dc` | `feat: expose desktop shell preload api` | 当前等价实现 | 当前 preload 暴露 tray 与持久 UI state API。 |
+| `bb35735` | `feat: add desktop shell controls` | 当前等价实现 | 当前页面保留 close-to-tray 与 startup 控制。 |
+| `f09dccf` | `docs: log desktop shell batch1` | 非产品审计/计划文件 | 仅桌面 shell 批次记录。 |
+| `da5a018` | `docs: add desktop overlays batch2 plan` | 非产品审计/计划文件 | 仅桌面 overlay 批次计划。 |
+| `8f48927` | `test: add desktop overlay state helpers` | 当前等价实现 | 当前 `desktop/overlay-state.js` 及测试覆盖 state helper。 |
+| `fef347a` | `feat: dedupe desktop lyrics main state` | 当前等价实现 | 当前 main 以稳定签名去重桌面歌词更新。 |
+| `39a1ade` | `feat: add desktop overlay renderer controls` | 真实缺口 | 唯一缺口：桌面 overlay 多行/对齐 payload 与 renderer、锁定控制、壁纸启用 UI 尚未完整迁入；本 Task 不实施。 |
+| `cc108ea` | `docs: add local assets batch3 plan` | 非产品审计/计划文件 | 仅本地资产批次计划。 |
+| `5e2acf2` | `test: add local asset helper` | 当前等价实现 | 当前 `desktop/local-assets.js` 与测试覆盖本地资产 helper。 |
+| `b913567` | `feat: expose local asset desktop api` | 当前等价实现 | 当前 desktop API 使用授权根、协议 URL 与受限读取。 |
+| `b58c6d9` | `docs: log local assets batch3a` | 非产品审计/计划文件 | 仅本地资产批次记录。 |
+| `a9a9a4c` | `feat: parse local media assets` | 当前等价实现 | 归档允许裸名称 direct `FileList` 条目按同 stem 关联歌词；当前要求经过验证的非空同目录路径。带真实相对路径的文件夹导入仍保留该功能。这是安全加固，不是迁移缺口。 |
+| `9bf71e7` | `merge local media assets batch3b` | 当前等价实现 | merge-only；其本地媒体资产能力由当前模块覆盖。 |
+| `2788df9` | `feat: import local music folders` | 当前等价实现 | 当前 `public/local-library.js` 保留本地文件夹导入。 |
+| `aa5c967` | `merge local library import batch3c` | 当前等价实现 | merge-only；其本地库导入能力由当前模块覆盖。 |
+| `c337444` | `feat: remember local library state` | 当前等价实现 | 当前本地库 snapshot/state 能力和测试保留。 |
+| `f9ed0fb` | `merge local library state batch3d` | 当前等价实现 | merge-only；其本地库状态能力由当前模块覆盖。 |
+| `85a542e` | `integrate local beat cache` | 当前等价实现 | 当前 `public/local-beat-cache.js` 及路由测试覆盖缓存。 |
+| `38f7a8f` | `merge local beat cache batch4` | 当前等价实现 | merge-only；其节奏缓存能力由当前模块覆盖。 |
+| `bd790db` | `open online entry` | 当前等价实现 | 当前在线来源导航和在线 URL 路由存在。 |
+| `5ff55d8` | `merge online entry batch5` | 当前等价实现 | merge-only；其在线入口能力由当前导航覆盖。 |
+| `351019b` | `add source navigation` | 当前等价实现 | 当前 online/playlists/local 三个来源导航均存在。 |
+| `ee637d0` | `merge source navigation batch6` | 当前等价实现 | merge-only；其来源导航能力由当前模块覆盖。 |
+| `92514c4` | `add palette helpers` | 已在 Task 7/8/9 迁移 | 已在 Task 9 以当前 `public/palette-helpers.js` 原 blob 迁入。 |
+| `7ec1fb3` | `merge palette helpers batch7` | 已在 Task 7/8/9 迁移 | 已在 Task 9 迁入调色板 helper；本提交仅合并该能力。 |
 
 Task 10 合同测试锁定以下当前能力：在线/歌单/本地来源导航和 QQ/通用在线 URL 路由；本地库、媒体资产、节奏缓存、桌面本地资产、shell 与 overlay state 模块；`public/folia-native/runtime.js` 存在且已退役的 `build/folia-stage.js` 不存在；`check`、`test`、`test:visual`、`verify:artifacts`、`build:win:dir` 脚本可用。
 
