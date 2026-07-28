@@ -784,13 +784,17 @@ test('removes_owned_temporary_descriptor_after_transient_cleanup_failure', async
     );
     await fs.mkdir(descriptorDirectory, { recursive: true });
     await fs.writeFile(foreignTemporaryPath, 'foreign temporary descriptor', 'utf8');
+    const isOwnedDescriptorTemporary = (filePath) =>
+      path.dirname(filePath) === descriptorDirectory &&
+      filePath.endsWith('.tmp') &&
+      filePath !== foreignTemporaryPath;
     const failingFs = {
       ...fs,
       async rename() {
         throw new Error(failureToken);
       },
       async unlink(filePath) {
-        if (filePath.endsWith('.tmp') && filePath !== foreignTemporaryPath) {
+        if (isOwnedDescriptorTemporary(filePath)) {
           temporaryUnlinkAttempts += 1;
           if (temporaryUnlinkAttempts < 3) throw new Error(failureToken);
         }
@@ -798,8 +802,7 @@ test('removes_owned_temporary_descriptor_after_transient_cleanup_failure', async
       },
       async writeFile(filePath, contents, options) {
         if (
-          filePath.endsWith('.tmp') &&
-          filePath !== foreignTemporaryPath &&
+          isOwnedDescriptorTemporary(filePath) &&
           contents === '' &&
           denyFirstSanitize
         ) {
@@ -857,6 +860,10 @@ test('reports_persistent_owned_temporary_cleanup_failure_without_touching_foreig
     let foreignUnlinkAttempts = 0;
     await fs.mkdir(descriptorDirectory, { recursive: true });
     await fs.writeFile(foreignTemporaryPath, 'foreign temporary descriptor', 'utf8');
+    const isOwnedDescriptorTemporary = (filePath) =>
+      path.dirname(filePath) === descriptorDirectory &&
+      filePath.endsWith('.tmp') &&
+      filePath !== foreignTemporaryPath;
     const failingFs = {
       ...fs,
       async rename() {
@@ -864,15 +871,14 @@ test('reports_persistent_owned_temporary_cleanup_failure_without_touching_foreig
       },
       async unlink(filePath) {
         if (filePath === foreignTemporaryPath) foreignUnlinkAttempts += 1;
-        if (filePath.endsWith('.tmp') && filePath !== foreignTemporaryPath) {
+        if (isOwnedDescriptorTemporary(filePath)) {
           throw new Error(failureToken);
         }
         return fs.unlink(filePath);
       },
       async writeFile(filePath, contents, options) {
         if (
-          filePath.endsWith('.tmp') &&
-          filePath !== foreignTemporaryPath &&
+          isOwnedDescriptorTemporary(filePath) &&
           contents === ''
         ) {
           throw new Error(failureToken);
@@ -1759,6 +1765,321 @@ test('continues_after_a_successor_link_reports_failure_after_commit', async () =
   });
 });
 
+test('keeps a live candidate write private from a concurrent publisher', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const firstPid = 4_470;
+    const pendingWriteStarted = createDeferred();
+    const permitPendingWrite = createDeferred();
+    const scannerRetryScheduled = createDeferred();
+    let delayedPendingPath;
+    let delayedPendingText;
+    let delayPendingWrite = true;
+    const delayedWriteFs = {
+      ...fs,
+      async writeFile(filePath, contents, options) {
+        if (
+          delayPendingWrite &&
+          filePath.startsWith(generationDirectory) &&
+          (filePath.endsWith('.pending') || filePath.endsWith('.pending.tmp'))
+        ) {
+          delayPendingWrite = false;
+          delayedPendingPath = filePath;
+          const text = String(contents);
+          delayedPendingText = text.slice(0, Math.max(1, Math.floor(text.length / 2)));
+          await fs.writeFile(filePath, delayedPendingText, options);
+          pendingWriteStarted.resolve();
+          await permitPendingWrite.promise;
+          await fs.appendFile(filePath, text.slice(delayedPendingText.length), 'utf8');
+          return;
+        }
+        return fs.writeFile(filePath, contents, options);
+      },
+    };
+    const scannerTimer = {
+      clearInterval() {},
+      clearTimeout() {},
+      setInterval() {
+        return {};
+      },
+      setTimeout() {
+        scannerRetryScheduled.resolve();
+        return {};
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let firstPublisher;
+    let scannerPublisher;
+    let scannerReadyError = Promise.resolve();
+    try {
+      firstPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_622,
+        clock: () => 10_163_000,
+        fs: delayedWriteFs,
+        instanceId: 'instance-delayed-private-candidate-first',
+        pid: firstPid,
+        timer: createIdleTimer(),
+        token: 'delayed-private-candidate-first-token',
+      });
+      await pendingWriteStarted.promise;
+
+      scannerPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_623,
+        clock: () => 10_163_000,
+        instanceId: 'instance-delayed-private-candidate-scanner',
+        isProcessAlive(candidatePid) {
+          return candidatePid === firstPid;
+        },
+        pid: 4_471,
+        timer: scannerTimer,
+        token: 'delayed-private-candidate-scanner-token',
+      });
+      const scannerReady = scannerPublisher.ready;
+      scannerReadyError = scannerReady.catch((error) => error);
+
+      const scannerOutcome = await Promise.race([
+        scannerRetryScheduled.promise.then(() => 'retry-scheduled'),
+        scannerReady.then(() => 'ready', () => 'rejected'),
+        new Promise((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+      ]);
+      assert.equal(scannerOutcome, 'retry-scheduled');
+      assert.equal(await fs.readFile(delayedPendingPath, 'utf8'), delayedPendingText);
+      assert.deepEqual(
+        await fs.readdir(generationDirectory),
+        [path.basename(delayedPendingPath)],
+      );
+
+      permitPendingWrite.resolve();
+      assert.equal(await firstPublisher.ready, true);
+      assert.equal(
+        await Promise.race([
+          scannerReady.then(() => 'ready', () => 'rejected'),
+          new Promise((resolve) => setTimeout(() => resolve('still-pending'), 20)),
+        ]),
+        'still-pending',
+      );
+    } finally {
+      permitPendingWrite.resolve();
+      await Promise.allSettled([scannerPublisher?.close()]);
+      await scannerReadyError;
+      await Promise.allSettled([firstPublisher?.close()]);
+    }
+  });
+});
+
+test('reclaims a dead private candidate temporary file before publishing', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const crashedPid = 4_472;
+    const crashedLockId = '5b15e031-3ef1-45f0-9708-07dbf77c0121';
+    const crashedTemporaryPath = path.join(
+      generationDirectory,
+      '.candidate.' + crashedPid + '.' + crashedLockId + '.owner.tmp',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(crashedTemporaryPath, '{ partial', 'utf8');
+
+    let livenessChecks = 0;
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_624,
+        clock: () => 10_163_000,
+        instanceId: 'instance-private-candidate-crash-successor',
+        isProcessAlive(candidatePid) {
+          assert.equal(candidatePid, crashedPid);
+          livenessChecks += 1;
+          return false;
+        },
+        pid: 4_473,
+        timer: createIdleTimer(),
+        token: 'private-candidate-crash-successor-token',
+      });
+      assert.equal(await publisher.ready, true);
+      await assert.rejects(fs.access(crashedTemporaryPath), { code: 'ENOENT' });
+      assert.ok(livenessChecks > 0);
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+    }
+  });
+});
+
+test('continues when candidate record links report failure after commit', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const reportedArtifactLinks = new Set();
+    const linkThenThrowFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        const result = await fs.link(sourcePath, destinationPath);
+        const fileName = path.basename(destinationPath);
+        if (
+          destinationPath.startsWith(generationDirectory) &&
+          (fileName.endsWith('.pending') ||
+            /^owner\.[a-f0-9-]+\.json$/i.test(fileName))
+        ) {
+          reportedArtifactLinks.add(fileName);
+          const error = new Error('candidate-record-link-reported-after-commit');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return result;
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_625,
+        clock: () => 10_163_000,
+        fs: linkThenThrowFs,
+        instanceId: 'instance-candidate-record-link-after-commit',
+        pid: 4_474,
+        timer: createIdleTimer(),
+        token: 'candidate-record-link-after-commit-token',
+      });
+      assert.equal(await publisher.ready, true);
+      assert.equal(reportedArtifactLinks.size, 2);
+      assert.equal(
+        (await fs.readdir(generationDirectory)).some((fileName) =>
+          fileName.startsWith('.candidate.') && fileName.endsWith('.tmp'),
+        ),
+        false,
+      );
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+    }
+  });
+});
+
+test('reclaims a released private candidate temp while its pid remains live', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const firstPid = 4_475;
+    const failingFs = {
+      ...fs,
+      async unlink(filePath) {
+        if (
+          filePath.startsWith(generationDirectory) &&
+          path.basename(filePath).startsWith('.candidate.')
+        ) {
+          const error = new Error('candidate-temp-cleanup-failure');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.unlink(filePath);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let failingPublisher;
+    let successorPublisher;
+    try {
+      failingPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_626,
+        clock: () => 10_163_000,
+        fs: failingFs,
+        instanceId: 'instance-released-private-temp-first',
+        pid: firstPid,
+        timer: createIdleTimer(),
+        token: 'released-private-temp-first-token',
+      });
+      await assert.rejects(failingPublisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+        return true;
+      });
+
+      const residueNames = await fs.readdir(generationDirectory);
+      const temporaryName = residueNames.find((fileName) =>
+        fileName.startsWith('.candidate.') && fileName.endsWith('.tmp'),
+      );
+      const releasedName = residueNames.find((fileName) =>
+        fileName.endsWith('.released'),
+      );
+      assert.ok(temporaryName);
+      assert.ok(releasedName);
+
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_627,
+        clock: () => 10_163_000,
+        instanceId: 'instance-released-private-temp-successor',
+        isProcessAlive(candidatePid) {
+          return candidatePid === firstPid;
+        },
+        pid: firstPid,
+        timer: createIdleTimer(),
+        token: 'released-private-temp-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      await assert.rejects(
+        fs.access(path.join(generationDirectory, temporaryName)),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(
+        fs.access(path.join(generationDirectory, releasedName)),
+        { code: 'ENOENT' },
+      );
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+      await Promise.allSettled([failingPublisher?.close()]);
+    }
+  });
+});
+
+test('fails closed for an unrecognized private candidate artifact', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const unknownTemporaryPath = path.join(
+      generationDirectory,
+      '.candidate.unknown.tmp',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(unknownTemporaryPath, 'unknown candidate residue', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_628,
+      clock: () => 10_163_000,
+      instanceId: 'instance-unknown-private-candidate',
+      pid: 4_476,
+      timer: createIdleTimer(),
+      token: 'unknown-private-candidate-token',
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+      return true;
+    });
+    assert.equal(
+      await fs.readFile(unknownTemporaryPath, 'utf8'),
+      'unknown candidate residue',
+    );
+    await publisher.close();
+  });
+});
+
 test('reclaims_an_unreferenced_malformed_pending_candidate', async () => {
   await withTempAppData(async (appData) => {
     const generationDirectory = path.join(
@@ -2117,7 +2438,14 @@ test('releases_an_abandoned_prelink_candidate_and_reclaims_it', async () => {
         }
         return fs.link(sourcePath, destinationPath);
       },
-      async unlink() {
+      async unlink(filePath) {
+        if (
+          filePath.startsWith(generationDirectory) &&
+          path.basename(filePath).startsWith('.candidate.') &&
+          filePath.endsWith('.tmp')
+        ) {
+          return fs.unlink(filePath);
+        }
         const error = new Error('candidate-cleanup-failure');
         error.code = 'EACCES';
         throw error;

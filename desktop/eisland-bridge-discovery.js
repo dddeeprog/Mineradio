@@ -244,6 +244,30 @@ function temporaryGenerationRootPath(generationDirectory, lockId) {
   );
 }
 
+function temporaryGenerationCandidatePath(generationDirectory, owner, kind) {
+  return path.join(
+    generationDirectory,
+    '.candidate.' + owner.pid + '.' + owner.lockId + '.' + kind + '.tmp',
+  );
+}
+
+function parseTemporaryGenerationCandidateFileName(fileName) {
+  const match = typeof fileName === 'string'
+    ? /^\.candidate\.([1-9]\d*)\.([a-f0-9-]+)\.(pending|owner)\.tmp$/i.exec(
+      fileName,
+    )
+    : null;
+  if (!match) return null;
+
+  const pid = Number(match[1]);
+  if (!isPositiveProcessId(pid) || !isValidLockId(match[2])) return null;
+  return {
+    kind: match[3],
+    lockId: match[2],
+    pid,
+  };
+}
+
 function isGenerationOwnerFileName(fileName) {
   if (
     typeof fileName !== 'string' ||
@@ -359,25 +383,99 @@ async function readGenerationCandidateLinkState(
     : 'other';
 }
 
-async function writeGenerationCandidate(fs, generationDirectory, owner) {
-  const ownerPath = generationOwnerPath(generationDirectory, owner.lockId);
-  const pendingPath = generationPendingPath(ownerPath);
-  await fs.writeFile(pendingPath, JSON.stringify(owner), {
-    encoding: 'utf8',
-    flag: 'wx',
-    mode: 0o600,
-  });
+async function readGenerationCandidateRecordState(fs, recordPath, owner) {
+  const record = await readLockOwner(fs, recordPath);
+  if (!record.exists) return 'absent';
+  if (record.error || record.malformed) return 'unknown';
+  return lockOwnersMatch(record.record, owner) ? 'committed' : 'other';
+}
+
+async function publishGenerationCandidateRecord(
+  fs,
+  temporaryPath,
+  recordPath,
+  owner,
+) {
   try {
-    await fs.writeFile(ownerPath, JSON.stringify(owner), {
+    await fs.writeFile(temporaryPath, JSON.stringify(owner), {
       encoding: 'utf8',
       flag: 'wx',
       mode: 0o600,
     });
   } catch (error) {
-    await removeGenerationFile(fs, pendingPath);
-    throw error;
+    const temporary = await readLockOwner(fs, temporaryPath);
+    return temporary.exists
+      ? { cleanupFailed: true, error }
+      : { error };
   }
-  return { ownerPath, pendingPath };
+
+  try {
+    await fs.link(temporaryPath, recordPath);
+  } catch (error) {
+    const recordState = await readGenerationCandidateRecordState(
+      fs,
+      recordPath,
+      owner,
+    );
+    const temporaryRemoved = await removeGenerationFile(fs, temporaryPath);
+    if (!temporaryRemoved || recordState === 'unknown') {
+      return { cleanupFailed: true, error };
+    }
+    if (recordState === 'committed') return { published: true };
+    return { error };
+  }
+
+  return (await removeGenerationFile(fs, temporaryPath))
+    ? { published: true }
+    : { cleanupFailed: true, published: true };
+}
+
+async function writeGenerationCandidate(fs, generationDirectory, owner) {
+  const ownerPath = generationOwnerPath(generationDirectory, owner.lockId);
+  const pendingPath = generationPendingPath(ownerPath);
+  const pendingPublication = await publishGenerationCandidateRecord(
+    fs,
+    temporaryGenerationCandidatePath(generationDirectory, owner, 'pending'),
+    pendingPath,
+    owner,
+  );
+  if (!pendingPublication.published) {
+    return {
+      cleanupFailed: pendingPublication.cleanupFailed,
+      error: pendingPublication.error,
+      ownerPath,
+      pendingPath,
+    };
+  }
+  if (pendingPublication.cleanupFailed) {
+    return { cleanupFailed: true, ownerPath, pendingPath };
+  }
+
+  const ownerPublication = await publishGenerationCandidateRecord(
+    fs,
+    temporaryGenerationCandidatePath(generationDirectory, owner, 'owner'),
+    ownerPath,
+    owner,
+  );
+  if (ownerPublication.published) {
+    return {
+      cleanupFailed: ownerPublication.cleanupFailed,
+      ownerPath,
+      pendingPath,
+      written: !ownerPublication.cleanupFailed,
+    };
+  }
+  if (ownerPublication.cleanupFailed) {
+    return { cleanupFailed: true, ownerPath, pendingPath };
+  }
+  if (!(await removeGenerationFile(fs, pendingPath))) {
+    return { cleanupFailed: true, ownerPath, pendingPath };
+  }
+  return {
+    error: ownerPublication.error,
+    ownerPath,
+    pendingPath,
+  };
 }
 
 async function removeGenerationFile(fs, filePath) {
@@ -909,6 +1007,30 @@ async function cleanupUnreachableGenerationResidue(
   const knownFileNames = new Set(fileNames);
   const pendingOwnerFileNames = new Set();
   for (const fileName of fileNames) {
+    if (!fileName.startsWith('.candidate.')) continue;
+    const temporaryCandidate = parseTemporaryGenerationCandidateFileName(
+      fileName,
+    );
+    if (!temporaryCandidate) return GENERATION_RESIDUE_FAILED;
+    const temporaryPath = path.join(generationDirectory, fileName);
+    const ownerPath = generationOwnerPath(
+      generationDirectory,
+      temporaryCandidate.lockId,
+    );
+    const released = await hasGenerationReleaseMarker(fs, ownerPath);
+    if (
+      !released &&
+      !(await isConfirmedDead(isProcessAlive, temporaryCandidate.pid))
+    ) {
+      return GENERATION_RESIDUE_BLOCKED;
+    }
+    if (!(
+      await removeGenerationFile(fs, temporaryPath)
+    )) {
+      return GENERATION_RESIDUE_FAILED;
+    }
+  }
+  for (const fileName of fileNames) {
     const ownerFileName = generationArtifactOwnerFileName(
       fileName,
       GENERATION_PENDING_SUFFIX,
@@ -1162,19 +1284,16 @@ async function createPublisherGenerationCandidate(
     predecessor,
     released: false,
   };
-  try {
-    await writeGenerationCandidate(fs, generationDirectory, owner);
-  } catch (error) {
-    if (!(await cleanupGenerationCandidate(
-      fs,
-      generation.ownerPath,
-      generation.pendingPath,
-    ))) {
-      generation.cleanupFailed = true;
-      return generation;
-    }
-    throw error;
+  const candidate = await writeGenerationCandidate(
+    fs,
+    generationDirectory,
+    owner,
+  );
+  if (candidate.cleanupFailed) {
+    generation.cleanupFailed = true;
+    return generation;
   }
+  if (!candidate.written) throw candidate.error;
   return generation;
 }
 
