@@ -26,6 +26,7 @@ const {
 const {
   desktopLyricsStateSignature,
   normalizeDesktopLyricsOpacity,
+  shouldIgnoreDesktopLyricsMouse,
 } = require('./overlay-state');
 
 let mainWindow = null;
@@ -1025,7 +1026,7 @@ function rememberDesktopLyricsBounds() {
 
 function applyDesktopLyricsMouseBehavior() {
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
-  const shouldIgnore = !desktopLyricsPointerCapture;
+  const shouldIgnore = shouldIgnoreDesktopLyricsMouse(desktopLyricsPointerCapture);
   if (desktopLyricsMouseIgnored === shouldIgnore) return;
   desktopLyricsMouseIgnored = shouldIgnore;
   desktopLyricsWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });

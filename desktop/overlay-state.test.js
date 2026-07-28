@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   desktopLyricsStateSignature,
   normalizeDesktopLyricsOpacity,
+  shouldIgnoreDesktopLyricsMouse,
 } = require('./overlay-state');
 
 test('normalizeDesktopLyricsOpacity clamps to desktop lyrics bounds', () => {
@@ -59,4 +60,9 @@ test('desktopLyricsStateSignature changes for user-visible payload changes', () 
   assert.notEqual(desktopLyricsStateSignature(base), desktopLyricsStateSignature({ ...base, text: 'Line two' }));
   assert.notEqual(desktopLyricsStateSignature(base), desktopLyricsStateSignature({ ...base, rows: 'double' }));
   assert.notEqual(desktopLyricsStateSignature(base), desktopLyricsStateSignature({ ...base, align: 'left' }));
+});
+
+test('shouldIgnoreDesktopLyricsMouse follows renderer pointer capture', () => {
+  assert.equal(shouldIgnoreDesktopLyricsMouse(false), true);
+  assert.equal(shouldIgnoreDesktopLyricsMouse(true), false);
 });

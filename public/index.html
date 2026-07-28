@@ -53,6 +53,7 @@
 <script src="local-beat-cache.js"></script>
 <script src="source-navigation.js"></script>
 <script src="palette-helpers.js"></script>
+<script src="desktop-overlay-runtime.js"></script>
 <script>
 try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'simple-mode-preload');
@@ -28953,22 +28954,45 @@ var desktopOverlayPushState = {
   lastLyricsBeatKey: '',
   lastWallpaperKey: ''
 };
+var desktopOverlayRuntime = window.MineradioDesktopOverlayRuntime || null;
 var desktopOverlaySyncTimer = null;
+var desktopOverlayScheduler = null;
 function desktopOverlayActive() {
   return !!(fx && (fx.desktopLyrics || fx.wallpaperMode) && window.desktopWindow && window.desktopWindow.isDesktop);
 }
+function resetDesktopOverlayPushState() {
+  desktopOverlayPushState.lastLyricsKey = '';
+  desktopOverlayPushState.lastWallpaperKey = '';
+}
+function ensureDesktopOverlayScheduler() {
+  if (desktopOverlayScheduler || !desktopOverlayRuntime || typeof desktopOverlayRuntime.createOverlayScheduler !== 'function') return desktopOverlayScheduler;
+  desktopOverlayScheduler = desktopOverlayRuntime.createOverlayScheduler({
+    setTimeout: function(callback, delay) { return setTimeout(callback, delay); },
+    clearTimeout: function(timer) { clearTimeout(timer); },
+    isActive: desktopOverlayActive,
+    tick: syncDesktopOverlayState,
+    onInactive: resetDesktopOverlayPushState,
+    getDelay: desktopOverlaySyncDelay
+  });
+  return desktopOverlayScheduler;
+}
 function cancelDesktopOverlaySync(resetState) {
-  if (desktopOverlaySyncTimer) {
+  if (desktopOverlayScheduler) desktopOverlayScheduler.cancel();
+  else if (desktopOverlaySyncTimer) {
     clearTimeout(desktopOverlaySyncTimer);
     desktopOverlaySyncTimer = null;
   }
   if (!resetState) return;
-  desktopOverlayPushState.lastLyricsKey = '';
-  desktopOverlayPushState.lastWallpaperKey = '';
+  resetDesktopOverlayPushState();
 }
 function scheduleDesktopOverlaySync(delay) {
   if (!desktopOverlayActive()) {
     cancelDesktopOverlaySync(true);
+    return;
+  }
+  var scheduler = ensureDesktopOverlayScheduler();
+  if (scheduler) {
+    scheduler.schedule(delay == null ? desktopOverlaySyncDelay() : delay);
     return;
   }
   if (desktopOverlaySyncTimer) return;
@@ -29121,15 +29145,25 @@ function notifyDesktopLyricsBeatMapReady() {
   } catch (e) {}
 }
 function desktopOverlayRenderPressureLevel() {
-  var level = getRenderLoadTier();
+  var loadTier = getRenderLoadTier();
   var fps = renderPerfState && isFinite(renderPerfState.fps) ? Number(renderPerfState.fps) : 0;
+  if (desktopOverlayRuntime && typeof desktopOverlayRuntime.normalizeRenderPressureLevel === 'function') {
+    return desktopOverlayRuntime.normalizeRenderPressureLevel(loadTier, fps);
+  }
+  var level = Number(loadTier);
+  if (!isFinite(level)) level = 0;
+  level = Math.max(0, Math.min(2, Math.round(level)));
   if (fps > 0 && fps < 24) level = Math.max(level, 2);
   else if (fps > 0 && fps < 42) level = Math.max(level, 1);
   return Math.max(0, Math.min(2, level));
 }
 function desktopOverlaySyncDelay() {
-  if (typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization()) return 900;
+  var hidden = typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization();
   var level = desktopOverlayRenderPressureLevel();
+  if (desktopOverlayRuntime && typeof desktopOverlayRuntime.desktopOverlaySyncDelay === 'function') {
+    return desktopOverlayRuntime.desktopOverlaySyncDelay({ hidden:hidden, pressure:level });
+  }
+  if (hidden) return 900;
   if (level >= 2) return 620;
   if (level >= 1) return 420;
   return 320;
@@ -29138,8 +29172,12 @@ function desktopLyricsPushInterval() {
   var fps = normalizeDesktopLyricsFps(fx && fx.desktopLyricsFps);
   if (!fps) return 8;
   var interval = Math.max(8, Math.min(42, 1000 / fps));
-  if (typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization()) return Math.max(interval, 120);
+  var hidden = typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization();
   var level = desktopOverlayRenderPressureLevel();
+  if (desktopOverlayRuntime && typeof desktopOverlayRuntime.desktopLyricsPushInterval === 'function') {
+    return desktopOverlayRuntime.desktopLyricsPushInterval({ hidden:hidden, pressure:level, fps:fps });
+  }
+  if (hidden) return Math.max(interval, 120);
   if (level >= 2) return Math.max(interval * 1.75, 38);
   if (level >= 1) return Math.max(interval * 1.25, 26);
   return interval;
@@ -29264,7 +29302,7 @@ function applyWallpaperModeState(force) {
 }
 function syncDesktopOverlayState() {
   if (!desktopOverlayActive()) {
-    if (desktopOverlaySyncTimer) cancelDesktopOverlaySync(true);
+    if ((desktopOverlayScheduler && desktopOverlayScheduler.pending()) || desktopOverlaySyncTimer) cancelDesktopOverlaySync(true);
     return;
   }
   if (fx.desktopLyrics) pushDesktopLyricsState(false);

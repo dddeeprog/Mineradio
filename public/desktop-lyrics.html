@@ -193,8 +193,10 @@
       <div id="lockHint" class="lock-hint"><span class="lock-icon"></span><span id="lockText">&#20013;&#38190;&#35299;&#38145;</span><button id="lockToggleBtn" class="lyrics-tool-btn lyrics-lock-toggle" type="button" aria-label="Toggle desktop lyrics lock">&#35299;&#38145;</button><button id="closeLyricsBtn" class="lyrics-tool-btn lyrics-close" type="button" aria-label="Close desktop lyrics">&#20851;&#38381;&#26700;&#38754;&#27468;&#35789;</button></div>
     </div>
   </div>
+  <script src="desktop-overlay-runtime.js"></script>
   <script>
     'use strict';
+    var desktopOverlayRuntime = window.MineradioDesktopOverlayRuntime || null;
     var canvas = document.getElementById('fx');
     var ctx = canvas.getContext('2d');
     var stage = document.getElementById('stage');
@@ -1076,7 +1078,11 @@
     }
     function lockToggleUnderPointer(evt) {
       if (!isLocked() || !hintVisible || !lockToggleBtn || !evt) return false;
-      return pointInRect(evt, lockToggleBtn.getBoundingClientRect(), 0, 0);
+      var rect = lockToggleBtn.getBoundingClientRect();
+      if (desktopOverlayRuntime && typeof desktopOverlayRuntime.shouldCaptureLockedControl === 'function') {
+        return desktopOverlayRuntime.shouldCaptureLockedControl({ locked:true, hintVisible:true, pointer:evt, rect:rect });
+      }
+      return pointInRect(evt, rect, 0, 0);
     }
     function setHintVisible(visible) {
       hintVisible = !!visible;

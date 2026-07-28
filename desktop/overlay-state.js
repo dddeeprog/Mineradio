@@ -10,6 +10,10 @@ function normalizeDesktopLyricsOpacity(value) {
   return Math.max(0.28, Math.min(1, n));
 }
 
+function shouldIgnoreDesktopLyricsMouse(pointerCapture) {
+  return !pointerCapture;
+}
+
 function desktopLyricsStateSignature(state) {
   const payload = state || {};
   const motion = payload.motion || {};
@@ -62,4 +66,5 @@ module.exports = {
   desktopLyricsStateSignature,
   normalizeDesktopLyricsOpacity,
   roundedStateValue,
+  shouldIgnoreDesktopLyricsMouse,
 };
