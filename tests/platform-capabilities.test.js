@@ -188,7 +188,7 @@ test('metadata-only providers never advertise playback, matching or writes even 
   }
 });
 
-test('unwired Netease operations require an explicit allowlist and an authenticated account', () => {
+test('unwired Netease operations require an allowlist while only writes require login', () => {
   const unwired = [
     'albumDetail',
     'albumCollect',
@@ -212,6 +212,14 @@ test('unwired Netease operations require an explicit allowlist and an authentica
     assert.equal(defaultLoggedIn.capabilities[capability], true, capability);
     assert.equal(defaultLoggedIn.availability[capability], false, capability);
     assert.equal(explicitlyEnabled.availability[capability], true, capability);
+  }
+  assert.equal(loggedOut.availability.albumDetail, true);
+  for (const capability of [
+    'albumCollect',
+    'playlistSubscribe',
+    'commentsLike',
+    'commentsCreate',
+  ]) {
     assert.equal(loggedOut.availability[capability], false, capability);
   }
 });

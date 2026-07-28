@@ -35,14 +35,6 @@ const AUTHENTICATED_CAPABILITIES = new Set([
   'listenDurationReport',
 ]);
 
-const NETEASE_UNWIRED_CAPABILITIES = new Set([
-  'albumDetail',
-  'albumCollect',
-  'playlistSubscribe',
-  'commentsLike',
-  'commentsCreate',
-]);
-
 function createCapabilityMap(enabledCapabilities) {
   const enabled = new Set(enabledCapabilities);
   return Object.freeze(Object.fromEntries(
@@ -187,9 +179,8 @@ function enabledCapabilitiesFor(provider, options) {
   )));
 }
 
-function requiresLogin(provider, capability) {
-  return AUTHENTICATED_CAPABILITIES.has(capability)
-    || (provider === 'netease' && NETEASE_UNWIRED_CAPABILITIES.has(capability));
+function requiresLogin(capability) {
+  return AUTHENTICATED_CAPABILITIES.has(capability);
 }
 
 function cloneCapabilityMap(capabilities) {
@@ -225,7 +216,7 @@ function createProviderCapability(provider, status, options) {
     capability,
     capabilities[capability]
       && enabled.has(capability)
-      && (!requiresLogin(provider, capability) || account.loggedIn),
+      && (!requiresLogin(capability) || account.loggedIn),
   ]));
 
   return {
