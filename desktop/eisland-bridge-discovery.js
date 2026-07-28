@@ -35,6 +35,10 @@ function lockReleaseError() {
   return bridgeDiscoveryError('Bridge discovery descriptor lock release failed.');
 }
 
+function timerOperationError() {
+  return bridgeDiscoveryError('Bridge discovery descriptor timer operation failed.');
+}
+
 function normalizeDiscoveryError(error) {
   return error?.[BRIDGE_DISCOVERY_ERROR] ? error : publicationError();
 }
@@ -124,13 +128,19 @@ function waitForLockRetry(timer, lockRetryWaiters) {
 }
 
 function cancelLockRetries(timer, lockRetryWaiters) {
+  let cancellationError;
   for (const waiter of [...lockRetryWaiters]) {
     lockRetryWaiters.delete(waiter);
-    if (waiter.handle !== undefined && typeof timer.clearTimeout === 'function') {
-      timer.clearTimeout(waiter.handle);
+    try {
+      if (waiter.handle !== undefined && typeof timer.clearTimeout === 'function') {
+        timer.clearTimeout(waiter.handle);
+      }
+    } catch {
+      if (!cancellationError) cancellationError = timerOperationError();
     }
     waiter.resolve(false);
   }
+  return cancellationError;
 }
 
 async function sanitizeTemporaryFile(fs, temporaryPath) {
@@ -305,15 +315,32 @@ function createBridgeDiscoveryPublisher({
     if (closePromise) return closePromise;
 
     isClosed = true;
-    cancelLockRetries(timer, lockRetryWaiters);
-    if (refreshTimer !== undefined) {
-      timer.clearInterval(refreshTimer);
-      refreshTimer = undefined;
-    }
-    closePromise = publication.then(async () => {
-      let removedDescriptor = false;
-      let closeError;
+    let resolveClose;
+    let rejectClose;
+    closePromise = new Promise((resolve, reject) => {
+      resolveClose = resolve;
+      rejectClose = reject;
+    });
 
+    const finishClose = async () => {
+      let closeError;
+      try {
+        closeError = cancelLockRetries(timer, lockRetryWaiters);
+      } catch {
+        closeError = timerOperationError();
+      }
+      if (refreshTimer !== undefined) {
+        const timerToClear = refreshTimer;
+        refreshTimer = undefined;
+        try {
+          timer.clearInterval(timerToClear);
+        } catch {
+          if (!closeError) closeError = timerOperationError();
+        }
+      }
+
+      await publication;
+      let removedDescriptor = false;
       if (hasPublished) {
         try {
           removedDescriptor = await withDescriptorLock(
@@ -334,7 +361,7 @@ function createBridgeDiscoveryPublisher({
             },
           );
         } catch (error) {
-          closeError = normalizeDiscoveryError(error);
+          if (!closeError) closeError = normalizeDiscoveryError(error);
         }
       }
 
@@ -345,16 +372,25 @@ function createBridgeDiscoveryPublisher({
       }
       if (closeError) throw closeError;
       return removedDescriptor;
-    });
+    };
+
+    finishClose().then(
+      (removedDescriptor) => resolveClose(removedDescriptor),
+      (error) => rejectClose(normalizeDiscoveryError(error)),
+    );
     return closePromise;
   }
 
   const ready = publish().then((published) => {
     if (published && !isClosed) {
-      refreshTimer = timer.setInterval(
-        () => publish().catch(() => false),
-        REFRESH_INTERVAL_MS,
-      );
+      try {
+        refreshTimer = timer.setInterval(
+          () => publish().catch(() => false),
+          REFRESH_INTERVAL_MS,
+        );
+      } catch {
+        throw timerOperationError();
+      }
     }
     return published;
   });

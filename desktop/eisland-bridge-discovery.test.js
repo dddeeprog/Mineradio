@@ -770,6 +770,121 @@ test('does_not_report_success_when_descriptor_lock_release_persists', async () =
     }
   });
 });
+test('normalizes_set_interval_failure_without_leaking_token', async () => {
+  await withTempAppData(async (appData) => {
+    const failureToken = 'set-interval-failure-token';
+    const timer = {
+      ...createIdleTimer(),
+      setInterval() {
+        throw new Error(failureToken);
+      },
+    };
+    const unhandledReasons = [];
+    const onUnhandledRejection = (reason) => unhandledReasons.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+      const publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_581,
+        clock: () => 8_400_000,
+        instanceId: 'instance-set-interval',
+        pid: 4_335,
+        timer,
+        token: failureToken,
+      });
+
+      await assert.rejects(publisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery descriptor timer operation failed.');
+        assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
+        return true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(unhandledReasons, []);
+
+      await publisher.close();
+      assert.deepEqual(await fs.readdir(path.join(appData, 'Mineradio')), []);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  });
+});
+test('normalizes_timer_teardown_failures_after_cleanup_with_one_close_promise', async () => {
+  await withTempAppData(async (appData) => {
+    const clearIntervalToken = 'clear-interval-failure-token';
+    const clearTimeoutToken = 'clear-timeout-failure-token';
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    let clearIntervalCalls = 0;
+    let clearTimeoutCalls = 0;
+    let releasedExternalLock = false;
+    const timer = createControllableTimer();
+    timer.clearInterval = () => {
+      clearIntervalCalls += 1;
+      throw new Error(clearIntervalToken);
+    };
+    timer.clearTimeout = () => {
+      clearTimeoutCalls += 1;
+      throw new Error(clearTimeoutToken);
+    };
+    const lockedFs = {
+      ...fs,
+      async writeFile(filePath, contents, options) {
+        try {
+          return await fs.writeFile(filePath, contents, options);
+        } catch (error) {
+          if (
+            filePath === lockPath &&
+            options?.flag === 'wx' &&
+            error?.code === 'EEXIST' &&
+            !releasedExternalLock
+          ) {
+            releasedExternalLock = true;
+            await fs.unlink(lockPath);
+          }
+          throw error;
+        }
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_582,
+      clock: () => 8_500_000,
+      fs: lockedFs,
+      instanceId: 'instance-timer-teardown',
+      pid: 4_336,
+      timer,
+      token: `${clearIntervalToken}-${clearTimeoutToken}`,
+    });
+    await publisher.ready;
+
+    await fs.writeFile(lockPath, 'external lock', 'utf8');
+    const pendingPublication = publisher.publish();
+    await waitForTimeout(timer, 1);
+
+    let firstClose;
+    assert.doesNotThrow(() => {
+      firstClose = publisher.close();
+    });
+    const secondClose = publisher.close();
+
+    assert.equal(typeof firstClose?.then, 'function');
+    assert.strictEqual(firstClose, secondClose);
+    assert.equal(await pendingPublication, false);
+    assert.equal(clearTimeoutCalls, 1);
+    assert.equal(clearIntervalCalls, 1);
+    await assert.rejects(firstClose, (error) => {
+      assert.equal(error?.message, 'Bridge discovery descriptor timer operation failed.');
+      assert.doesNotMatch(String(error?.message), new RegExp(clearIntervalToken));
+      assert.doesNotMatch(String(error?.message), new RegExp(clearTimeoutToken));
+      return true;
+    });
+    await assert.rejects(fs.access(descriptorPath), { code: 'ENOENT' });
+    assert.deepEqual(await fs.readdir(descriptorDirectory), []);
+  });
+});
 test('normalizes_mkdir_failure_without_leaking_token', async () => {
   await withTempAppData(async (appData) => {
     const failureToken = 'mkdir-failure-token';
