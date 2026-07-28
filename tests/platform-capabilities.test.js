@@ -115,6 +115,45 @@ test('default availability only enables implemented capabilities and preserves l
   assert.equal(loggedIn.availability.listenDurationReport, false);
 });
 
+test('unwired provider search requires the server implementation allowlist', () => {
+  const statuses = {
+    kugou: {
+      loggedIn: true,
+      search: true,
+      availability: { search: true },
+      enabledCapabilities: ['search'],
+    },
+    qishui: {
+      loggedIn: true,
+      search: true,
+      availability: { search: true },
+      enabledCapabilities: ['search'],
+    },
+    spotify: {
+      loggedIn: true,
+      search: true,
+      availability: { search: true },
+      enabledCapabilities: ['search'],
+    },
+  };
+  const defaultSnapshot = createCapabilitySnapshot(statuses);
+  const enabledSnapshot = createCapabilitySnapshot(statuses, {
+    enabledCapabilities: {
+      kugou: ['search'],
+      qishui: ['search'],
+      spotify: ['search'],
+    },
+  });
+
+  for (const provider of ['kugou', 'qishui', 'spotify']) {
+    const unavailable = providerCapability(defaultSnapshot, provider);
+    const enabled = providerCapability(enabledSnapshot, provider);
+    assert.equal(unavailable.capabilities.search, true, provider);
+    assert.equal(unavailable.availability.search, false, provider);
+    assert.equal(enabled.availability.search, true, provider);
+  }
+});
+
 test('metadata-only providers never advertise playback, matching or writes even when logged in', () => {
   const snapshot = createCapabilitySnapshot({
     kugou: {

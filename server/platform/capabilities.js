@@ -95,9 +95,9 @@ const DEFAULT_ENABLED_CAPABILITIES = Object.freeze({
     'commentsRead',
   ]),
   qq: Object.freeze(['search', 'playback', 'sourceMatch', 'commentsRead']),
-  kugou: Object.freeze(['search']),
-  qishui: Object.freeze(['search']),
-  spotify: Object.freeze(['search']),
+  kugou: Object.freeze([]),
+  qishui: Object.freeze([]),
+  spotify: Object.freeze([]),
 });
 
 function isRecord(value) {
