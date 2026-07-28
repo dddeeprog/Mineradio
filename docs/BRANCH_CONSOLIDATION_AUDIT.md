@@ -117,6 +117,24 @@
 
 结论：Task 9 已将归档调色板帮助函数按原 blob 迁入可测试模块，并以局部页面包装函数接入；没有整文件替换 `public/index.html`，也没有迁移页面专属渲染所有权。
 
+## Task 10 - merge-two 归档全量能力分类（2026-07-28）
+
+本节覆盖 `master..archive/pre-unify-merge-two-20260728` 中的每一个提交。分类以当前统一分支的真实能力、代码位置和回归合同为准；本 Task 只建立审计与合同，不迁移产品行为。
+
+| 归档提交 | 分类 | 审计结论 |
+| --- | --- | --- |
+| `d628697`、`9931afa`、`42394bc`、`0ce5b7e`、`8968c90`、`d3f4b67`、`1380efa`、`40b19e3`、`f13785d`、`3d377f5`、`f7b555c`、`d6f4c0a`、`2d072d5`、`8e269d2`、`67c009f`、`8a7c76b`、`db37605`、`f09dccf`、`da5a018`、`cc108ea`、`b58c6d9` | 审计、文档、chore 或 test-only；无需产品迁移 | 它们只建立审计、计划、分类器或批次记录；`42394bc` 的 `.worktrees` 忽略规则已在当前分支迁入。 |
+| `027da04`、`d18da77`、`94ff4dc`、`bb35735`、`8f48927`、`fef347a` | 桌面 shell、IPC、控制与状态已更早迁入 | 当前 `desktop/shell-state.js`、`desktop/overlay-state.js`、main/preload 连接及现有桌面测试覆盖该能力。 |
+| `5e2acf2`、`b913567` | 本地资产 API 已更早迁入并加强 | 当前 `desktop/local-assets.js` 维持受授权根目录、协议 URL 和受限读取边界。 |
+| `a9a9a4c` | 本地媒体/歌词资产能力已迁入，且有刻意安全加固 | 归档允许裸名称 direct `FileList` 条目按同 stem 关联歌词；当前要求经过验证的非空同目录路径。带真实相对路径的文件夹导入仍保留该功能。这是安全加固，不是迁移缺口。 |
+| `9bf71e7`、`aa5c967`、`f9ed0fb`、`38f7a8f` | merge-only | 仅合并前序已分类能力，没有独立产品行为需要迁移。 |
+| `2788df9`、`c337444`、`85a542e` | 本地媒体库/状态/节奏缓存已更早迁入 | 当前 `public/local-library.js`、`public/local-media-assets.js`、`public/local-beat-cache.js` 及其测试保留能力。 |
+| `bd790db`、`351019b`、`92514c4` | 已迁入或当前等价 | 在线入口、来源导航和调色板帮助能力分别由当前导航、页面路由与 `public/palette-helpers.js` 覆盖。 |
+| `5ff55d8`、`ee637d0`、`7ec1fb3` | merge-only | 仅合并已分类的在线入口、来源导航和调色板能力。 |
+| `39a1ade` | 唯一真实当前对等缺口 | 桌面覆盖层 renderer/control 行为尚未完整迁入：多行/对齐 payload 与 renderer、锁定控制、壁纸启用 UI。此 Task 只记录缺口，不实施。 |
+
+Task 10 合同测试锁定以下当前能力：在线/歌单/本地来源导航和 QQ/通用在线 URL 路由；本地库、媒体资产、节奏缓存、桌面本地资产、shell 与 overlay state 模块；`public/folia-native/runtime.js` 存在且已退役的 `build/folia-stage.js` 不存在；`check`、`test`、`test:visual`、`verify:artifacts`、`build:win:dir` 脚本可用。
+
 ## 迁移纪律
 
 1. 每项能力必须先确认当前实现、来源证据和最小回归测试，再做单一能力迁移。
