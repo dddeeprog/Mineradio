@@ -22945,7 +22945,8 @@ function localSongAssetFiles(song, audioRecord) {
 }
 function localLyricCandidateFiles(song) {
   var candidates = Array.isArray(song && song.localAdjacentLyricCandidates) ? song.localAdjacentLyricCandidates : [];
-  var legacy = normalizeLocalAssetRecord(song && song.localAdjacentLyricFile);
+  var primary = normalizeLocalAssetRecord(song && song.localAdjacentLyricFile);
+  var legacy = normalizeLocalAssetRecord(song && song.localAdjacentLegacyTxtFile);
   var out = [];
   function add(file) {
     file = normalizeLocalAssetRecord(file);
@@ -22954,6 +22955,7 @@ function localLyricCandidateFiles(song) {
     if (!out.some(function(existing) { return localImportFileIdentity(existing) === identity; })) out.push(file);
   }
   candidates.forEach(add);
+  add(primary);
   add(legacy);
   return out;
 }
@@ -23093,6 +23095,10 @@ async function collectLocalImportAssets(localMedia, audioFile, files) {
   }
   var lyricCandidates = Array.isArray(result.adjacent.lyricCandidates) ? result.adjacent.lyricCandidates.slice() : [];
   if (!lyricCandidates.length && result.adjacent.lyricFile) lyricCandidates.push(result.adjacent.lyricFile);
+  var legacyTxtFile = result.adjacent.legacyTxtFile || null;
+  if (legacyTxtFile && !lyricCandidates.some(function(file) {
+    return localImportFileIdentity(file) === localImportFileIdentity(legacyTxtFile);
+  })) lyricCandidates.push(legacyTxtFile);
   if (typeof localMedia.readTextFile === 'function') {
     for (var lyricIndex = 0; lyricIndex < lyricCandidates.length; lyricIndex += 1) {
       var lyricCandidate = lyricCandidates[lyricIndex];

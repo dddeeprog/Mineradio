@@ -199,6 +199,8 @@ test('findAdjacentLocalAssets retains legacy TXT only as a fallback outside lyri
   assert.equal(txtFallback.lyricFile, legacyTxt);
   assert.deepEqual(txtFallback.lyricCandidates, []);
   assert.equal(preferredLrc.lyricFile, lrc);
+  assert.deepEqual(preferredLrc.lyricCandidates, [lrc]);
+  assert.equal(preferredLrc.legacyTxtFile, legacyTxt);
 });
 
 test('findAdjacentLocalAssets rejects traversal-path TTML, LRC and legacy TXT candidates', () => {

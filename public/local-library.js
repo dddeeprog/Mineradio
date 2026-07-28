@@ -125,6 +125,7 @@
     });
     result.lyricCandidates = result.lyricCandidates.map(function(item) { return item.asset; });
     result.lyricFile = result.lyricCandidates[0] || legacyTxtFile;
+    result.legacyTxtFile = legacyTxtFile;
     return result;
   }
 
@@ -155,6 +156,7 @@
       localLibraryFileSignature: signature,
       localAdjacentLyricFile: adjacent.lyricFile || null,
       localAdjacentLyricCandidates: adjacent.lyricCandidates || [],
+      localAdjacentLegacyTxtFile: adjacent.legacyTxtFile || null,
       localAdjacentCoverFile: adjacent.coverFile || null,
     };
   }

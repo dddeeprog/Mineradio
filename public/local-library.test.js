@@ -134,6 +134,8 @@ test('buildLocalLibrarySongs keeps legacy TXT only as a fallback outside lyricCa
   assert.equal(txtFallback.localAdjacentLyricFile, legacyTxt);
   assert.deepEqual(txtFallback.localAdjacentLyricCandidates, []);
   assert.equal(preferredLrc.localAdjacentLyricFile, lrc);
+  assert.deepEqual(preferredLrc.localAdjacentLyricCandidates, [lrc]);
+  assert.equal(preferredLrc.localAdjacentLegacyTxtFile, legacyTxt);
 });
 
 test('buildLocalLibrarySongs rejects traversal-path TTML, LRC and legacy TXT candidates', () => {

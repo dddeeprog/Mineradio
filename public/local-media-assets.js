@@ -511,6 +511,7 @@
     });
     result.lyricCandidates = result.lyricCandidates.map(function(item) { return item.file; });
     result.lyricFile = result.lyricCandidates[0] || legacyTxtFile;
+    result.legacyTxtFile = legacyTxtFile;
     return result;
   }
 
