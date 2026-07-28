@@ -960,6 +960,116 @@ test('reclaims_dead_owner_lock_before_publishing', async () => {
     assert.deepEqual(await fs.readdir(descriptorDirectory), []);
   });
 });
+test('does_not_let_residual_reclaim_file_block_dead_lock_recovery', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    const deadOwner = {
+      instanceId: 'crashed-residual-owner',
+      pid: 50_002,
+      lockId: '8af77d5a-7801-4226-bffe-f628503a7b2f',
+    };
+    const residualReclaimPath = `${lockPath}.${deadOwner.lockId}.reclaim`;
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(lockPath, JSON.stringify(deadOwner), 'utf8');
+    await fs.writeFile(residualReclaimPath, '', 'utf8');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_587,
+      clock: () => 8_900_000,
+      instanceId: 'instance-residual-reclaim',
+      isProcessAlive(candidatePid) {
+        assert.equal(candidatePid, deadOwner.pid);
+        return false;
+      },
+      pid: 4_343,
+      timer: createIdleTimer(),
+      token: 'residual-reclaim-token',
+    });
+
+    await publisher.ready;
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_587,
+      token: 'residual-reclaim-token',
+      instanceId: 'instance-residual-reclaim',
+      pid: 4_343,
+      expiresAtMs: 8_905_000,
+    });
+    assert.equal(await fs.readFile(residualReclaimPath, 'utf8'), '');
+
+    await publisher.close();
+    assert.deepEqual(await fs.readdir(descriptorDirectory), [
+      path.basename(residualReclaimPath),
+    ]);
+  });
+});
+test('recovers_after_quarantine_move_failure_for_dead_lock', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    const deadOwner = {
+      instanceId: 'crashed-quarantine-owner',
+      pid: 50_003,
+      lockId: '39ba47e8-946c-4a63-a17c-e9f6a98aaa85',
+    };
+    let quarantinePath;
+    let failAfterQuarantineMove = true;
+    const interruptedFs = {
+      ...fs,
+      async rename(sourcePath, destinationPath) {
+        await fs.rename(sourcePath, destinationPath);
+        if (
+          failAfterQuarantineMove &&
+          sourcePath === lockPath &&
+          destinationPath.startsWith(`${lockPath}.dead.${deadOwner.lockId}.`)
+        ) {
+          failAfterQuarantineMove = false;
+          quarantinePath = destinationPath;
+          const error = new Error('simulated reclaimer interruption');
+          error.code = 'EIO';
+          throw error;
+        }
+      },
+    };
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(lockPath, JSON.stringify(deadOwner), 'utf8');
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_588,
+      clock: () => 9_000_000,
+      fs: interruptedFs,
+      instanceId: 'instance-quarantine-recovery',
+      isProcessAlive(candidatePid) {
+        assert.equal(candidatePid, deadOwner.pid);
+        return false;
+      },
+      pid: 4_344,
+      timer: createIdleTimer(),
+      token: 'quarantine-recovery-token',
+    });
+
+    await publisher.ready;
+    assert.equal(failAfterQuarantineMove, false);
+    assert.ok(quarantinePath);
+    assert.deepEqual(JSON.parse(await fs.readFile(quarantinePath, 'utf8')), deadOwner);
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_588,
+      token: 'quarantine-recovery-token',
+      instanceId: 'instance-quarantine-recovery',
+      pid: 4_344,
+      expiresAtMs: 9_005_000,
+    });
+
+    await publisher.close();
+    assert.deepEqual(await fs.readdir(descriptorDirectory), [path.basename(quarantinePath)]);
+  });
+});
 test('keeps_active_and_permission_owner_locks', async () => {
   await withTempAppData(async (appData) => {
     const scenarios = [

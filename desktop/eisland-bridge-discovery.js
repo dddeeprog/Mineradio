@@ -172,43 +172,36 @@ async function isConfirmedDead(isProcessAlive, pid) {
   }
 }
 
-function reclaimClaimPath(lockPath, lockId) {
-  return lockPath + '.' + lockId + '.reclaim';
+function quarantinePath(lockPath, lockId) {
+  return `${lockPath}.dead.${lockId}.${randomUUID()}.reclaimed`;
 }
 
-async function reclaimDeadDescriptorLock(fs, lockPath, isProcessAlive) {
+async function quarantineDeadDescriptorLock(fs, lockPath, isProcessAlive) {
   const observed = await readLockOwner(fs, lockPath);
-  if (observed.error || !isReclaimableLockOwner(observed.record)) return false;
-  if (!(await isConfirmedDead(isProcessAlive, observed.record.pid))) return false;
+  if (observed.error || !isReclaimableLockOwner(observed.record)) return null;
+  if (!(await isConfirmedDead(isProcessAlive, observed.record.pid))) return null;
 
-  const claimPath = reclaimClaimPath(lockPath, observed.record.lockId);
+  const current = await readLockOwner(fs, lockPath);
+  if (current.error || !lockOwnersMatch(current.record, observed.record)) return null;
+  if (!(await isConfirmedDead(isProcessAlive, current.record.pid))) return null;
+
+  const deadLockPath = quarantinePath(lockPath, observed.record.lockId);
   try {
-    await fs.writeFile(claimPath, '', {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    await fs.rename(lockPath, deadLockPath);
+    return deadLockPath;
   } catch (error) {
-    if (error?.code === 'EEXIST') return false;
+    if (error?.code === 'ENOENT' || error?.code === 'EEXIST') return null;
     throw error;
   }
+}
 
-  try {
-    const current = await readLockOwner(fs, lockPath);
-    if (current.error || !lockOwnersMatch(current.record, observed.record)) return false;
-    if (!(await isConfirmedDead(isProcessAlive, current.record.pid))) return false;
+async function cleanupQuarantinedLocks(fs, quarantinePaths) {
+  for (const deadLockPath of quarantinePaths) {
     try {
-      await fs.unlink(lockPath);
-      return true;
-    } catch (error) {
-      if (error?.code === 'ENOENT') return false;
-      throw error;
-    }
-  } finally {
-    try {
-      await fs.unlink(claimPath);
+      await fs.unlink(deadLockPath);
     } catch {}
   }
+  quarantinePaths.clear();
 }
 
 function waitForRetry(timer) {
@@ -329,6 +322,7 @@ async function withDescriptorLock(
   let acquired = false;
   let retries = 0;
   let reclaims = 0;
+  const quarantinePaths = new Set();
 
   while (retries < LOCK_ACQUIRE_ATTEMPTS) {
     if (shouldCancel()) return false;
@@ -344,15 +338,16 @@ async function withDescriptorLock(
       if (error?.code !== 'EEXIST') throw error;
       if (shouldCancel()) return false;
 
-      let reclaimed = false;
+      let deadLockPath = null;
       if (reclaims < LOCK_ACQUIRE_ATTEMPTS) {
         try {
-          reclaimed = await reclaimDeadDescriptorLock(fs, lockPath, isProcessAlive);
+          deadLockPath = await quarantineDeadDescriptorLock(fs, lockPath, isProcessAlive);
         } catch {
-          reclaimed = false;
+          deadLockPath = null;
         }
       }
-      if (reclaimed) {
+      if (deadLockPath) {
+        quarantinePaths.add(deadLockPath);
         reclaims += 1;
         continue;
       }
@@ -364,6 +359,7 @@ async function withDescriptorLock(
     }
   }
   if (!acquired) throw lockAcquireError();
+  await cleanupQuarantinedLocks(fs, quarantinePaths);
 
   try {
     if (shouldCancel()) return false;
