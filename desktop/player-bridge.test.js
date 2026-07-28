@@ -365,3 +365,62 @@ test('rejects_unbound_lyrics_after_a_track_change', () => {
     lines: ['B current'],
   });
 });
+
+test('strips_deeply_nested_media_sources', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 90_000 });
+
+  bridge.receiveHeartbeat({
+    state: {
+      audio: {
+        coverUrl: 'https://image.example/audio-cover.jpg',
+        transport: {
+          source: 'https://audio.example/signed-source?token=private',
+          src: 'https://audio.example/song-a.mp3?token=private',
+        },
+        variants: [
+          { src: 'https://audio.example/variant-a.mp3?token=private' },
+        ],
+      },
+      coverUrl: 'https://image.example/cover.jpg',
+    },
+    track: { id: 'song-a' },
+    lyrics: { trackId: 'song-a', lines: ['safe'] },
+  });
+
+  assert.deepEqual(bridge.getState().state, {
+    audio: {
+      coverUrl: 'https://image.example/audio-cover.jpg',
+      transport: {},
+      variants: [{}],
+    },
+    coverUrl: 'https://image.example/cover.jpg',
+  });
+});
+
+test('keeps_bound_lyrics_when_late_unbound_lyrics_arrive', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 100_000 });
+
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-a', title: 'Song A' },
+    lyrics: { trackId: 'song-a', lines: ['A current'] },
+  });
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-b', title: 'Song B' },
+    lyrics: { trackId: 'song-b', lines: ['B current'] },
+  });
+  const confirmed = bridge.getState();
+
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'song-b', title: 'Song B' },
+    lyrics: { lines: ['A late without an owner'] },
+  });
+
+  const snapshot = bridge.getState();
+  assert.deepEqual(snapshot.lyrics, confirmed.lyrics);
+  assert.equal(snapshot.lyricsRevision, confirmed.lyricsRevision);
+});

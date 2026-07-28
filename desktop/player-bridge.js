@@ -4,29 +4,30 @@ const RENDERER_COMMAND_TIMEOUT_MS = 1_500;
 const COMMAND_RESULT_CACHE_TTL_MS = 30_000;
 const COMMAND_RESULT_CACHE_MAX_ENTRIES = 256;
 
-function isSensitiveKey(key, parentKey = '') {
+function isMediaContextKey(key) {
   const normalized = String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
-  const normalizedParent = String(parentKey).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  return /^(audio|stream|music|media|playback|player)$/.test(normalized);
+}
+
+function isSensitiveKey(key, inMediaContext = false) {
+  const normalized = String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
   if (normalized.includes('cookie') || normalized.includes('account')) return true;
   if (/(audio|stream|music|play)(url|src)$/.test(normalized)) return true;
   if (normalized === 'url') return true;
-  if (
-    /^(audio|stream|music|media|playback|player)$/.test(normalizedParent)
-    && ['src', 'source', 'url', 'uri', 'href'].includes(normalized)
-  ) return true;
+  if (inMediaContext && ['src', 'source', 'url', 'uri', 'href'].includes(normalized)) return true;
   return false;
 }
 
-function normalizeValue(value, parentKey = '') {
+function normalizeValue(value, inMediaContext = false) {
   if (value == null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.map((item) => normalizeValue(item, parentKey));
+  if (Array.isArray(value)) return value.map((item) => normalizeValue(item, inMediaContext));
   if (typeof value !== 'object') return null;
 
   const normalized = {};
   for (const key of Object.keys(value).sort()) {
-    if (isSensitiveKey(key, parentKey)) continue;
-    const next = normalizeValue(value[key], key);
+    if (isSensitiveKey(key, inMediaContext)) continue;
+    const next = normalizeValue(value[key], inMediaContext || isMediaContextKey(key));
     if (next !== undefined) normalized[key] = next;
   }
   return normalized;
@@ -97,9 +98,8 @@ function createPlayerBridge({
     const nextLyrics = normalizeSection(payload.lyrics);
     const trackChanged = !sameValue(track, nextTrack);
     const requiresTrackBinding = trackChanged || requiresTrackBoundLyrics;
-    const nextCurrentLyrics = lyricsBelongToTrack(nextLyrics, nextTrack, requiresTrackBinding)
-      ? nextLyrics
-      : null;
+    const acceptsLyrics = lyricsBelongToTrack(nextLyrics, nextTrack, requiresTrackBinding);
+    const nextCurrentLyrics = acceptsLyrics ? nextLyrics : null;
 
     if (!sameValue(state, nextState)) {
       state = nextState;
@@ -115,14 +115,10 @@ function createPlayerBridge({
         lyrics = null;
         lyricsRevision += 1;
       }
-    } else if (!sameValue(lyrics, nextCurrentLyrics)) {
+    } else if (acceptsLyrics && !sameValue(lyrics, nextCurrentLyrics)) {
       lyrics = nextCurrentLyrics;
       lyricsRevision += 1;
     }
-    if (nextCurrentLyrics != null && requiresTrackBinding) {
-      requiresTrackBoundLyrics = false;
-    }
-
     updatedAtMs = clock();
   }
 
