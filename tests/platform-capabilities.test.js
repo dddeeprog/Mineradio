@@ -89,6 +89,29 @@ test('creates all five providers in stable order with fixed labels, auth methods
   }
 });
 
+test('falls back to a finite timestamp when the injected clock fails', () => {
+  const invalidClocks = [
+    () => {
+      throw new Error('clock-secret');
+    },
+    () => undefined,
+    () => Number.NaN,
+    () => Number.POSITIVE_INFINITY,
+  ];
+
+  for (const now of invalidClocks) {
+    const snapshot = createCapabilitySnapshot({}, { now });
+    assert.equal(Number.isFinite(snapshot.generatedAt), true);
+    assert.deepEqual(snapshot.providers.map(item => item.provider), PLATFORM_ORDER);
+    assert.equal(JSON.stringify(snapshot).includes('clock-secret'), false);
+  }
+
+  assert.equal(
+    createCapabilitySnapshot({}, { now: () => 987654321 }).generatedAt,
+    987654321,
+  );
+});
+
 test('default availability only enables implemented capabilities and preserves logged-out playback', () => {
   const snapshot = createCapabilitySnapshot();
   const netease = providerCapability(snapshot, 'netease');

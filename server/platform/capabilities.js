@@ -165,6 +165,7 @@ function sanitizeAccount(status) {
 }
 
 function enabledCapabilitiesFor(provider, options) {
+  // This allowlist is server-owned configuration and must never come from request input.
   const configured = isRecord(options) && isRecord(options.enabledCapabilities)
     ? options.enabledCapabilities
     : null;
@@ -236,7 +237,7 @@ function createCapabilitySnapshot(statusByProvider, options) {
 
   return {
     schema: PLATFORM_CAPABILITY_SCHEMA,
-    generatedAt: now(),
+    generatedAt: safeGeneratedAt(now),
     providers: PLATFORM_ORDER.map(provider => createProviderCapability(
       provider,
       hasOwn(statusByProvider, provider) ? statusByProvider[provider] : {},
@@ -252,6 +253,15 @@ function providerCapability(snapshot, provider) {
     isRecord(candidate) && candidate.provider === provider
   ));
   return item ? cloneProvider(item) : null;
+}
+
+function safeGeneratedAt(now) {
+  try {
+    const value = now();
+    return Number.isFinite(value) ? value : Date.now();
+  } catch (_) {
+    return Date.now();
+  }
 }
 
 module.exports = {
