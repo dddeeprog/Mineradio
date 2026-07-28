@@ -78,6 +78,7 @@ test('migrates legacy Folia modes and retires the removed orbit effect', () => {
   assert.equal(migrateLegacyNativeLyricConfig(null, { visualMode: 'cappella' }).mode, 'cappella');
   assert.equal(migrateLegacyNativeLyricConfig(null, { visualMode: 'partita' }).mode, 'partita');
   assert.equal(migrateLegacyNativeLyricConfig(null, { visualMode: 'cover' }).mode, 'monet');
+  assert.equal(migrateLegacyNativeLyricConfig(null, { visualMode: 'auto' }).mode, 'mineradio-3d');
   assert.equal(migrateLegacyNativeLyricConfig(null, { visualMode: 'minimal' }).mode, 'mineradio-3d');
   assert.equal(
     migrateLegacyNativeLyricConfig(null, { nativeLyricEffect: 'claddagh-orbit' }).modes.mineradio3d.effect,
