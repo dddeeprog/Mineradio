@@ -619,6 +619,21 @@ test('clear removes all providers and the encrypted file', () => {
   assert.equal(disk.calls.removes, 1);
 });
 
+test('encrypted clear refreshes disk before removing credentials written by another instance', () => {
+  const disk = createMemoryDisk();
+  const clearingStore = createEncryptedStore(disk);
+  const writingStore = createEncryptedStore(disk);
+  writingStore.set('qq', { accountId: 'q-1', cookie: 'qq-secret' });
+  const readsBeforeClear = disk.calls.reads;
+
+  assert.equal(clearingStore.clear(), true);
+
+  assert.equal(disk.calls.reads, readsBeforeClear + 1);
+  assert.equal(disk.calls.removes, 1);
+  assert.equal(disk.exists(), false);
+  assert.equal(clearingStore.get('qq'), null);
+});
+
 test('discard helper returns a stable secret-free error for removal failures', () => {
   assert.throws(
     () => discardCredentialStoreFile({

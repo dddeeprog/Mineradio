@@ -410,7 +410,13 @@ function createCredentialStore(options = {}) {
     },
 
     clear() {
-      if (Object.keys(providers).length === 0) return false;
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      if (Object.keys(currentProviders).length === 0) {
+        providers = currentProviders;
+        return false;
+      }
       if (persistenceAvailable) removePersistedFile();
       providers = emptyProviders();
       return true;
