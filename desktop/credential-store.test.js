@@ -10,6 +10,7 @@ const {
   CREDENTIAL_SCHEMA,
   SUPPORTED_CREDENTIAL_PROVIDERS,
   createCredentialStore,
+  discardCredentialStoreFile,
   writeFileAtomic,
 } = credentialStoreModule;
 
@@ -54,6 +55,11 @@ function createMemoryDisk(initialValue) {
     },
     removeFile() {
       calls.removes += 1;
+      if (value == null) {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      }
       value = null;
     },
   };
@@ -92,13 +98,14 @@ test('exports the exact supported provider contract', () => {
   assert.equal(Object.isFrozen(SUPPORTED_CREDENTIAL_PROVIDERS), true);
 });
 
-test('exports only the credential store API and required atomic write helper', () => {
+test('exports only the credential store API and required helpers', () => {
   assert.deepEqual(
     Object.keys(credentialStoreModule).sort(),
     [
       'CREDENTIAL_SCHEMA',
       'SUPPORTED_CREDENTIAL_PROVIDERS',
       'createCredentialStore',
+      'discardCredentialStoreFile',
       'writeFileAtomic',
     ].sort(),
   );
@@ -137,6 +144,41 @@ test('persists only encrypted envelope bytes and reads one provider', () => {
   const reloaded = createEncryptedStore(disk, { safeStorage });
   assert.deepEqual(reloaded.get('spotify'), credential);
   assert.equal(reloaded.get('netease'), null);
+});
+
+test('encrypted stores refresh disk before merging sequential provider writes', () => {
+  const disk = createMemoryDisk();
+  const first = createEncryptedStore(disk);
+  const second = createEncryptedStore(disk);
+
+  first.set('netease', {
+    accountId: 'netease-user',
+    cookie: 'netease-secret',
+  });
+  second.set('spotify', {
+    accountId: 'spotify-user',
+    refreshToken: 'spotify-secret',
+  });
+
+  assert.deepEqual(second.get('netease'), {
+    accountId: 'netease-user',
+    cookie: 'netease-secret',
+  });
+  assert.deepEqual(second.get('spotify'), {
+    accountId: 'spotify-user',
+    refreshToken: 'spotify-secret',
+  });
+  assert.equal(disk.calls.reads, 4);
+
+  const reloaded = createEncryptedStore(disk);
+  assert.deepEqual(reloaded.get('netease'), {
+    accountId: 'netease-user',
+    cookie: 'netease-secret',
+  });
+  assert.deepEqual(reloaded.get('spotify'), {
+    accountId: 'spotify-user',
+    refreshToken: 'spotify-secret',
+  });
 });
 
 test('get returns a fresh deep copy of credential data', () => {
@@ -260,6 +302,40 @@ test('memory-only mode never touches disk and is lost on restart', () => {
   assert.deepEqual(diskAccess, []);
 });
 
+test('memory-only logout can explicitly discard legacy ciphertext without reading or writing', () => {
+  const disk = createMemoryDisk(Buffer.from('legacy-encrypted-data'));
+  const store = createCredentialStore({
+    filePath: 'credentials.bin',
+    safeStorage: { isEncryptionAvailable: () => false },
+    readFile: disk.readFile,
+    writeFileAtomic: disk.writeFileAtomic,
+    removeFile: disk.removeFile,
+    now: () => TEST_NOW,
+  });
+  store.set('qq', { accountId: 'memory-user', token: 'memory-secret' });
+
+  assert.equal(store.clear(), true);
+  assert.equal(disk.exists(), true);
+  assert.equal(disk.calls.reads, 0);
+  assert.equal(disk.calls.writes, 0);
+  assert.equal(disk.calls.removes, 0);
+
+  assert.equal(discardCredentialStoreFile({
+    filePath: 'credentials.bin',
+    removeFile: disk.removeFile,
+  }), true);
+  assert.equal(disk.exists(), false);
+  assert.equal(disk.calls.reads, 0);
+  assert.equal(disk.calls.writes, 0);
+  assert.equal(disk.calls.removes, 1);
+
+  assert.equal(discardCredentialStoreFile({
+    filePath: 'credentials.bin',
+    removeFile: disk.removeFile,
+  }), false);
+  assert.equal(disk.calls.removes, 2);
+});
+
 test('rejects unknown providers on every provider operation', () => {
   const store = createCredentialStore({
     filePath: 'credentials.bin',
@@ -380,6 +456,32 @@ test('wraps decrypt failures in a stable secret-free corruption error', () => {
   assert.equal(disk.calls.removes, 0);
 });
 
+test('a corrupt store can be explicitly discarded after construction fails', () => {
+  const ciphertext = Buffer.from('corrupt-encrypted-data');
+  const disk = createMemoryDisk(ciphertext);
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    decryptString: () => {
+      throw new Error('corrupt-encrypted-data');
+    },
+  };
+
+  assert.throws(
+    () => createEncryptedStore(disk, { safeStorage }),
+    error => error.code === 'CREDENTIAL_STORE_CORRUPT',
+  );
+  const readsAfterFailure = disk.calls.reads;
+
+  assert.equal(discardCredentialStoreFile({
+    filePath: 'credentials.bin',
+    removeFile: disk.removeFile,
+  }), true);
+  assert.equal(disk.exists(), false);
+  assert.equal(disk.calls.reads, readsAfterFailure);
+  assert.equal(disk.calls.writes, 0);
+  assert.equal(disk.calls.removes, 1);
+});
+
 test('treats damaged decrypted JSON as corrupt without overwriting it', () => {
   const safeStorage = createSafeStorage();
   const ciphertext = safeStorage.encryptString('{"refreshToken":"json-secret"');
@@ -443,6 +545,48 @@ test('deleting one provider persists the others unchanged', () => {
   });
 });
 
+test('encrypted delete refreshes disk and preserves providers added by another instance', () => {
+  const disk = createMemoryDisk();
+  const seed = createEncryptedStore(disk);
+  seed.set('netease', { accountId: 'n-1', cookie: 'netease-secret' });
+  seed.set('qq', { accountId: 'q-1', cookie: 'qq-secret' });
+  const deletingStore = createEncryptedStore(disk);
+  const writingStore = createEncryptedStore(disk);
+  writingStore.set('spotify', {
+    accountId: 's-1',
+    refreshToken: 'spotify-secret',
+  });
+
+  assert.equal(deletingStore.delete('netease'), true);
+
+  assert.equal(deletingStore.get('netease'), null);
+  assert.deepEqual(deletingStore.get('qq'), {
+    accountId: 'q-1',
+    cookie: 'qq-secret',
+  });
+  assert.deepEqual(deletingStore.get('spotify'), {
+    accountId: 's-1',
+    refreshToken: 'spotify-secret',
+  });
+  const reloaded = createEncryptedStore(disk);
+  assert.deepEqual(reloaded.get('spotify'), {
+    accountId: 's-1',
+    refreshToken: 'spotify-secret',
+  });
+});
+
+test('encrypted delete can remove a provider added after the instance was created', () => {
+  const disk = createMemoryDisk();
+  const deletingStore = createEncryptedStore(disk);
+  const writingStore = createEncryptedStore(disk);
+  writingStore.set('kugou', { accountId: 'k-1', token: 'kugou-secret' });
+
+  assert.equal(deletingStore.delete('kugou'), true);
+
+  assert.equal(disk.exists(), false);
+  assert.equal(deletingStore.get('kugou'), null);
+});
+
 test('deleting the last provider removes the credential file', () => {
   const disk = createMemoryDisk();
   const store = createEncryptedStore(disk);
@@ -473,6 +617,20 @@ test('clear removes all providers and the encrypted file', () => {
   assert.equal(disk.calls.removes, 1);
   assert.equal(store.clear(), false);
   assert.equal(disk.calls.removes, 1);
+});
+
+test('discard helper returns a stable secret-free error for removal failures', () => {
+  assert.throws(
+    () => discardCredentialStoreFile({
+      filePath: 'credentials.bin',
+      removeFile: () => {
+        throw new Error('remove failed with encrypted-secret');
+      },
+    }),
+    error => error.code === 'CREDENTIAL_STORE_REMOVE_FAILED'
+      && error.message === 'Credential store data could not be removed'
+      && !serializeError(error).includes('encrypted-secret'),
+  );
 });
 
 test('snapshot and serialized errors contain only redacted metadata', () => {
@@ -523,6 +681,17 @@ test('snapshot and serialized errors contain only redacted metadata', () => {
         && !serialized.includes('credential-secret');
     },
   );
+});
+
+test('default atomic write replaces an existing file with new contents', (t) => {
+  const directory = makeTempDirectory(t);
+  const target = path.join(directory, 'platform-credentials.bin');
+  fs.writeFileSync(target, 'old ciphertext');
+
+  writeFileAtomic(target, Buffer.from('new ciphertext'));
+
+  assert.equal(fs.readFileSync(target, 'utf8'), 'new ciphertext');
+  assert.deepEqual(fs.readdirSync(directory), ['platform-credentials.bin']);
 });
 
 test('default atomic write fsyncs a same-directory temporary file and preserves the old file on failure', (t) => {

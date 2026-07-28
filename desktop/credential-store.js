@@ -175,11 +175,20 @@ function readFile(filePath) {
 }
 
 function removeFile(filePath) {
+  fs.unlinkSync(filePath);
+}
+
+function discardCredentialStoreFile(options = {}) {
+  const remove = options.removeFile || removeFile;
   try {
-    fs.unlinkSync(filePath);
+    remove(options.filePath);
+    return true;
   } catch (error) {
-    if (error && error.code === 'ENOENT') return;
-    throw error;
+    if (error && error.code === 'ENOENT') return false;
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_REMOVE_FAILED',
+      'Credential store data could not be removed',
+    );
   }
 }
 
@@ -330,14 +339,7 @@ function createCredentialStore(options = {}) {
   }
 
   function removePersistedFile() {
-    try {
-      remove(filePath);
-    } catch (_error) {
-      throw createCredentialStoreError(
-        'CREDENTIAL_STORE_REMOVE_FAILED',
-        'Credential store data could not be removed',
-      );
-    }
+    discardCredentialStoreFile({ filePath, removeFile: remove });
   }
 
   return {
@@ -366,7 +368,10 @@ function createCredentialStore(options = {}) {
         );
       }
 
-      const nextProviders = copyProviders(providers);
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      const nextProviders = copyProviders(currentProviders);
       nextProviders[provider] = {
         credential: credentialCopy,
         accountId: accountIdFromCredential(credentialCopy),
@@ -383,9 +388,15 @@ function createCredentialStore(options = {}) {
 
     delete(provider) {
       assertSupportedProvider(provider);
-      if (!providers[provider]) return false;
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      if (!currentProviders[provider]) {
+        providers = currentProviders;
+        return false;
+      }
 
-      const nextProviders = copyProviders(providers);
+      const nextProviders = copyProviders(currentProviders);
       delete nextProviders[provider];
       if (persistenceAvailable) {
         if (Object.keys(nextProviders).length === 0) {
@@ -427,5 +438,6 @@ module.exports = {
   CREDENTIAL_SCHEMA,
   SUPPORTED_CREDENTIAL_PROVIDERS,
   createCredentialStore,
+  discardCredentialStoreFile,
   writeFileAtomic,
 };
