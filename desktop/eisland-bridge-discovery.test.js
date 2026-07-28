@@ -173,6 +173,99 @@ test('does_not_overwrite_fresh_active_external_descriptor_on_initial_publish', a
     assert.equal(await publisher.close(), false);
   });
 });
+
+test('fails_closed_when_an_external_descriptor_cannot_be_read', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const externalDescriptor = {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_593,
+      token: 'external-unreadable-token',
+      instanceId: 'external-unreadable-instance',
+      pid: 50_006,
+      expiresAtMs: 9_205_000,
+    };
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(descriptorPath, JSON.stringify(externalDescriptor), 'utf8');
+
+    let livenessChecks = 0;
+    const unreadableDescriptorFs = {
+      ...fs,
+      async readFile(filePath, ...args) {
+        if (filePath === descriptorPath) {
+          const error = new Error('external-descriptor-read-denied');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.readFile(filePath, ...args);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_594,
+      clock: () => 9_200_000,
+      fs: unreadableDescriptorFs,
+      instanceId: 'instance-unreadable-descriptor-candidate',
+      isProcessAlive() {
+        livenessChecks += 1;
+        return true;
+      },
+      pid: 4_348,
+      timer: createIdleTimer(),
+      token: 'unreadable-descriptor-candidate-token',
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(
+        error?.message,
+        'Bridge discovery descriptor publication failed.',
+      );
+      assert.doesNotMatch(String(error?.message), /external-descriptor-read-denied/);
+      return true;
+    });
+    assert.equal(livenessChecks, 0);
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(descriptorPath, 'utf8')),
+      externalDescriptor,
+    );
+    assert.equal(await publisher.close(), false);
+  });
+});
+
+test('fails_closed_when_an_external_descriptor_is_not_json', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const malformedDescriptor = '{ definitely-not-json';
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(descriptorPath, malformedDescriptor, 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_595,
+      clock: () => 9_200_000,
+      instanceId: 'instance-malformed-descriptor-candidate',
+      isProcessAlive: () => true,
+      pid: 4_349,
+      timer: createIdleTimer(),
+      token: 'malformed-descriptor-candidate-token',
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(
+        error?.message,
+        'Bridge discovery descriptor publication failed.',
+      );
+      return true;
+    });
+    assert.equal(await fs.readFile(descriptorPath, 'utf8'), malformedDescriptor);
+    assert.equal(await publisher.close(), false);
+  });
+});
+
 test('publishes_atomically_without_partial_json', async () => {
   await withTempAppData(async (appData) => {
     const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
@@ -1518,6 +1611,406 @@ test('cleans_an_unlinked_generation_candidate_after_link_failure', async () => {
     await assert.rejects(publisher.ready);
     assert.deepEqual(await fs.readdir(generationDirectory), []);
     await publisher.close();
+  });
+});
+
+test('continues_after_an_initial_root_link_reports_failure_after_commit', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const rootLinkThenThrowFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        const result = await fs.link(sourcePath, destinationPath);
+        if (destinationPath === generationRootPath) {
+          const error = new Error('root-link-reported-after-commit');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return result;
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let firstPublisher;
+    let successorPublisher;
+    try {
+      firstPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_617,
+        clock: () => 10_161_000,
+        fs: rootLinkThenThrowFs,
+        instanceId: 'instance-root-link-after-commit',
+        pid: 4_437,
+        timer: createIdleTimer(),
+        token: 'root-link-after-commit-token',
+      });
+      assert.equal(await firstPublisher.ready, true);
+
+      const rootOwner = JSON.parse(
+        await fs.readFile(generationRootPath, 'utf8'),
+      );
+      assert.equal(rootOwner.instanceId, 'instance-root-link-after-commit');
+      const ownerPath = path.join(
+        generationDirectory,
+        'owner.' + rootOwner.lockId + '.json',
+      );
+      await fs.access(ownerPath);
+      await assert.rejects(fs.access(ownerPath + '.pending'), { code: 'ENOENT' });
+
+      await firstPublisher.close();
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_618,
+        clock: () => 10_161_000,
+        instanceId: 'instance-root-link-after-commit-successor',
+        pid: 4_438,
+        timer: createIdleTimer(),
+        token: 'root-link-after-commit-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+      await Promise.allSettled([firstPublisher?.close()]);
+    }
+  });
+});
+
+test('continues_after_a_successor_link_reports_failure_after_commit', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const successorLinkThenThrowFs = {
+      ...fs,
+      async link(sourcePath, destinationPath) {
+        const result = await fs.link(sourcePath, destinationPath);
+        if (destinationPath.endsWith('.next')) {
+          const error = new Error('successor-link-reported-after-commit');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return result;
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const firstPublisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_619,
+      clock: () => 10_162_000,
+      instanceId: 'instance-successor-link-first',
+      pid: 4_439,
+      timer: createIdleTimer(),
+      token: 'successor-link-first-token',
+    });
+    await firstPublisher.ready;
+    await firstPublisher.close();
+
+    let committedSuccessor;
+    let laterSuccessor;
+    try {
+      committedSuccessor = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_620,
+        clock: () => 10_162_000,
+        fs: successorLinkThenThrowFs,
+        instanceId: 'instance-successor-link-after-commit',
+        pid: 4_440,
+        timer: createIdleTimer(),
+        token: 'successor-link-after-commit-token',
+      });
+      assert.equal(await committedSuccessor.ready, true);
+
+      const rootOwner = JSON.parse(
+        await fs.readFile(generationRootPath, 'utf8'),
+      );
+      assert.equal(rootOwner.instanceId, 'instance-successor-link-after-commit');
+      const ownerPath = path.join(
+        generationDirectory,
+        'owner.' + rootOwner.lockId + '.json',
+      );
+      await fs.access(ownerPath);
+      await assert.rejects(fs.access(ownerPath + '.pending'), { code: 'ENOENT' });
+      await assert.rejects(
+        fs.access(ownerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+
+      await committedSuccessor.close();
+      laterSuccessor = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_621,
+        clock: () => 10_162_000,
+        instanceId: 'instance-successor-link-later-successor',
+        pid: 4_441,
+        timer: createIdleTimer(),
+        token: 'successor-link-later-successor-token',
+      });
+      assert.equal(await laterSuccessor.ready, true);
+    } finally {
+      await Promise.allSettled([laterSuccessor?.close()]);
+      await Promise.allSettled([committedSuccessor?.close()]);
+      await Promise.allSettled([firstPublisher.close()]);
+    }
+  });
+});
+
+test('reclaims_an_unreferenced_malformed_pending_candidate', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const abandonedOwnerPath = path.join(
+      generationDirectory,
+      'owner.4cd9cf5f-8fc5-46c4-8cc4-0fc2696c0121.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(abandonedOwnerPath + '.pending', '{ partial', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_622,
+        clock: () => 10_163_000,
+        instanceId: 'instance-malformed-pending-successor',
+        pid: 4_442,
+        timer: createIdleTimer(),
+        token: 'malformed-pending-successor-token',
+      });
+      assert.equal(await publisher.ready, true);
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.pending'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(fs.access(abandonedOwnerPath), { code: 'ENOENT' });
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+    }
+  });
+});
+
+test('removes_only_a_malformed_pending_marker_from_a_reachable_owner', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const generationRootPath = path.join(generationDirectory, 'root');
+    const reachableOwner = {
+      instanceId: 'instance-reachable-malformed-pending',
+      pid: 4_443,
+      lockId: '9e06f46d-bbff-4dbe-ad4d-ef8d2e2d0121',
+    };
+    const reachableOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + reachableOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      reachableOwnerPath,
+      JSON.stringify(reachableOwner),
+      'utf8',
+    );
+    await fs.link(reachableOwnerPath, generationRootPath);
+    await fs.writeFile(reachableOwnerPath + '.pending', '{ partial', 'utf8');
+    await fs.writeFile(reachableOwnerPath + '.released', '', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let successorPublisher;
+    try {
+      successorPublisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_623,
+        clock: () => 10_163_000,
+        instanceId: 'instance-reachable-malformed-pending-successor',
+        pid: 4_444,
+        timer: createIdleTimer(),
+        token: 'reachable-malformed-pending-successor-token',
+      });
+      assert.equal(await successorPublisher.ready, true);
+      await assert.rejects(
+        fs.access(reachableOwnerPath + '.pending'),
+        { code: 'ENOENT' },
+      );
+      const rootOwner = JSON.parse(await fs.readFile(generationRootPath, 'utf8'));
+      assert.equal(
+        rootOwner.instanceId,
+        'instance-reachable-malformed-pending-successor',
+      );
+    } finally {
+      await Promise.allSettled([successorPublisher?.close()]);
+    }
+  });
+});
+
+test('reclaims_an_unreferenced_malformed_owner_with_a_valid_pending_marker', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const abandonedOwner = {
+      instanceId: 'instance-malformed-owner',
+      pid: 4_443,
+      lockId: 'b7a938ba-5d99-4db2-8b91-a5e986a50121',
+    };
+    const abandonedOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + abandonedOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      abandonedOwnerPath + '.pending',
+      JSON.stringify(abandonedOwner),
+      'utf8',
+    );
+    await fs.writeFile(abandonedOwnerPath, '{ partial', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_623,
+        clock: () => 10_163_000,
+        instanceId: 'instance-malformed-owner-successor',
+        pid: 4_444,
+        timer: createIdleTimer(),
+        token: 'malformed-owner-successor-token',
+      });
+      assert.equal(await publisher.ready, true);
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.pending'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(fs.access(abandonedOwnerPath), { code: 'ENOENT' });
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+    }
+  });
+});
+
+test('fails_closed_for_a_live_unlinked_candidate_with_an_unreadable_owner', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const candidateOwner = {
+      instanceId: 'instance-unreadable-candidate',
+      pid: 4_445,
+      lockId: 'a2ee50f2-773b-4da2-80b5-9a30c5700121',
+    };
+    const candidateOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + candidateOwner.lockId + '.json',
+    );
+    const candidatePendingPath = candidateOwnerPath + '.pending';
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      candidatePendingPath,
+      JSON.stringify(candidateOwner),
+      'utf8',
+    );
+    await fs.writeFile(
+      candidateOwnerPath,
+      JSON.stringify(candidateOwner),
+      'utf8',
+    );
+
+    const unreadableOwnerFs = {
+      ...fs,
+      async readFile(filePath, ...args) {
+        if (filePath === candidateOwnerPath) {
+          const error = new Error('candidate-owner-read-denied');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return fs.readFile(filePath, ...args);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_624,
+      clock: () => 10_163_000,
+      fs: unreadableOwnerFs,
+      instanceId: 'instance-unreadable-candidate-successor',
+      isProcessAlive(candidatePid) {
+        return candidatePid === candidateOwner.pid;
+      },
+      pid: 4_446,
+      timer: createIdleTimer(),
+      token: 'unreadable-candidate-successor-token',
+    });
+
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(error?.message, 'Bridge discovery generation cleanup failed.');
+      return true;
+    });
+    assert.equal(
+      await fs.readFile(candidateOwnerPath, 'utf8'),
+      JSON.stringify(candidateOwner),
+    );
+    assert.equal(
+      await fs.readFile(candidatePendingPath, 'utf8'),
+      JSON.stringify(candidateOwner),
+    );
+    await publisher.close();
+  });
+});
+
+test('reclaims_an_unreferenced_malformed_compacting_marker', async () => {
+  await withTempAppData(async (appData) => {
+    const generationDirectory = path.join(
+      appData,
+      '.eisland-bridge-v1.json.generations',
+    );
+    const abandonedOwner = {
+      instanceId: 'instance-malformed-compacting',
+      pid: 4_445,
+      lockId: 'aa55dc85-6c3b-4417-8faa-969a38610121',
+    };
+    const abandonedOwnerPath = path.join(
+      generationDirectory,
+      'owner.' + abandonedOwner.lockId + '.json',
+    );
+    await fs.mkdir(generationDirectory, { recursive: true });
+    await fs.writeFile(
+      abandonedOwnerPath,
+      JSON.stringify(abandonedOwner),
+      'utf8',
+    );
+    await fs.writeFile(abandonedOwnerPath + '.compacting', '{ partial', 'utf8');
+
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    let publisher;
+    try {
+      publisher = createBridgeDiscoveryPublisher({
+        appData,
+        bridgePort: 34_624,
+        clock: () => 10_163_000,
+        instanceId: 'instance-malformed-compacting-successor',
+        pid: 4_446,
+        timer: createIdleTimer(),
+        token: 'malformed-compacting-successor-token',
+      });
+      assert.equal(await publisher.ready, true);
+      await assert.rejects(
+        fs.access(abandonedOwnerPath + '.compacting'),
+        { code: 'ENOENT' },
+      );
+      await assert.rejects(fs.access(abandonedOwnerPath), { code: 'ENOENT' });
+    } finally {
+      await Promise.allSettled([publisher?.close()]);
+    }
   });
 });
 
