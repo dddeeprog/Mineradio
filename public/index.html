@@ -23051,13 +23051,16 @@ function localImportReadOptions(extra) {
 function localImportFileIdentity(file) {
   return String((file && (file.webkitRelativePath || file.relativePath || file.fullPath || file.filePath || file.name)) || '');
 }
+function isTtmlLyricDocument(text) {
+  return /^(?:<\?xml\b[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE\s+tt(?:\s[^>]*)?>\s*)?(?:<!--[\s\S]*?-->\s*)*<tt[\s>]/i.test(String(text || '').trim());
+}
 function parseLocalImportedLyricText(text, file) {
   var raw = String(text || '').trim();
   var api = window.MineradioLocalLyricFileState || null;
   if (!raw || !api || typeof api.normalizeParsedLocalLyrics !== 'function') return null;
   var name = String(file && file.name || '');
   var isLegacyText = /\.txt$/i.test(name);
-  var isTtml = /\.ttml$/i.test(name) || (!isLegacyText && /^(?:<\?xml\b[^?]*\?>\s*)?<tt[\s>]/i.test(raw));
+  var isTtml = /\.ttml$/i.test(name) || (!isLegacyText && isTtmlLyricDocument(raw));
   var source = isTtml ? 'local-ttml' : (isLegacyText ? 'local-text' : 'local-lrc');
   var lines = isTtml ? parseFoliaTtmlLyricText(raw) : parseCustomLyricText(raw);
   lines = lines.map(function(line) {

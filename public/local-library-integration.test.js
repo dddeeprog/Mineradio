@@ -43,7 +43,10 @@ test('local lyric candidate state loads before local media and library helpers',
 });
 
 test('local lyric imports parse TTML and LRC into one normalized lyric state', () => {
+  const detector = extractFunction(indexHtml, 'function isTtmlLyricDocument');
   const body = extractFunction(indexHtml, 'function parseLocalImportedLyricText');
+  assert.match(detector, /<!DOCTYPE/);
+  assert.match(detector, /<!--/);
   assert.match(body, /MineradioLocalLyricFileState/);
   assert.match(body, /normalizeParsedLocalLyrics/);
   assert.match(body, /parseFoliaTtmlLyricText/);
@@ -56,6 +59,7 @@ test('local lyric imports parse TTML and LRC into one normalized lyric state', (
   assert.match(body, /lines\.map\(function\(line\) \{[\s\S]*source: source/);
 
   const context = {
+    prologTtml: '<?xml version="1.0"?>\n<!-- meta -->\n<!DOCTYPE tt>\n<tt></tt>',
     window: {
       MineradioLocalLyricFileState: {
         normalizeParsedLocalLyrics(input) {
@@ -71,8 +75,8 @@ test('local lyric imports parse TTML and LRC into one normalized lyric state', (
     parseFoliaTtmlLyricText() { return [{ text: 'TTML', source: 'folia-ttml' }]; },
     parseCustomLyricText() { return [{ text: 'LRC', source: 'custom-lrc' }]; },
   };
-  vm.runInNewContext(`${body}; this.ttmlState = parseLocalImportedLyricText('<tt></tt>', { name: 'song.ttml' }); this.xmlTtmlState = parseLocalImportedLyricText('<?xml version="1.0"?>  <tt></tt>', { name: 'song.lrc' }); this.lrcState = parseLocalImportedLyricText('[00:00]line', { name: 'song.lrc' }); this.textState = parseLocalImportedLyricText('[00:00]line', { name: 'song.txt' });`, context);
-  [[context.ttmlState, 'local-ttml', '同目录 TTML'], [context.xmlTtmlState, 'local-ttml', '同目录 TTML'], [context.lrcState, 'local-lrc', '同目录 LRC'], [context.textState, 'local-text', '同目录 TXT']].forEach(function(entry) {
+  vm.runInNewContext(`${detector}; ${body}; this.ttmlState = parseLocalImportedLyricText('<tt></tt>', { name: 'song.ttml' }); this.xmlTtmlState = parseLocalImportedLyricText('<?xml version="1.0"?>  <tt></tt>', { name: 'song.lrc' }); this.prologTtmlState = parseLocalImportedLyricText(prologTtml, { name: 'song.lrc' }); this.lrcState = parseLocalImportedLyricText('[00:00]line', { name: 'song.lrc' }); this.textState = parseLocalImportedLyricText('[00:00]line', { name: 'song.txt' });`, context);
+  [[context.ttmlState, 'local-ttml', '同目录 TTML'], [context.xmlTtmlState, 'local-ttml', '同目录 TTML'], [context.prologTtmlState, 'local-ttml', '同目录 TTML'], [context.lrcState, 'local-lrc', '同目录 LRC'], [context.textState, 'local-text', '同目录 TXT']].forEach(function(entry) {
     assert.equal(entry[0].hasNativeKaraoke, false);
     assert.equal(entry[0].timingSource, entry[1]);
     assert.equal(entry[0].sourceLabel, entry[2]);
@@ -129,6 +133,7 @@ test('direct dropped local files use async metadata and asset parsing', () => {
 test('local library assets retain ordered lyric candidates and the importer falls back from invalid TTML to LRC', async () => {
   const assets = extractFunction(indexHtml, 'function localSongAssetFiles');
   const candidates = extractFunction(indexHtml, 'function localLyricCandidateFiles');
+  const detector = extractFunction(indexHtml, 'function isTtmlLyricDocument');
   const parser = extractFunction(indexHtml, 'function parseLocalImportedLyricText');
   const importer = extractFunction(indexHtml, 'async function collectLocalImportAssets');
 
@@ -157,7 +162,7 @@ test('local library assets retain ordered lyric candidates and the importer fall
     parseFoliaTtmlLyricText() { return []; },
     parseCustomLyricText() { return [{ text: 'LRC', source: 'custom-lrc' }]; },
   };
-  vm.runInNewContext(`${parser}; ${importer}; this.collect = collectLocalImportAssets;`, context);
+  vm.runInNewContext(`${detector}; ${parser}; ${importer}; this.collect = collectLocalImportAssets;`, context);
   const result = await context.collect({
     findAdjacentLocalAssets() { return { lyricFile: ttml, lyricCandidates: [ttml, lrc] }; },
     async extractLocalMetadata() { return {}; },
@@ -172,6 +177,7 @@ test('local library assets retain ordered lyric candidates and the importer fall
 });
 
 test('valid local LRC avoids FLAC embedded lyric fallback', async () => {
+  const detector = extractFunction(indexHtml, 'function isTtmlLyricDocument');
   const parser = extractFunction(indexHtml, 'function parseLocalImportedLyricText');
   const importer = extractFunction(indexHtml, 'async function collectLocalImportAssets');
   let embeddedReads = 0;
@@ -189,7 +195,7 @@ test('valid local LRC avoids FLAC embedded lyric fallback', async () => {
     parseFoliaTtmlLyricText() { return []; },
     parseCustomLyricText() { return [{ text: 'LRC', source: 'custom-lrc' }]; },
   };
-  vm.runInNewContext(`${parser}; ${importer}; this.collect = collectLocalImportAssets;`, context);
+  vm.runInNewContext(`${detector}; ${parser}; ${importer}; this.collect = collectLocalImportAssets;`, context);
   const result = await context.collect({
     findAdjacentLocalAssets() { return { lyricFile: lrc, lyricCandidates: [lrc] }; },
     async extractLocalMetadata() { return {}; },
