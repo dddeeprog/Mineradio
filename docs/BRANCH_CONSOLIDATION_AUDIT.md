@@ -179,7 +179,7 @@ Task 10 合同测试锁定以下当前能力：在线/歌单/本地来源导航�
 - Windows 构建：首次 `build:win:dir` 失败是因为辅助 worktree 缺少 `node_modules/electron`；`package-lock.json` 已锁定 Electron 42.4.1，执行 `npm ci` 恢复本地依赖且未产生受跟踪源码或 lock 文件变更。随后 `build:win:dir` 与 `build:win` 均通过。
 - 产物验证：`npm run verify:artifacts` 已验证 `dist/Mineradio-1.1.0-Setup.exe`，SHA256 为 `6A311119709031C692B1D840B40C3067AAAF587DA699DF0D17B331B77F30F00A`。Authenticode 状态仅因当前宿主中 `Microsoft.PowerShell.Security` 受重复 TypeData 成员影响而无法加载，记录为 `Unavailable`；该结果**不构成已签名或未签名结论**。
 - 评审：Task 10B 的 spec review 与 code-quality review 均已批准。
-- 仓库卫生：验证完成后 `git diff --check` 通过，工作树干净。
+- 仓库卫生：验证完成后 `git diff --check` 通过；`git status --short` 无输出，工作树干净。
 
 结论：Task 10B 的功能、回归、视觉和 Windows 产物验证均已完成；参考硬件模式实际使用软件渲染，因此硬件性能目标仍不在本轮已验证范围内。
 
