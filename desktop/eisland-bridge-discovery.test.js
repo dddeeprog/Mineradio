@@ -25,10 +25,73 @@ async function withTempAppData(run) {
 function createIdleTimer() {
   return {
     clearInterval() {},
+    clearTimeout(handle) {
+      if (!handle) return;
+      handle.cleared = true;
+      globalThis.clearTimeout(handle.timeout);
+    },
     setInterval() {
       return {};
     },
+    setTimeout(callback, delay) {
+      const handle = { cleared: false };
+      handle.timeout = globalThis.setTimeout(() => {
+        if (!handle.cleared) callback();
+      }, delay);
+      return handle;
+    },
   };
+}
+
+function createControllableTimer() {
+  return {
+    intervals: [],
+    timeouts: [],
+    clearInterval(handle) {
+      handle.clearCount += 1;
+      handle.cleared = true;
+    },
+    clearTimeout(handle) {
+      handle.clearCount += 1;
+      handle.cleared = true;
+    },
+    setInterval(callback, delay) {
+      const handle = {
+        callback,
+        clearCount: 0,
+        cleared: false,
+        delay,
+      };
+      this.intervals.push(handle);
+      return handle;
+    },
+    setTimeout(callback, delay) {
+      const handle = {
+        callback,
+        clearCount: 0,
+        cleared: false,
+        delay,
+        fired: false,
+      };
+      this.timeouts.push(handle);
+      return handle;
+    },
+    fireInterval(handle = this.intervals[0]) {
+      return handle.callback();
+    },
+    fireTimeout(handle = this.timeouts.find((candidate) => !candidate.cleared && !candidate.fired)) {
+      handle.fired = true;
+      return handle.callback();
+    },
+  };
+}
+
+async function waitForTimeout(timer, count) {
+  for (let turn = 0; turn < 20; turn += 1) {
+    if (timer.timeouts.length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.fail(`Expected ${count} scheduled timeout(s).`);
 }
 
 function createDeferred() {
@@ -466,24 +529,44 @@ test('does_not_delete_later_publisher_during_gated_close', async () => {
     });
   });
 });
-test('sanitizes_and_closes_owned_temporary_descriptor_after_cleanup_failure', async () => {
+test('removes_owned_temporary_descriptor_after_transient_cleanup_failure', async () => {
   await withTempAppData(async (appData) => {
     const failureToken = 'temporary-cleanup-failure-token';
-    let allowTemporaryCleanup = false;
     let temporaryUnlinkAttempts = 0;
+    let denyFirstSanitize = true;
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const foreignTemporaryPath = path.join(
+      descriptorDirectory,
+      '.eisland-bridge-v1.foreign.tmp',
+    );
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(foreignTemporaryPath, 'foreign temporary descriptor', 'utf8');
     const failingFs = {
       ...fs,
       async rename() {
         throw new Error(failureToken);
       },
       async unlink(filePath) {
-        if (filePath.endsWith('.tmp') && !allowTemporaryCleanup) {
+        if (filePath.endsWith('.tmp') && filePath !== foreignTemporaryPath) {
           temporaryUnlinkAttempts += 1;
-          throw new Error(failureToken);
+          if (temporaryUnlinkAttempts < 3) throw new Error(failureToken);
         }
         return fs.unlink(filePath);
       },
+      async writeFile(filePath, contents, options) {
+        if (
+          filePath.endsWith('.tmp') &&
+          filePath !== foreignTemporaryPath &&
+          contents === '' &&
+          denyFirstSanitize
+        ) {
+          denyFirstSanitize = false;
+          throw new Error(failureToken);
+        }
+        return fs.writeFile(filePath, contents, options);
+      },
     };
+    const timer = createControllableTimer();
     const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
     const publisher = createBridgeDiscoveryPublisher({
       appData,
@@ -492,27 +575,199 @@ test('sanitizes_and_closes_owned_temporary_descriptor_after_cleanup_failure', as
       fs: failingFs,
       instanceId: 'instance-temporary-cleanup',
       pid: 4_331,
-      timer: createIdleTimer(),
+      timer,
       token: failureToken,
     });
 
+    await waitForTimeout(timer, 1);
+    await timer.fireTimeout();
+    await waitForTimeout(timer, 2);
+    await timer.fireTimeout();
     await assert.rejects(publisher.ready, (error) => {
+      assert.equal(error?.message, 'Bridge discovery descriptor publication failed.');
       assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
       return true;
     });
 
-    const descriptorDirectory = path.join(appData, 'Mineradio');
     const temporaryNames = (await fs.readdir(descriptorDirectory)).filter((name) =>
       name.endsWith('.tmp'),
     );
     assert.equal(temporaryNames.length, 1);
-    const temporaryPath = path.join(descriptorDirectory, temporaryNames[0]);
-    assert.doesNotMatch(await fs.readFile(temporaryPath, 'utf8'), new RegExp(failureToken));
-    assert.ok(temporaryUnlinkAttempts >= 2);
+    assert.equal(temporaryNames[0], path.basename(foreignTemporaryPath));
+    assert.equal(await fs.readFile(foreignTemporaryPath, 'utf8'), 'foreign temporary descriptor');
+    assert.equal(temporaryUnlinkAttempts, 3);
 
-    allowTemporaryCleanup = true;
     await publisher.close();
-    assert.deepEqual(await fs.readdir(descriptorDirectory), []);
+    assert.deepEqual(await fs.readdir(descriptorDirectory), [
+      path.basename(foreignTemporaryPath),
+    ]);
+  });
+});
+test('reports_persistent_owned_temporary_cleanup_failure_without_touching_foreign_files', async () => {
+  await withTempAppData(async (appData) => {
+    const failureToken = 'persistent-temporary-cleanup-failure-token';
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const foreignTemporaryPath = path.join(
+      descriptorDirectory,
+      '.eisland-bridge-v1.foreign.tmp',
+    );
+    let foreignUnlinkAttempts = 0;
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(foreignTemporaryPath, 'foreign temporary descriptor', 'utf8');
+    const failingFs = {
+      ...fs,
+      async rename() {
+        throw new Error(failureToken);
+      },
+      async unlink(filePath) {
+        if (filePath === foreignTemporaryPath) foreignUnlinkAttempts += 1;
+        if (filePath.endsWith('.tmp') && filePath !== foreignTemporaryPath) {
+          throw new Error(failureToken);
+        }
+        return fs.unlink(filePath);
+      },
+      async writeFile(filePath, contents, options) {
+        if (
+          filePath.endsWith('.tmp') &&
+          filePath !== foreignTemporaryPath &&
+          contents === ''
+        ) {
+          throw new Error(failureToken);
+        }
+        return fs.writeFile(filePath, contents, options);
+      },
+    };
+    const timer = createControllableTimer();
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_578,
+      clock: () => 8_100_000,
+      fs: failingFs,
+      instanceId: 'instance-persistent-temporary-cleanup',
+      pid: 4_332,
+      timer,
+      token: failureToken,
+    });
+
+    await waitForTimeout(timer, 1);
+    await timer.fireTimeout();
+    await waitForTimeout(timer, 2);
+    await timer.fireTimeout();
+    await assert.rejects(publisher.ready, (error) => {
+      assert.equal(error?.message, 'Bridge discovery descriptor cleanup failed.');
+      assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
+      return true;
+    });
+
+    const closing = publisher.close();
+    await waitForTimeout(timer, 3);
+    await timer.fireTimeout();
+    await waitForTimeout(timer, 4);
+    await timer.fireTimeout();
+    await assert.rejects(closing, (error) => {
+      assert.equal(error?.message, 'Bridge discovery descriptor cleanup failed.');
+      assert.doesNotMatch(String(error?.message), new RegExp(failureToken));
+      return true;
+    });
+    assert.equal(foreignUnlinkAttempts, 0);
+    assert.equal(await fs.readFile(foreignTemporaryPath, 'utf8'), 'foreign temporary descriptor');
+  });
+});
+test('cancels_pending_lock_acquisition_when_closed', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(lockPath, 'external lock', 'utf8');
+    let sawInitialLock = false;
+    const lockedFs = {
+      ...fs,
+      async writeFile(filePath, contents, options) {
+        try {
+          return await fs.writeFile(filePath, contents, options);
+        } catch (error) {
+          if (
+            filePath === lockPath &&
+            options?.flag === 'wx' &&
+            error?.code === 'EEXIST' &&
+            !sawInitialLock
+          ) {
+            sawInitialLock = true;
+            await fs.unlink(lockPath);
+          }
+          throw error;
+        }
+      },
+    };
+    const timer = createControllableTimer();
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_579,
+      clock: () => 8_200_000,
+      fs: lockedFs,
+      instanceId: 'instance-cancel-lock',
+      pid: 4_333,
+      timer,
+      token: 'cancel-lock-token',
+    });
+
+    await waitForTimeout(timer, 1);
+    const ready = publisher.ready;
+    const closing = publisher.close();
+    assert.equal(timer.timeouts[0].cleared, true);
+    assert.equal(await ready, false);
+    assert.equal(await closing, false);
+    assert.equal(sawInitialLock, true);
+    await assert.rejects(fs.access(lockPath), { code: 'ENOENT' });
+  });
+});
+test('does_not_report_success_when_descriptor_lock_release_persists', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    const failureToken = 'persistent-lock-release-failure-token';
+    let rejectRelease = false;
+    let releaseAttempts = 0;
+    const failingFs = {
+      ...fs,
+      async unlink(filePath) {
+        if (filePath === lockPath && rejectRelease) {
+          releaseAttempts += 1;
+          throw new Error(failureToken);
+        }
+        return fs.unlink(filePath);
+      },
+    };
+    const timer = createControllableTimer();
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_580,
+      clock: () => 8_300_000,
+      fs: failingFs,
+      instanceId: 'instance-release-lock',
+      pid: 4_334,
+      timer,
+      token: failureToken,
+    });
+    await publisher.ready;
+
+    rejectRelease = true;
+    const refreshing = timer.fireInterval();
+    try {
+      await waitForTimeout(timer, 1);
+      await timer.fireTimeout();
+      await waitForTimeout(timer, 2);
+      await timer.fireTimeout();
+      assert.equal(await refreshing, false);
+      assert.equal(releaseAttempts, 3);
+    } finally {
+      rejectRelease = false;
+      await refreshing;
+      await fs.unlink(lockPath).catch(() => {});
+    }
   });
 });
 test('normalizes_mkdir_failure_without_leaking_token', async () => {
