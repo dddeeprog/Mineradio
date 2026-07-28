@@ -71,6 +71,7 @@ const { createDiscoverRoutes } = require('./server/routes/discover');
 const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
 const { createFoliaThemeRoutes } = require('./server/routes/folia-theme');
 const { createNeteaseRoutes } = require('./server/routes/netease');
+const { createPlatformRoutes } = require('./server/routes/platform');
 const { createPodcastRoutes } = require('./server/routes/podcast');
 const { createProxyRoutes } = require('./server/routes/proxy');
 const { createQQRoutes } = require('./server/routes/qq');
@@ -2694,6 +2695,21 @@ async function getLoginInfo() {
   }
 }
 
+async function getPlatformAccountStatuses() {
+  const results = await Promise.allSettled([getLoginInfo(), getQQLoginInfo()]);
+  return {
+    netease: results[0].status === 'fulfilled'
+      ? results[0].value
+      : { provider: 'netease', loggedIn: false },
+    qq: results[1].status === 'fulfilled'
+      ? results[1].value
+      : { provider: 'qq', loggedIn: false },
+    kugou: { provider: 'kugou', loggedIn: false },
+    qishui: { provider: 'qishui', loggedIn: false },
+    spotify: { provider: 'spotify', loggedIn: false },
+  };
+}
+
 function appVersionPayload() {
   return {
     name: APP_PACKAGE.name || 'mineradio',
@@ -2714,6 +2730,10 @@ const appStatusRoutes = createAppStatusRoutes({
   sendJSON,
   appVersionPayload,
   getLoginInfo,
+});
+const platformRoutes = createPlatformRoutes({
+  sendJSON,
+  getAccountStatuses: getPlatformAccountStatuses,
 });
 const weatherRadioRoutes = createWeatherRadioRoutes({
   sendJSON,
@@ -2875,6 +2895,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await appStatusRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
+  if (await platformRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 

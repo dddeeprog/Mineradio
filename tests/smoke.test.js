@@ -11,6 +11,12 @@ test('maintenance baseline scripts are wired', () => {
   const scripts = pkg.scripts || {};
 
   assert.match(scripts.check, /node --check server\.js/);
+  assert.match(scripts.check, /node --check server\/platform\/capabilities\.js/);
+  assert.match(scripts.check, /node --check server\/platform\/account-cache\.js/);
+  assert.match(scripts.check, /node --check server\/platform\/account-context\.js/);
+  assert.match(scripts.check, /node --check server\/routes\/platform\.js/);
+  assert.match(scripts.check, /node --check desktop\/app-paths\.js/);
+  assert.match(scripts.check, /node --check desktop\/credential-store\.js/);
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
@@ -49,6 +55,27 @@ test('complete weather route is registered in the local API server', () => {
   assert.match(server, /buildFullWeather/);
   assert.match(server, /weatherFullRoutes\.handleRoute\(pn, req, res, url\)/);
   assert.match(route, /pn === '\/api\/weather\/full'/);
+});
+
+test('platform capability route is registered before provider routes', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
+  const platformDispatch = server.indexOf(
+    'platformRoutes.handleRoute(pn, req, res, url)',
+  );
+  const neteaseDispatch = server.indexOf(
+    'neteaseRoutes.handleRoute(pn, req, res, url)',
+  );
+  const qqDispatch = server.indexOf(
+    'qqRoutes.handleRoute(pn, req, res, url)',
+  );
+
+  assert.match(server, /createPlatformRoutes/);
+  assert.match(server, /const platformRoutes = createPlatformRoutes\(/);
+  assert.match(server, /async function getPlatformAccountStatuses\(\)/);
+  assert.match(server, /Promise\.allSettled\(\[getLoginInfo\(\), getQQLoginInfo\(\)\]\)/);
+  assert.notEqual(platformDispatch, -1);
+  assert.ok(platformDispatch < neteaseDispatch);
+  assert.ok(platformDispatch < qqDispatch);
 });
 
 test('playback session restore script is wired', () => {

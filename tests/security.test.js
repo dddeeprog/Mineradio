@@ -33,6 +33,21 @@ test('state changing routes require POST', () => {
   assert.equal(isMethodAllowedForRoute('/api/search', 'GET'), true);
 });
 
+test('platform capability route is GET-only', () => {
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/capabilities', 'GET'),
+    true,
+  );
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/capabilities', 'POST'),
+    false,
+  );
+  assert.equal(
+    isMethodAllowedForRoute('/api/platform/capabilities', 'DELETE'),
+    false,
+  );
+});
+
 test('remote media URL validation rejects local network targets', () => {
   assert.doesNotThrow(() => assertAllowedRemoteMediaUrl('https://music.163.com/song/media/outer/url?id=1.mp3'));
   assert.doesNotThrow(() => assertAllowedRemoteMediaUrl('https://y.qq.com/music/photo_new/T002R300x300M000abc.jpg'));

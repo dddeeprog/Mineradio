@@ -2,6 +2,10 @@ const net = require('net');
 
 const LOOPBACK_HOST = '127.0.0.1';
 
+const GET_ONLY_ROUTES = new Set([
+  '/api/platform/capabilities',
+]);
+
 const POST_ONLY_ROUTES = new Set([
   '/api/update/download',
   '/api/update/patch',
@@ -135,8 +139,11 @@ function isStateChangingRoute(pathname) {
 }
 
 function isMethodAllowedForRoute(pathname, method) {
-  if (!isStateChangingRoute(pathname)) return true;
-  return String(method || '').toUpperCase() === 'POST';
+  pathname = String(pathname || '');
+  method = String(method || '').toUpperCase();
+  if (GET_ONLY_ROUTES.has(pathname)) return method === 'GET';
+  if (POST_ONLY_ROUTES.has(pathname)) return method === 'POST';
+  return true;
 }
 
 module.exports = {
