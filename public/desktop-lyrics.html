@@ -1074,10 +1074,16 @@
       var hintRect = lockHint.getBoundingClientRect();
       return pointInRect(evt, hintRect, 10, 10);
     }
+    function lockToggleUnderPointer(evt) {
+      if (!isLocked() || !hintVisible || !lockToggleBtn || !evt) return false;
+      return pointInRect(evt, lockToggleBtn.getBoundingClientRect(), 0, 0);
+    }
     function setHintVisible(visible) {
       hintVisible = !!visible;
       stage.classList.toggle('hint-visible', hintVisible);
-      setPointerCapture(!isLocked() && (hintVisible || dragging) && hoverInside);
+      setPointerCapture(isLocked()
+        ? lockToggleUnderPointer(lastPointerEvent)
+        : (hintVisible || dragging) && hoverInside);
     }
     function hideInteractionHint() {
       hoverInside = false;
@@ -1108,7 +1114,7 @@
         } else {
           hideInteractionHint();
         }
-        setPointerCapture(false);
+        setPointerCapture(lockToggleUnderPointer(evt));
         return inside;
       }
       if (inside || dragging) {

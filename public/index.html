@@ -28957,24 +28957,27 @@ var desktopOverlaySyncTimer = null;
 function desktopOverlayActive() {
   return !!(fx && (fx.desktopLyrics || fx.wallpaperMode) && window.desktopWindow && window.desktopWindow.isDesktop);
 }
-function cancelDesktopOverlaySync() {
+function cancelDesktopOverlaySync(resetState) {
   if (desktopOverlaySyncTimer) {
     clearTimeout(desktopOverlaySyncTimer);
     desktopOverlaySyncTimer = null;
   }
+  if (!resetState) return;
   desktopOverlayPushState.lastLyricsKey = '';
   desktopOverlayPushState.lastWallpaperKey = '';
-  if (lyricLineFinder && typeof lyricLineFinder.reset === 'function') lyricLineFinder.reset();
 }
 function scheduleDesktopOverlaySync(delay) {
   if (!desktopOverlayActive()) {
-    cancelDesktopOverlaySync();
+    cancelDesktopOverlaySync(true);
     return;
   }
   if (desktopOverlaySyncTimer) return;
   desktopOverlaySyncTimer = setTimeout(function(){
     desktopOverlaySyncTimer = null;
-    if (!desktopOverlayActive()) return;
+    if (!desktopOverlayActive()) {
+      cancelDesktopOverlaySync(true);
+      return;
+    }
     syncDesktopOverlayState();
     scheduleDesktopOverlaySync(desktopOverlaySyncDelay());
   }, Math.max(0, delay == null ? desktopOverlaySyncDelay() : delay));
@@ -29117,9 +29120,16 @@ function notifyDesktopLyricsBeatMapReady() {
     if (fx && fx.desktopLyrics) pushDesktopLyricsState(true);
   } catch (e) {}
 }
+function desktopOverlayRenderPressureLevel() {
+  var level = getRenderLoadTier();
+  var fps = renderPerfState && isFinite(renderPerfState.fps) ? Number(renderPerfState.fps) : 0;
+  if (fps > 0 && fps < 24) level = Math.max(level, 2);
+  else if (fps > 0 && fps < 42) level = Math.max(level, 1);
+  return Math.max(0, Math.min(2, level));
+}
 function desktopOverlaySyncDelay() {
   if (typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization()) return 900;
-  var level = typeof getRuntimeFramePressureLevel === 'function' ? getRuntimeFramePressureLevel() : 0;
+  var level = desktopOverlayRenderPressureLevel();
   if (level >= 2) return 620;
   if (level >= 1) return 420;
   return 320;
@@ -29129,7 +29139,7 @@ function desktopLyricsPushInterval() {
   if (!fps) return 8;
   var interval = Math.max(8, Math.min(42, 1000 / fps));
   if (typeof isHiddenForBackgroundOptimization === 'function' && isHiddenForBackgroundOptimization()) return Math.max(interval, 120);
-  var level = typeof getRuntimeFramePressureLevel === 'function' ? getRuntimeFramePressureLevel() : 0;
+  var level = desktopOverlayRenderPressureLevel();
   if (level >= 2) return Math.max(interval * 1.75, 38);
   if (level >= 1) return Math.max(interval * 1.25, 26);
   return interval;
@@ -29254,7 +29264,7 @@ function applyWallpaperModeState(force) {
 }
 function syncDesktopOverlayState() {
   if (!desktopOverlayActive()) {
-    cancelDesktopOverlaySync();
+    if (desktopOverlaySyncTimer) cancelDesktopOverlaySync(true);
     return;
   }
   if (fx.desktopLyrics) pushDesktopLyricsState(false);
@@ -29359,10 +29369,16 @@ function toggleFullscreen() {
   if (typeof api.onDesktopLyricsEnabledState === 'function') {
     api.onDesktopLyricsEnabledState(function(payload){
       var enabled = !!(payload && payload.enabled);
-      if (fx.desktopLyrics === enabled) return;
+      if (fx.desktopLyrics === enabled) {
+        if (enabled || fx.wallpaperMode) scheduleDesktopOverlaySync(0);
+        else cancelDesktopOverlaySync(true);
+        return;
+      }
       fx.desktopLyrics = enabled;
       updateFxInputs();
       saveLyricLayout();
+      if (fx.desktopLyrics || fx.wallpaperMode) scheduleDesktopOverlaySync(0);
+      else cancelDesktopOverlaySync(true);
       showToast(enabled ? '桌面歌词已开启' : '桌面歌词已关闭');
     });
   }
