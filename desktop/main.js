@@ -5,6 +5,10 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { Readable } = require('stream');
 const {
+  configureStableAppPaths,
+  migrateOwnedDataFiles,
+} = require('./app-paths');
+const {
   isAllowedAppUrl,
   isAllowedLoginUrl,
   isSafeExternalUrl,
@@ -68,6 +72,20 @@ const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
 const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
 const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
 const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
+const APP_PATHS = configureStableAppPaths(app);
+const LEGACY_APP_DATA_ROOTS = Object.freeze([
+  path.resolve(__dirname, '..'),
+  path.join(path.dirname(APP_PATHS.userData), 'mineradio'),
+]);
+
+try {
+  migrateOwnedDataFiles({
+    sourceRoots: LEGACY_APP_DATA_ROOTS,
+    targetRoot: APP_PATHS.userData,
+  });
+} catch (error) {
+  console.warn('Owned data migration skipped:', error.message);
+}
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
@@ -403,7 +421,7 @@ function focusMainWindow() {
 }
 
 function desktopShellSettingsPath() {
-  return path.join(app.getPath('userData'), DESKTOP_SHELL_SETTINGS_FILE);
+  return path.join(APP_PATHS.userData, DESKTOP_SHELL_SETTINGS_FILE);
 }
 
 function readDesktopShellSettings() {
@@ -429,7 +447,7 @@ function applySavedDesktopShellSettings() {
 }
 
 function desktopUiStatePath() {
-  return path.join(app.getPath('userData'), DESKTOP_UI_STATE_FILE);
+  return path.join(APP_PATHS.userData, DESKTOP_UI_STATE_FILE);
 }
 
 function readDesktopUiState() {
@@ -518,7 +536,7 @@ function createTray() {
 }
 
 function getUpdateDownloadDir() {
-  return path.join(app.getPath('userData'), 'updates');
+  return path.join(APP_PATHS.userData, 'updates');
 }
 
 function shouldEnsureDesktopShortcut() {
@@ -1667,28 +1685,22 @@ handleIpc('mineradio-wallpaper-update', async (_event, payload) => {
   }
 });
 
+function configureLocalServerEnvironment(port) {
+  process.env.HOST = '127.0.0.1';
+  process.env.PORT = String(port);
+  process.env.COOKIE_FILE = path.join(APP_PATHS.userData, '.cookie');
+  process.env.QQ_COOKIE_FILE = path.join(APP_PATHS.userData, '.qq-cookie');
+  process.env.MINERADIO_PLATFORM_CACHE_FILE = APP_PATHS.platformCache;
+  process.env.MINERADIO_LISTEN_SYNC_FILE = APP_PATHS.listenJournal;
+  process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
+}
+
 async function createWindow() {
   htmlFullscreenActive = false;
   windowFullscreenActive = false;
   const port = await findOpenPort(3000);
   mainServerPort = port;
-
-  process.env.HOST = '127.0.0.1';
-  process.env.PORT = String(port);
-  process.env.COOKIE_FILE = path.join(app.getPath('userData'), '.cookie');
-  process.env.QQ_COOKIE_FILE = path.join(app.getPath('userData'), '.qq-cookie');
-  process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
-  try {
-    const legacyQQCookie = path.join(__dirname, '..', '.qq-cookie');
-    if (fs.existsSync(legacyQQCookie)) {
-      if (!fs.existsSync(process.env.QQ_COOKIE_FILE)) {
-        fs.copyFileSync(legacyQQCookie, process.env.QQ_COOKIE_FILE);
-      }
-      fs.unlinkSync(legacyQQCookie);
-    }
-  } catch (e) {
-    console.warn('QQ cookie migration skipped:', e.message);
-  }
+  configureLocalServerEnvironment(port);
 
   localServer = require(path.join(__dirname, '..', 'server.js'));
   await waitForServer(localServer);
@@ -1787,7 +1799,6 @@ async function createWindow() {
   await mainWindow.loadURL(`http://127.0.0.1:${port}`);
 }
 
-app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 
 if (!gotSingleInstanceLock) {
