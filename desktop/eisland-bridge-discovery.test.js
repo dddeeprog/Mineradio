@@ -447,6 +447,7 @@ test('does_not_overwrite_later_publisher_during_gated_refresh', async () => {
       bridgePort: 34_574,
       clock: () => 6_000_000,
       instanceId: 'instance-refresh-new',
+      isProcessAlive: () => true,
       pid: 4_328,
       timer: createIdleTimer(),
       token: 'refresh-new-token',
@@ -506,6 +507,7 @@ test('does_not_delete_later_publisher_during_gated_close', async () => {
       bridgePort: 34_576,
       clock: () => 7_000_000,
       instanceId: 'instance-close-new',
+      isProcessAlive: () => true,
       pid: 4_330,
       timer: createIdleTimer(),
       token: 'close-new-token',
@@ -912,5 +914,175 @@ test('normalizes_mkdir_failure_without_leaking_token', async () => {
       return true;
     });
     await Promise.all([publisher.close(), publisher.close()]);
+  });
+});
+test('reclaims_dead_owner_lock_before_publishing', async () => {
+  await withTempAppData(async (appData) => {
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    const descriptorPath = path.join(descriptorDirectory, 'eisland-bridge-v1.json');
+    const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+    const deadOwner = {
+      instanceId: 'crashed-instance',
+      pid: 50_001,
+      lockId: '3fc40e7c-6568-49c0-bb7d-0c6aa6a406e4',
+    };
+    await fs.mkdir(descriptorDirectory, { recursive: true });
+    await fs.writeFile(lockPath, JSON.stringify(deadOwner), 'utf8');
+    let livenessChecks = 0;
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_583,
+      clock: () => 8_600_000,
+      instanceId: 'instance-reclaim-dead-lock',
+      isProcessAlive(candidatePid) {
+        livenessChecks += 1;
+        assert.equal(candidatePid, deadOwner.pid);
+        return false;
+      },
+      pid: 4_337,
+      timer: createIdleTimer(),
+      token: 'reclaim-dead-lock-token',
+    });
+
+    await publisher.ready;
+    assert.ok(livenessChecks >= 1);
+    assert.deepEqual(JSON.parse(await fs.readFile(descriptorPath, 'utf8')), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_583,
+      token: 'reclaim-dead-lock-token',
+      instanceId: 'instance-reclaim-dead-lock',
+      pid: 4_337,
+      expiresAtMs: 8_605_000,
+    });
+
+    await publisher.close();
+    assert.deepEqual(await fs.readdir(descriptorDirectory), []);
+  });
+});
+test('keeps_active_and_permission_owner_locks', async () => {
+  await withTempAppData(async (appData) => {
+    const scenarios = [
+      {
+        name: 'active',
+        probe: () => true,
+      },
+      {
+        name: 'permission',
+        probe: () => {
+          const error = new Error('permission-owner-lock-token');
+          error.code = 'EPERM';
+          throw error;
+        },
+      },
+    ];
+
+    for (const [index, scenario] of scenarios.entries()) {
+      const scenarioAppData = path.join(appData, scenario.name);
+      const descriptorDirectory = path.join(scenarioAppData, 'Mineradio');
+      const lockPath = path.join(descriptorDirectory, '.eisland-bridge-v1.json.lock');
+      const owner = {
+        instanceId: scenario.name + '-owner',
+        pid: 50_010 + index,
+        lockId: '3fc40e7c-6568-49c0-bb7d-0c6aa6a406e' + index,
+      };
+      const ownerText = JSON.stringify(owner);
+      let livenessChecks = 0;
+      let lockUnlinkAttempts = 0;
+      await fs.mkdir(descriptorDirectory, { recursive: true });
+      await fs.writeFile(lockPath, ownerText, 'utf8');
+      const guardedFs = {
+        ...fs,
+        async unlink(filePath) {
+          if (filePath === lockPath) lockUnlinkAttempts += 1;
+          return fs.unlink(filePath);
+        },
+      };
+      const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+      const publisher = createBridgeDiscoveryPublisher({
+        appData: scenarioAppData,
+        bridgePort: 34_584 + index,
+        clock: () => 8_700_000,
+        fs: guardedFs,
+        instanceId: scenario.name + '-candidate',
+        isProcessAlive(candidatePid) {
+          livenessChecks += 1;
+          assert.equal(candidatePid, owner.pid);
+          return scenario.probe();
+        },
+        pid: 4_340 + index,
+        timer: createIdleTimer(),
+        token: scenario.name + '-candidate-token',
+      });
+
+      await assert.rejects(publisher.ready, (error) => {
+        assert.equal(error?.message, 'Bridge discovery descriptor lock acquisition failed.');
+        assert.doesNotMatch(String(error?.message), /permission-owner-lock-token/);
+        return true;
+      });
+      assert.ok(livenessChecks >= 1);
+      assert.equal(lockUnlinkAttempts, 0);
+      assert.equal(await fs.readFile(lockPath, 'utf8'), ownerText);
+      await publisher.close();
+    }
+  });
+});
+test('coalesces_refresh_ticks_while_publication_is_in_flight', async () => {
+  await withTempAppData(async (appData) => {
+    const timer = createControllableTimer();
+    let renameCount = 0;
+    const refreshRenameStarted = createDeferred();
+    const permitRefreshRename = createDeferred();
+    const gatedFs = {
+      ...fs,
+      async rename(fromPath, toPath) {
+        renameCount += 1;
+        if (renameCount === 2) {
+          refreshRenameStarted.resolve();
+          await permitRefreshRename.promise;
+        }
+        return fs.rename(fromPath, toPath);
+      },
+    };
+    const { createBridgeDiscoveryPublisher } = loadBridgeDiscovery();
+    const publisher = createBridgeDiscoveryPublisher({
+      appData,
+      bridgePort: 34_586,
+      clock: () => 8_800_000,
+      fs: gatedFs,
+      instanceId: 'instance-coalesced-refresh',
+      pid: 4_342,
+      timer,
+      token: 'coalesced-refresh-token',
+    });
+    await publisher.ready;
+
+    const firstRefresh = timer.fireInterval();
+    await refreshRenameStarted.promise;
+    const repeatedRefreshes = [
+      timer.fireInterval(),
+      timer.fireInterval(),
+      timer.fireInterval(),
+    ];
+    permitRefreshRename.resolve();
+    await Promise.all([firstRefresh, ...repeatedRefreshes]);
+
+    assert.equal(renameCount, 2);
+    const descriptorDirectory = path.join(appData, 'Mineradio');
+    assert.deepEqual(await fs.readdir(descriptorDirectory), ['eisland-bridge-v1.json']);
+    assert.deepEqual(JSON.parse(await fs.readFile(
+      path.join(descriptorDirectory, 'eisland-bridge-v1.json'),
+      'utf8',
+    )), {
+      protocol: 'mineradio-bridge/v1',
+      bridgePort: 34_586,
+      token: 'coalesced-refresh-token',
+      instanceId: 'instance-coalesced-refresh',
+      pid: 4_342,
+      expiresAtMs: 8_805_000,
+    });
+
+    await publisher.close();
+    assert.deepEqual(await fs.readdir(descriptorDirectory), []);
   });
 });

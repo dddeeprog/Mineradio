@@ -101,6 +101,116 @@ async function readDescriptor(fs, descriptorPath) {
 function hasDescriptorOwner(descriptor, instanceId, pid) {
   return descriptor?.instanceId === instanceId && descriptor?.pid === pid;
 }
+
+function isPositiveProcessId(pid) {
+  return Number.isInteger(pid) && pid > 0;
+}
+
+function isValidLockId(lockId) {
+  return typeof lockId === 'string' &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(lockId);
+}
+
+function createLockOwner(instanceId, pid) {
+  return {
+    instanceId: typeof instanceId === 'string' ? instanceId : '',
+    pid: Number.isInteger(pid) ? pid : 0,
+    lockId: randomUUID(),
+  };
+}
+
+function isReclaimableLockOwner(lockOwner) {
+  return Boolean(
+    lockOwner &&
+    typeof lockOwner === 'object' &&
+    typeof lockOwner.instanceId === 'string' &&
+    lockOwner.instanceId.length > 0 &&
+    isPositiveProcessId(lockOwner.pid) &&
+    isValidLockId(lockOwner.lockId),
+  );
+}
+
+function lockOwnersMatch(left, right) {
+  return Boolean(
+    left &&
+    right &&
+    left.instanceId === right.instanceId &&
+    left.pid === right.pid &&
+    left.lockId === right.lockId,
+  );
+}
+
+function defaultIsProcessAlive(pid) {
+  if (!isPositiveProcessId(pid)) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
+}
+
+async function readLockOwner(fs, lockPath) {
+  try {
+    return {
+      exists: true,
+      record: JSON.parse(await fs.readFile(lockPath, 'utf8')),
+    };
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { exists: false, record: null };
+    }
+    return { exists: true, error, record: null };
+  }
+}
+
+async function isConfirmedDead(isProcessAlive, pid) {
+  try {
+    return (await isProcessAlive(pid)) === false;
+  } catch {
+    return false;
+  }
+}
+
+function reclaimClaimPath(lockPath, lockId) {
+  return lockPath + '.' + lockId + '.reclaim';
+}
+
+async function reclaimDeadDescriptorLock(fs, lockPath, isProcessAlive) {
+  const observed = await readLockOwner(fs, lockPath);
+  if (observed.error || !isReclaimableLockOwner(observed.record)) return false;
+  if (!(await isConfirmedDead(isProcessAlive, observed.record.pid))) return false;
+
+  const claimPath = reclaimClaimPath(lockPath, observed.record.lockId);
+  try {
+    await fs.writeFile(claimPath, '', {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code === 'EEXIST') return false;
+    throw error;
+  }
+
+  try {
+    const current = await readLockOwner(fs, lockPath);
+    if (current.error || !lockOwnersMatch(current.record, observed.record)) return false;
+    if (!(await isConfirmedDead(isProcessAlive, current.record.pid))) return false;
+    try {
+      await fs.unlink(lockPath);
+      return true;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return false;
+      throw error;
+    }
+  } finally {
+    try {
+      await fs.unlink(claimPath);
+    } catch {}
+  }
+}
+
 function waitForRetry(timer) {
   return new Promise((resolve) => {
     if (typeof timer.setTimeout !== 'function') {
@@ -186,8 +296,11 @@ async function cleanupOwnedTemporaryFiles(fs, temporaryPaths, timer) {
   if (cleanupFailed) throw cleanupError();
 }
 
-async function releaseDescriptorLock(fs, lockPath, timer) {
+async function releaseDescriptorLock(fs, lockPath, lockOwner, timer) {
   for (let attempt = 0; attempt < LOCK_RELEASE_ATTEMPTS; attempt += 1) {
+    const observed = await readLockOwner(fs, lockPath);
+    if (!observed.exists) return true;
+    if (observed.error || !lockOwnersMatch(observed.record, lockOwner)) return false;
     try {
       await fs.unlink(lockPath);
       return true;
@@ -207,16 +320,20 @@ async function withDescriptorLock(
   timer,
   lockRetryWaiters,
   shouldCancel,
+  lockOwner,
+  isProcessAlive,
   operation,
 ) {
   const lockPath = path.join(descriptorDirectory, DESCRIPTOR_LOCK_FILE_NAME);
   await fs.mkdir(descriptorDirectory, { recursive: true });
   let acquired = false;
+  let retries = 0;
+  let reclaims = 0;
 
-  for (let attempt = 0; attempt < LOCK_ACQUIRE_ATTEMPTS; attempt += 1) {
+  while (retries < LOCK_ACQUIRE_ATTEMPTS) {
     if (shouldCancel()) return false;
     try {
-      await fs.writeFile(lockPath, '', {
+      await fs.writeFile(lockPath, JSON.stringify(lockOwner), {
         encoding: 'utf8',
         flag: 'wx',
         mode: 0o600,
@@ -226,7 +343,22 @@ async function withDescriptorLock(
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       if (shouldCancel()) return false;
-      if (attempt + 1 === LOCK_ACQUIRE_ATTEMPTS) throw lockAcquireError();
+
+      let reclaimed = false;
+      if (reclaims < LOCK_ACQUIRE_ATTEMPTS) {
+        try {
+          reclaimed = await reclaimDeadDescriptorLock(fs, lockPath, isProcessAlive);
+        } catch {
+          reclaimed = false;
+        }
+      }
+      if (reclaimed) {
+        reclaims += 1;
+        continue;
+      }
+
+      retries += 1;
+      if (retries === LOCK_ACQUIRE_ATTEMPTS) throw lockAcquireError();
       const shouldRetry = await waitForLockRetry(timer, lockRetryWaiters);
       if (!shouldRetry || shouldCancel()) return false;
     }
@@ -237,7 +369,7 @@ async function withDescriptorLock(
     if (shouldCancel()) return false;
     return await operation();
   } finally {
-    if (!(await releaseDescriptorLock(fs, lockPath, timer))) {
+    if (!(await releaseDescriptorLock(fs, lockPath, lockOwner, timer))) {
       throw lockReleaseError();
     }
   }
@@ -251,6 +383,7 @@ function createBridgeDiscoveryPublisher({
   clock = () => Date.now(),
   fs = defaultFs,
   instanceId,
+  isProcessAlive = defaultIsProcessAlive,
   pid,
   timer = { setInterval, clearInterval, setTimeout, clearTimeout },
   token,
@@ -262,10 +395,13 @@ function createBridgeDiscoveryPublisher({
   let refreshTimer;
   let closePromise;
   let publication = Promise.resolve();
+  let inFlightPublication;
   const lockRetryWaiters = new Set();
   const temporaryPaths = new Set();
 
-  async function publish() {
+  function publish() {
+    if (inFlightPublication) return inFlightPublication;
+
     const nextPublication = publication.then(async () => {
       try {
         if (isClosed) return false;
@@ -275,6 +411,8 @@ function createBridgeDiscoveryPublisher({
           timer,
           lockRetryWaiters,
           () => isClosed,
+          createLockOwner(instanceId, pid),
+          isProcessAlive,
           async () => {
             if (isClosed) return false;
             if (hasPublished) {
@@ -307,7 +445,16 @@ function createBridgeDiscoveryPublisher({
         throw normalizeDiscoveryError(error);
       }
     });
+    inFlightPublication = nextPublication;
     publication = nextPublication.catch(() => {});
+    nextPublication.then(
+      () => {
+        if (inFlightPublication === nextPublication) inFlightPublication = undefined;
+      },
+      () => {
+        if (inFlightPublication === nextPublication) inFlightPublication = undefined;
+      },
+    );
     return nextPublication;
   }
 
@@ -349,6 +496,8 @@ function createBridgeDiscoveryPublisher({
             timer,
             lockRetryWaiters,
             () => false,
+            createLockOwner(instanceId, pid),
+            isProcessAlive,
             async () => {
               const existing = await readDescriptor(fs, descriptorPath);
               if (!hasDescriptorOwner(existing, instanceId, pid)) return false;
