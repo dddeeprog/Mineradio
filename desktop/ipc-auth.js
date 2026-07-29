@@ -24,6 +24,9 @@ const MAIN_CHANNELS = new Set([
   'mineradio-desktop-lyrics-update',
   'mineradio-wallpaper-set-enabled',
   'mineradio-wallpaper-update',
+  'mineradio-eisland-bridge-state',
+  'mineradio-eisland-bridge-heartbeat',
+  'mineradio-eisland-bridge-command-complete',
 ]);
 
 const OVERLAY_CHANNELS = new Set([
