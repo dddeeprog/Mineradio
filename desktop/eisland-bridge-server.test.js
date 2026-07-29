@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const nodeHttp = require('node:http');
+const { createPlayerBridge } = require('./player-bridge');
 
 function loadBridgeServer() {
   try {
@@ -30,6 +32,55 @@ function createFakeHttp() {
       return server;
     },
   };
+}
+
+function createDeferredListeningHttp() {
+  const calls = [];
+  const closeCalls = [];
+  let createServerCalls = 0;
+  const server = new EventEmitter();
+  server.listening = false;
+  server.address = () => ({ address: '127.0.0.1', family: 'IPv4', port: 41_235 });
+  server.close = (callback) => {
+    closeCalls.push(undefined);
+    queueMicrotask(() => {
+      if (!server.listening) {
+        const error = new Error('server-not-running');
+        error.code = 'ERR_SERVER_NOT_RUNNING';
+        callback(error);
+        return;
+      }
+      server.listening = false;
+      callback();
+    });
+    return server;
+  };
+  server.fireListening = () => {
+    server.listening = true;
+    server.emit('listening');
+  };
+  server.listen = (...args) => {
+    calls.push(args);
+    return server;
+  };
+
+  return {
+    calls,
+    closeCalls,
+    get createServerCalls() {
+      return createServerCalls;
+    },
+    createServer(handler) {
+      createServerCalls += 1;
+      server.handler = handler;
+      return server;
+    },
+    server,
+  };
+}
+
+function waitForImmediate() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 async function invokeFakeRequest(handler, {
@@ -62,6 +113,38 @@ async function invokeFakeRequest(handler, {
   await result;
   return response;
 }
+
+function openChunkedRequest({ headers = {}, method = 'POST', path, port }) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const request = nodeHttp.request({
+      headers: {
+        ...headers,
+        'transfer-encoding': 'chunked',
+      },
+      host: '127.0.0.1',
+      method,
+      path,
+      port,
+    }, (response) => {
+      response.resume();
+      settled = true;
+      resolve({ request, statusCode: response.statusCode });
+    });
+    request.on('error', (error) => {
+      if (!settled) reject(error);
+    });
+    request.write('{"incomplete":');
+  });
+}
+
+function settlesBefore(promise, timeoutMs) {
+  return Promise.race([
+    promise.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
+}
+
 
 test('binds_ipv4_loopback_and_ignores_lan_environment', async () => {
   const { createEislandBridgeServer } = loadBridgeServer();
@@ -353,6 +436,222 @@ test('returns_not_ready_without_renderer_and_closes_idempotently', async () => {
       () => fetch(`${baseUrl}/api/eisland/v1/health`),
       TypeError,
     );
+  } finally {
+    await bridgeServer.close();
+  }
+});
+
+test('does_not_listen_when_closed_before_start', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  assert.equal(typeof createEislandBridgeServer, 'function');
+
+  const http = createDeferredListeningHttp();
+  const bridgeServer = createEislandBridgeServer({
+    bridge: { getState: () => ({ status: 'not-ready' }) },
+    http,
+    instanceId: 'closed-before-start-instance',
+    token: 'closed-before-start-token',
+  });
+
+  assert.equal(await bridgeServer.close(), false);
+  const startOutcome = await Promise.race([
+    bridgeServer.start(),
+    new Promise((resolve) => setTimeout(() => resolve({ pending: true }), 50)),
+  ]);
+  assert.deepEqual(startOutcome, { closed: true });
+  assert.equal(http.createServerCalls, 0);
+  assert.deepEqual(http.calls, []);
+});
+
+test('settles_start_and_closes_late_listener_when_close_races_listen', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  assert.equal(typeof createEislandBridgeServer, 'function');
+
+  const http = createDeferredListeningHttp();
+  const bridgeServer = createEislandBridgeServer({
+    bridge: { getState: () => ({ status: 'not-ready' }) },
+    http,
+    instanceId: 'close-race-instance',
+    token: 'close-race-token',
+  });
+  const startPromise = bridgeServer.start();
+  assert.deepEqual(http.calls, [[0, '127.0.0.1']]);
+
+  const closePromise = bridgeServer.close();
+  assert.strictEqual(bridgeServer.close(), closePromise);
+  assert.equal(await closePromise, true);
+  assert.deepEqual(await startPromise, { closed: true });
+
+  http.server.fireListening();
+  await waitForImmediate();
+  assert.equal(http.server.listening, false);
+  assert.ok(http.closeCalls.length >= 1);
+  assert.equal(http.server.listenerCount('listening'), 0);
+});
+
+test('drains_early_chunked_request_bodies_before_close', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  assert.equal(typeof createEislandBridgeServer, 'function');
+
+  async function assertEarlyResponseDrains({ expectedStatus, headers, method, path }) {
+    const bridgeServer = createEislandBridgeServer({
+      bridge: { getState: () => ({ status: 'not-ready' }) },
+      instanceId: 'drain-instance',
+      token: 'drain-token',
+    });
+    const { port } = await bridgeServer.start();
+    let request;
+    try {
+      const opened = await openChunkedRequest({ headers, method, path, port });
+      request = opened.request;
+      assert.equal(opened.statusCode, expectedStatus);
+      assert.equal(await settlesBefore(bridgeServer.close(), 100), true);
+    } finally {
+      request?.destroy();
+      await bridgeServer.close().catch(() => {});
+    }
+  }
+
+  await assertEarlyResponseDrains({
+    expectedStatus: 401,
+    headers: {},
+    method: 'POST',
+    path: '/api/eisland/v1/command',
+  });
+  await assertEarlyResponseDrains({
+    expectedStatus: 405,
+    headers: { authorization: 'Bearer drain-token' },
+    method: 'POST',
+    path: '/api/eisland/v1/health',
+  });
+
+});
+test('projects_real_player_bridge_command_results_to_public_v1_dtos', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  assert.equal(typeof createEislandBridgeServer, 'function');
+
+  async function requestCommand(bridge, token, body) {
+    const http = createFakeHttp();
+    const bridgeServer = createEislandBridgeServer({
+      bridge,
+      http,
+      instanceId: 'command-projection-instance',
+      token,
+    });
+    await bridgeServer.start();
+    try {
+      return await invokeFakeRequest(http.server.handler, {
+        body: JSON.stringify(body),
+        headers: { authorization: `Bearer ${token}` },
+        method: 'POST',
+        url: '/api/eisland/v1/command',
+      });
+    } finally {
+      await bridgeServer.close();
+    }
+  }
+
+  let successfulBridge;
+  successfulBridge = createPlayerBridge({
+    dispatchCommand(command) {
+      successfulBridge.receiveCommandReceipt({
+        attempt: command.attempt,
+        ok: true,
+        requestId: command.requestId,
+        result: { status: 'playing', token: 'raw-player-secret' },
+      });
+    },
+  });
+  successfulBridge.receiveHeartbeat({ state: { playing: true } });
+  const success = await requestCommand(successfulBridge, 'success-token', {
+    requestId: 'successful-command',
+    type: 'play',
+  });
+  assert.equal(success.statusCode, 200);
+  assert.deepEqual(JSON.parse(success.body), {
+    ok: true,
+    outcome: 'executed',
+    requestId: 'successful-command',
+  });
+  assert.doesNotMatch(success.body, /raw-player-secret|result/);
+
+  const timedOutBridge = createPlayerBridge({
+    clearTimeoutFn() {},
+    dispatchCommand() {},
+    setTimeoutFn(callback) {
+      queueMicrotask(callback);
+      return {};
+    },
+  });
+  timedOutBridge.receiveHeartbeat({ state: { playing: true } });
+  const timedOut = await requestCommand(timedOutBridge, 'timeout-token', {
+    requestId: 'timed-out-command',
+    type: 'toggle',
+  });
+  assert.equal(timedOut.statusCode, 200);
+  assert.deepEqual(JSON.parse(timedOut.body), {
+    error: 'TIMEOUT',
+    ok: false,
+    outcome: 'uncertain',
+    requestId: 'timed-out-command',
+  });
+
+  const conflictBridge = createPlayerBridge({
+    clearTimeoutFn() {},
+    dispatchCommand() {},
+    setTimeoutFn() {
+      return {};
+    },
+  });
+  conflictBridge.receiveHeartbeat({ state: { playing: true } });
+  const originalCommand = conflictBridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'shared-request-id',
+  });
+  try {
+    const conflict = await requestCommand(conflictBridge, 'conflict-token', {
+      requestId: 'shared-request-id',
+      type: 'pause',
+    });
+    assert.equal(conflict.statusCode, 200);
+    assert.deepEqual(JSON.parse(conflict.body), {
+      error: 'INTERNAL',
+      ok: false,
+      outcome: 'rejected',
+      requestId: 'shared-request-id',
+    });
+    assert.doesNotMatch(conflict.body, /request-id-conflict|different command/);
+  } finally {
+    conflictBridge.dispose();
+    void originalCommand;
+  }
+});
+
+test('contains_bridge_state_failures_at_the_http_boundary', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  assert.equal(typeof createEislandBridgeServer, 'function');
+
+  const http = createFakeHttp();
+  const bridgeServer = createEislandBridgeServer({
+    bridge: {
+      getState() {
+        throw new Error('state-reader-secret-must-not-leak');
+      },
+    },
+    http,
+    instanceId: 'state-error-instance',
+    token: 'state-error-token',
+  });
+  await bridgeServer.start();
+  try {
+    const response = await invokeFakeRequest(http.server.handler, {
+      headers: { authorization: 'Bearer state-error-token' },
+      url: '/api/eisland/v1/health',
+    });
+    assert.equal(response.statusCode, 500);
+    assert.deepEqual(JSON.parse(response.body), { error: 'INTERNAL' });
+    assert.doesNotMatch(response.body, /state-reader-secret-must-not-leak/);
   } finally {
     await bridgeServer.close();
   }

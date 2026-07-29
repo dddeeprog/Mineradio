@@ -19,6 +19,32 @@ function sendJson(response, statusCode, payload) {
   response.end(body);
 }
 
+function drainIncompleteRequest(request, response) {
+  if (!request || request.complete || request.destroyed) return;
+
+  try {
+    request.resume?.();
+  } catch {
+    // A response should still be sent even if a custom request stream cannot resume.
+  }
+
+  if (typeof request.destroy !== 'function' || typeof response?.once !== 'function') return;
+  const destroyIfStillIncomplete = () => {
+    if (request.complete || request.destroyed) return;
+    try {
+      request.destroy();
+    } catch {
+      // The response has already been completed; there is nothing else to recover here.
+    }
+  };
+  response.once('finish', destroyIfStillIncomplete);
+}
+
+function sendJsonAndDrain(request, response, statusCode, payload) {
+  drainIncompleteRequest(request, response);
+  sendJson(response, statusCode, payload);
+}
+
 const COMMAND_BODY_MAX_BYTES = 16_384;
 const COMMAND_TYPES = new Set(['play', 'pause', 'toggle', 'next', 'previous', 'seek']);
 
@@ -56,6 +82,38 @@ function normalizeCommandBody(value) {
   }
   if (!hasPosition || !isNonNegativeSafeInteger(value.positionMs)) return null;
   return { positionMs: value.positionMs, requestId, type };
+}
+
+function rejectedCommandResponse(requestId) {
+  return {
+    error: 'INTERNAL',
+    ok: false,
+    outcome: 'rejected',
+    requestId,
+  };
+}
+
+function projectCommandResponse(command, result) {
+  if (result?.ok === true) {
+    const response = {
+      ok: true,
+      outcome: 'executed',
+      requestId: command.requestId,
+    };
+    if (isNonNegativeSafeInteger(result.revision)) response.revision = result.revision;
+    return response;
+  }
+
+  if (result?.error?.code === 'renderer-timeout') {
+    return {
+      error: 'TIMEOUT',
+      ok: false,
+      outcome: 'uncertain',
+      requestId: command.requestId,
+    };
+  }
+
+  return rejectedCommandResponse(command.requestId);
 }
 
 function readJsonRequestBody(request) {
@@ -124,6 +182,13 @@ function createEislandBridgeServer({
   let server;
   let startPromise;
   let closePromise;
+  const closedStartResult = Object.freeze({ closed: true });
+  let isClosed = false;
+  let startSettled = false;
+  let resolveStart;
+  let rejectStartPromise;
+  let listeningHandler;
+  let errorHandler;
 
   function getBridgeState() {
     const state = typeof bridge?.getState === 'function' ? bridge.getState() : null;
@@ -138,9 +203,9 @@ function createEislandBridgeServer({
     }
   }
 
-  async function handleRequest(request, response) {
+  async function handleRequestRoute(request, response) {
     if (!hasValidBearerToken(request?.headers?.authorization, token)) {
-      sendJson(response, 401, { error: 'UNAUTHORIZED' });
+      sendJsonAndDrain(request, response, 401, { error: 'UNAUTHORIZED' });
       return;
     }
 
@@ -148,14 +213,14 @@ function createEislandBridgeServer({
     const method = typeof request?.method === 'string' ? request.method.toUpperCase() : '';
     if (routePath === '/api/eisland/v1/health') {
       if (method !== 'GET') {
-        sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+        sendJsonAndDrain(request, response, 405, { error: 'METHOD_NOT_ALLOWED' });
         return;
       }
       const state = getBridgeState();
       const status = ['ready', 'not-ready', 'stale'].includes(state.status)
         ? state.status
         : 'not-ready';
-      sendJson(response, 200, {
+      sendJsonAndDrain(request, response, 200, {
         instanceId,
         protocol: 'mineradio-bridge/v1',
         status,
@@ -165,15 +230,15 @@ function createEislandBridgeServer({
 
     if (routePath === '/api/eisland/v1/state') {
       if (method !== 'GET') {
-        sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+        sendJsonAndDrain(request, response, 405, { error: 'METHOD_NOT_ALLOWED' });
         return;
       }
-      sendJson(response, 200, getBridgeState());
+      sendJsonAndDrain(request, response, 200, getBridgeState());
       return;
     }
     if (routePath === '/api/eisland/v1/lyrics') {
       if (method !== 'GET') {
-        sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+        sendJsonAndDrain(request, response, 405, { error: 'METHOD_NOT_ALLOWED' });
         return;
       }
 
@@ -184,13 +249,13 @@ function createEislandBridgeServer({
           'http://127.0.0.1',
         );
       } catch {
-        sendJson(response, 400, { error: 'INVALID_LYRICS_VERSION' });
+        sendJsonAndDrain(request, response, 400, { error: 'INVALID_LYRICS_VERSION' });
         return;
       }
       const trackRevisionValues = requestUrl.searchParams.getAll('trackRevision');
       const lyricsRevisionValues = requestUrl.searchParams.getAll('lyricsRevision');
       if (trackRevisionValues.length !== 1 || lyricsRevisionValues.length !== 1) {
-        sendJson(response, 400, { error: 'INVALID_LYRICS_VERSION' });
+        sendJsonAndDrain(request, response, 400, { error: 'INVALID_LYRICS_VERSION' });
         return;
       }
       const trackRevision = Number(trackRevisionValues[0]);
@@ -201,13 +266,13 @@ function createEislandBridgeServer({
         || !isNonNegativeSafeInteger(trackRevision)
         || !isNonNegativeSafeInteger(lyricsRevision)
       ) {
-        sendJson(response, 400, { error: 'INVALID_LYRICS_VERSION' });
+        sendJsonAndDrain(request, response, 400, { error: 'INVALID_LYRICS_VERSION' });
         return;
       }
 
       const state = getBridgeState();
       if (state.trackRevision !== trackRevision || state.lyricsRevision !== lyricsRevision) {
-        sendJson(response, 409, { error: 'LYRICS_VERSION_CONFLICT' });
+        sendJsonAndDrain(request, response, 409, { error: 'LYRICS_VERSION_CONFLICT' });
         return;
       }
 
@@ -217,7 +282,7 @@ function createEislandBridgeServer({
           ? await bridge.getLyrics({ lyricsRevision, trackRevision })
           : null;
       } catch {
-        sendJson(response, 500, { error: 'INTERNAL' });
+        sendJsonAndDrain(request, response, 500, { error: 'INTERNAL' });
         return;
       }
       if (!lyrics || typeof lyrics !== 'object' || Array.isArray(lyrics)) {
@@ -234,7 +299,7 @@ function createEislandBridgeServer({
           trackId: sourceLyrics.trackId ?? state.track?.id ?? null,
         };
       }
-      sendJson(response, 200, {
+      sendJsonAndDrain(request, response, 200, {
         ...lyrics,
         instanceId,
         lyricsRevision,
@@ -245,7 +310,7 @@ function createEislandBridgeServer({
 
     if (routePath === '/api/eisland/v1/command') {
       if (method !== 'POST') {
-        sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+        sendJsonAndDrain(request, response, 405, { error: 'METHOD_NOT_ALLOWED' });
         return;
       }
 
@@ -253,18 +318,18 @@ function createEislandBridgeServer({
       try {
         rawCommand = await readJsonRequestBody(request);
       } catch (error) {
-        sendJson(response, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, {
+        sendJsonAndDrain(request, response, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, {
           error: error?.code === 'BODY_TOO_LARGE' ? 'BODY_TOO_LARGE' : 'INVALID_COMMAND',
         });
         return;
       }
       const command = normalizeCommandBody(rawCommand);
       if (!command) {
-        sendJson(response, 400, { error: 'INVALID_COMMAND' });
+        sendJsonAndDrain(request, response, 400, { error: 'INVALID_COMMAND' });
         return;
       }
       if (getBridgeState().status !== 'ready') {
-        sendJson(response, 200, {
+        sendJsonAndDrain(request, response, 200, {
           error: 'NOT_READY',
           ok: false,
           outcome: 'rejected',
@@ -273,7 +338,7 @@ function createEislandBridgeServer({
         return;
       }
       if (typeof bridge?.enqueueCommand !== 'function') {
-        sendJson(response, 500, { error: 'INTERNAL' });
+        sendJsonAndDrain(request, response, 200, rejectedCommandResponse(command.requestId));
         return;
       }
 
@@ -283,60 +348,128 @@ function createEislandBridgeServer({
           payload: command.type === 'seek' ? { positionMs: command.positionMs } : {},
           requestId: command.requestId,
         });
-        sendJson(response, 200, result);
+        sendJsonAndDrain(request, response, 200, projectCommandResponse(command, result));
       } catch {
-        sendJson(response, 500, { error: 'INTERNAL' });
+        sendJsonAndDrain(request, response, 200, rejectedCommandResponse(command.requestId));
       }
       return;
     }
 
 
-    sendJson(response, 404, { error: 'NOT_FOUND' });
+    sendJsonAndDrain(request, response, 404, { error: 'NOT_FOUND' });
+  }
+
+  async function handleRequest(request, response) {
+    try {
+      await handleRequestRoute(request, response);
+    } catch {
+      sendJsonAndDrain(request, response, 500, { error: 'INTERNAL' });
+    }
+  }
+
+
+  function removeStartListeners() {
+    if (!server) return;
+    if (listeningHandler) server.removeListener('listening', listeningHandler);
+    if (errorHandler) server.removeListener('error', errorHandler);
+    listeningHandler = undefined;
+    errorHandler = undefined;
+  }
+
+  function settleStart(value) {
+    if (!startPromise || startSettled) return;
+    startSettled = true;
+    resolveStart(value);
+  }
+
+  function rejectStart(error) {
+    if (!startPromise || startSettled) return;
+    startSettled = true;
+    removeStartListeners();
+    rejectStartPromise(error);
+  }
+
+  function closeUnderlyingServer() {
+    if (!server) return Promise.resolve(false);
+    return new Promise((resolve, reject) => {
+      const finish = (error) => {
+        if (error?.code === 'ERR_SERVER_NOT_RUNNING') {
+          resolve(true);
+          return;
+        }
+        if (error) {
+          reject(error);
+          return;
+        }
+        removeStartListeners();
+        resolve(true);
+      };
+      try {
+        server.close(finish);
+      } catch (error) {
+        finish(error);
+      }
+    });
+  }
+
+  function closeLateListener() {
+    closeUnderlyingServer().catch(() => {
+      removeStartListeners();
+    });
   }
 
   function start() {
     if (startPromise) return startPromise;
+    if (isClosed) {
+      startSettled = true;
+      startPromise = Promise.resolve(closedStartResult);
+      return startPromise;
+    }
 
     server = http.createServer(handleRequest);
     startPromise = new Promise((resolve, reject) => {
-      const onError = (error) => {
-        server.removeListener('listening', onListening);
-        reject(error);
-      };
-      const onListening = () => {
-        server.removeListener('error', onError);
-        const address = server.address();
-        resolve({ port: address.port });
-      };
-
-      server.once('error', onError);
-      server.once('listening', onListening);
-      try {
-        server.listen(0, '127.0.0.1');
-      } catch (error) {
-        onError(error);
-      }
+      resolveStart = resolve;
+      rejectStartPromise = reject;
     });
+    listeningHandler = () => {
+      if (isClosed) {
+        closeLateListener();
+        return;
+      }
+      const address = server.address();
+      removeStartListeners();
+      settleStart({ port: address.port });
+    };
+    errorHandler = (error) => {
+      if (isClosed) {
+        removeStartListeners();
+        return;
+      }
+      rejectStart(error);
+    };
+    server.once('error', errorHandler);
+    server.once('listening', listeningHandler);
+    try {
+      if (isClosed) {
+        settleStart(closedStartResult);
+      } else {
+        server.listen(0, '127.0.0.1');
+      }
+    } catch (error) {
+      errorHandler(error);
+    }
     return startPromise;
   }
 
   function close() {
     if (closePromise) return closePromise;
+    isClosed = true;
+    settleStart(closedStartResult);
     if (!server) {
       closePromise = Promise.resolve(false);
       return closePromise;
     }
-
-    closePromise = new Promise((resolve, reject) => {
-      try {
-        server.close((error) => {
-          if (error) reject(error);
-          else resolve(true);
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
+    closePromise = closeUnderlyingServer();
     return closePromise;
   }
 
