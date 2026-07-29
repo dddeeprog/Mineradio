@@ -93,6 +93,89 @@ function rejectedCommandResponse(requestId) {
   };
 }
 
+const PUBLIC_TRACK_SOURCES = new Set(['netease', 'qq', 'local', 'podcast']);
+const PUBLIC_PLAYBACK_STATUSES = new Set(['playing', 'paused', 'stopped']);
+const PUBLIC_CAPABILITY_KEYS = ['next', 'pause', 'play', 'previous', 'seek'];
+
+function isPublicCommandSection(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function publicText(value, maxLength = 512) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength);
+}
+
+function isSafeCoverUrl(value) {
+  const text = publicText(value, 2_048);
+  if (!text) return false;
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash) return false;
+  for (const key of parsed.searchParams.keys()) {
+    if (/(?:token|auth|secret|cookie|credential|signature|api[-_]?key|session)|(?:^|[-_])sig(?:$|[-_])/i.test(key)) {
+      return false;
+    }
+  }
+  let pathname = parsed.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return !/(?:^|\/)(?:audio|stream)(?:\/|$)|\.(?:mp3|m4a|aac|flac|ogg|opus|wav|webm)$/i.test(pathname);
+}
+
+function projectCommandState(value) {
+  if (!isPublicCommandSection(value) || !isPublicCommandSection(value.playback)) return null;
+  const playback = {};
+  if (isNonNegativeSafeInteger(value.playback.durationMs)) {
+    playback.durationMs = value.playback.durationMs;
+  }
+  if (isNonNegativeSafeInteger(value.playback.positionMs)) {
+    playback.positionMs = value.playback.positionMs;
+  }
+  if (Number.isFinite(value.playback.rate) && value.playback.rate > 0 && value.playback.rate <= 16) {
+    playback.rate = value.playback.rate;
+  }
+  if (PUBLIC_PLAYBACK_STATUSES.has(value.playback.status)) playback.status = value.playback.status;
+  if (Object.keys(playback).length === 0) return null;
+
+  const state = { playback };
+  if (isPublicCommandSection(value.capabilities)) {
+    const capabilities = {};
+    for (const key of PUBLIC_CAPABILITY_KEYS) {
+      if (typeof value.capabilities[key] === 'boolean') capabilities[key] = value.capabilities[key];
+    }
+    if (Object.keys(capabilities).length > 0) state.capabilities = capabilities;
+  }
+  return state;
+}
+
+function projectCommandTrack(value) {
+  if (value === null) return null;
+  if (!isPublicCommandSection(value)) return undefined;
+  const track = {};
+  const id = publicText(value.id, 256);
+  const source = publicText(value.source, 32).toLowerCase();
+  const title = publicText(value.title);
+  const artist = publicText(value.artist);
+  const album = publicText(value.album);
+  const coverUrl = publicText(value.coverUrl, 2_048);
+  if (id) track.id = id;
+  if (PUBLIC_TRACK_SOURCES.has(source)) track.source = source;
+  if (title) track.title = title;
+  if (artist) track.artist = artist;
+  if (album) track.album = album;
+  if (isSafeCoverUrl(coverUrl)) track.coverUrl = coverUrl;
+  if (isNonNegativeSafeInteger(value.durationMs)) track.durationMs = value.durationMs;
+  return Object.keys(track).length > 0 ? track : null;
+}
+
 function projectCommandResponse(command, result) {
   if (result?.ok === true) {
     const response = {
@@ -100,7 +183,16 @@ function projectCommandResponse(command, result) {
       outcome: 'executed',
       requestId: command.requestId,
     };
-    if (isNonNegativeSafeInteger(result.revision)) response.revision = result.revision;
+    const terminal = isPublicCommandSection(result.result) ? result.result : null;
+    const terminalRevision = terminal?.revision;
+    if (isNonNegativeSafeInteger(terminalRevision)) response.revision = terminalRevision;
+    else if (isNonNegativeSafeInteger(result.revision)) response.revision = result.revision;
+    const state = projectCommandState(terminal?.state);
+    if (state) response.state = state;
+    if (terminal && Object.prototype.hasOwnProperty.call(terminal, 'track')) {
+      const track = projectCommandTrack(terminal.track);
+      if (track !== undefined) response.track = track;
+    }
     return response;
   }
 

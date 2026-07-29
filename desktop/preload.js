@@ -31,6 +31,21 @@ function restorePersistentUiState() {
 
 restorePersistentUiState();
 
+contextBridge.exposeInMainWorld('eislandBridge', {
+  publishState: (snapshot) => ipcRenderer.send('mineradio-eisland-bridge-state', snapshot || {}),
+  publishHeartbeat: (snapshot) => ipcRenderer.send('mineradio-eisland-bridge-heartbeat', snapshot || {}),
+  onCommand: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, command) => callback(command || {});
+    ipcRenderer.on('mineradio-eisland-bridge-command', listener);
+    return () => ipcRenderer.removeListener('mineradio-eisland-bridge-command', listener);
+  },
+  completeCommand: (receipt) => ipcRenderer.send(
+    'mineradio-eisland-bridge-command-complete',
+    receipt || {},
+  ),
+});
+
 contextBridge.exposeInMainWorld('desktopWindow', {
   isDesktop: true,
   minimize: () => ipcRenderer.invoke('desktop-window-minimize'),

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const nodeHttp = require('node:http');
 const { createPlayerBridge } = require('./player-bridge');
+const { createEislandBridgeRuntime } = require('../public/eisland-bridge-runtime');
 
 function loadBridgeServer() {
   try {
@@ -288,9 +289,69 @@ test('validates_lyrics_and_command_bodies', async () => {
   };
   const commandResult = {
     ok: true,
+    result: {
+      revision: 10,
+      state: {
+        authToken: 'must-not-leak',
+        capabilities: {
+          next: true,
+          pause: false,
+          play: true,
+          previous: false,
+          seek: true,
+          unsupported: true,
+        },
+        playback: {
+          durationMs: 30_000,
+          positionMs: 12_000,
+          rate: 1,
+          secret: 'must-not-leak',
+          status: 'playing',
+        },
+        unknownState: { token: 'must-not-leak' },
+      },
+      track: {
+        album: '安全专辑',
+        artist: '安全歌手',
+        coverUrl: 'https://image.example/cover.jpg',
+        durationMs: 30_000,
+        id: 'netease:8',
+        localPath: 'C:/private/song.mp3',
+        source: 'netease',
+        title: '安全歌曲',
+        url: 'https://audio.example/private.mp3',
+      },
+    },
+  };
+  const expectedCommandResponse = {
+    ok: true,
     outcome: 'executed',
     requestId: 'seek-okay',
     revision: 10,
+    state: {
+      capabilities: {
+        next: true,
+        pause: false,
+        play: true,
+        previous: false,
+        seek: true,
+      },
+      playback: {
+        durationMs: 30_000,
+        positionMs: 12_000,
+        rate: 1,
+        status: 'playing',
+      },
+    },
+    track: {
+      album: '安全专辑',
+      artist: '安全歌手',
+      coverUrl: 'https://image.example/cover.jpg',
+      durationMs: 30_000,
+      id: 'netease:8',
+      source: 'netease',
+      title: '安全歌曲',
+    },
   };
   const http = createFakeHttp();
   const bridgeServer = createEislandBridgeServer({
@@ -380,7 +441,7 @@ test('validates_lyrics_and_command_bodies', async () => {
       type: 'seek',
     });
     assert.equal(acceptedSeek.statusCode, 200);
-    assert.deepEqual(JSON.parse(acceptedSeek.body), commandResult);
+    assert.deepEqual(JSON.parse(acceptedSeek.body), expectedCommandResponse);
     assert.deepEqual(commandCalls, [{
       command: 'seek',
       payload: { positionMs: 3_210 },
@@ -554,26 +615,59 @@ test('projects_real_player_bridge_command_results_to_public_v1_dtos', async () =
   let successfulBridge;
   successfulBridge = createPlayerBridge({
     dispatchCommand(command) {
+      successfulBridge.receiveHeartbeat({
+        commandAttempt: command.attempt,
+        state: {
+          authToken: 'post-state-secret',
+          playback: { status: 'playing' },
+        },
+        track: {
+          localPath: 'C:/private/post-state.mp3',
+          source: 'netease',
+          title: '命令后歌曲',
+        },
+      });
       successfulBridge.receiveCommandReceipt({
         attempt: command.attempt,
         ok: true,
         requestId: command.requestId,
-        result: { status: 'playing', token: 'raw-player-secret' },
+        result: {
+          state: { authToken: 'forged-secret', playing: false },
+          status: 'playing',
+          token: 'raw-player-secret',
+          track: { title: '伪造歌曲' },
+        },
       });
     },
   });
-  successfulBridge.receiveHeartbeat({ state: { playing: true } });
+  successfulBridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { source: 'netease', title: '命令前歌曲' },
+  });
   const success = await requestCommand(successfulBridge, 'success-token', {
     requestId: 'successful-command',
     type: 'play',
   });
   assert.equal(success.statusCode, 200);
-  assert.deepEqual(JSON.parse(success.body), {
+  const successBody = JSON.parse(success.body);
+  assert.deepEqual(successBody, {
     ok: true,
     outcome: 'executed',
     requestId: 'successful-command',
+    revision: 2,
+    state: { playback: { status: 'playing' } },
+    track: { source: 'netease', title: '命令后歌曲' },
   });
-  assert.doesNotMatch(success.body, /raw-player-secret|result/);
+  successfulBridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { source: 'netease', title: '后续歌曲' },
+  });
+  const replay = await requestCommand(successfulBridge, 'success-token', {
+    requestId: 'successful-command',
+    type: 'play',
+  });
+  assert.deepEqual(JSON.parse(replay.body), successBody);
+  assert.doesNotMatch(success.body, /raw-player-secret|post-state-secret|forged-secret|private|result/);
 
   const timedOutBridge = createPlayerBridge({
     clearTimeoutFn() {},
@@ -628,6 +722,174 @@ test('projects_real_player_bridge_command_results_to_public_v1_dtos', async () =
   }
 });
 
+test('does not expose encoded media paths as command cover art', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  const http = createFakeHttp();
+  const bridge = {
+    getState() {
+      return { status: 'ready' };
+    },
+    enqueueCommand() {
+      return Promise.resolve({
+        ok: true,
+        result: {
+          revision: 1,
+          state: { playback: { status: 'playing' } },
+          track: {
+            coverUrl: this.nextCoverUrl,
+            source: 'netease',
+            title: '安全标题',
+          },
+        },
+      });
+    },
+    nextCoverUrl: '',
+  };
+  const bridgeServer = createEislandBridgeServer({
+    bridge,
+    http,
+    instanceId: 'encoded-cover-instance',
+    token: 'encoded-cover-token',
+  });
+  await bridgeServer.start();
+  try {
+    for (const [index, coverUrl] of [
+      'https://image.example/%61udio/private',
+      'https://image.example/cover%2Emp3',
+    ].entries()) {
+      bridge.nextCoverUrl = coverUrl;
+      const response = await invokeFakeRequest(http.server.handler, {
+        body: JSON.stringify({ requestId: `encoded-cover-${index}`, type: 'play' }),
+        headers: { authorization: 'Bearer encoded-cover-token' },
+        method: 'POST',
+        url: '/api/eisland/v1/command',
+      });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(JSON.parse(response.body), {
+        ok: true,
+        outcome: 'executed',
+        requestId: `encoded-cover-${index}`,
+        revision: 1,
+        state: { playback: { status: 'playing' } },
+        track: { source: 'netease', title: '安全标题' },
+      });
+      assert.doesNotMatch(response.body, /%61udio|%2Emp3/i);
+    }
+  } finally {
+    await bridgeServer.close();
+  }
+});
+
+test('runs a real runtime command through PlayerBridge to the public HTTP DTO', async () => {
+  const { createEislandBridgeServer } = loadBridgeServer();
+  const trace = [];
+  const audio = {
+    currentTime: 45,
+    duration: 120,
+    ended: false,
+    paused: true,
+    playbackRate: 1,
+  };
+  const player = {
+    audio,
+    currentIdx: 0,
+    currentLocalSong: null,
+    lyricsLines: [{ t: 0, text: '真实链路歌词' }],
+    play() {
+      audio.paused = false;
+      return Promise.resolve(true);
+    },
+    playQueue: [{
+      artist: '真实歌手',
+      cookie: 'renderer-cookie',
+      cover: 'https://image.example/runtime-cover.jpg',
+      duration: 120,
+      id: 901,
+      name: '真实运行时歌曲',
+      source: 'netease',
+      url: 'https://audio.example/private-runtime.mp3',
+    }],
+    trackSwitchToken: 901,
+  };
+  let runtime;
+  const bridge = createPlayerBridge({
+    clearTimeoutFn() {},
+    clock: () => 130_000,
+    createAttemptId: () => 'runtime-e2e-attempt',
+    dispatchCommand(command) {
+      return runtime.handleCommand(command);
+    },
+    setTimeoutFn: () => ({}),
+  });
+  runtime = createEislandBridgeRuntime({
+    completeCommand(receipt) {
+      trace.push('receipt');
+      bridge.receiveCommandReceipt(receipt);
+    },
+    clearIntervalFn() {},
+    getPlayer: () => player,
+    publishState(snapshot) {
+      trace.push('state');
+      bridge.receiveHeartbeat(snapshot);
+    },
+    setIntervalFn() {
+      return {};
+    },
+  });
+  assert.equal(runtime.start(), true);
+  trace.length = 0;
+  const http = createFakeHttp();
+  const bridgeServer = createEislandBridgeServer({
+    bridge,
+    http,
+    instanceId: 'runtime-e2e-instance',
+    token: 'runtime-e2e-token',
+  });
+  await bridgeServer.start();
+  try {
+    const response = await invokeFakeRequest(http.server.handler, {
+      body: JSON.stringify({ requestId: 'runtime-e2e-command', type: 'play' }),
+      headers: { authorization: 'Bearer runtime-e2e-token' },
+      method: 'POST',
+      url: '/api/eisland/v1/command',
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body), {
+      ok: true,
+      outcome: 'executed',
+      requestId: 'runtime-e2e-command',
+      revision: 2,
+      state: {
+        capabilities: {
+          next: true,
+          pause: true,
+          play: true,
+          previous: true,
+          seek: true,
+        },
+        playback: {
+          durationMs: 120_000,
+          positionMs: 45_000,
+          rate: 1,
+          status: 'playing',
+        },
+      },
+      track: {
+        artist: '真实歌手',
+        coverUrl: 'https://image.example/runtime-cover.jpg',
+        durationMs: 120_000,
+        id: 'netease:901',
+        source: 'netease',
+        title: '真实运行时歌曲',
+      },
+    });
+    assert.deepEqual(trace, ['state', 'receipt']);
+    assert.doesNotMatch(response.body, /renderer-cookie|private-runtime|audio\.example/i);
+  } finally {
+    await bridgeServer.close();
+    assert.equal(runtime.stop(), true);
+  }
+});
 test('contains_bridge_state_failures_at_the_http_boundary', async () => {
   const { createEislandBridgeServer } = loadBridgeServer();
   assert.equal(typeof createEislandBridgeServer, 'function');

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createEislandBridgeRuntime } = require('../public/eisland-bridge-runtime');
 
 function loadPlayerBridge() {
   try {
@@ -12,6 +13,15 @@ function loadPlayerBridge() {
   }
 }
 
+function publishPostCommandHeartbeat(bridge, {
+  state = { playback: { status: 'paused' } },
+  commandAttempt = '',
+  track = { source: 'netease', title: '桥接测试歌曲' },
+} = {}) {
+  const heartbeat = { state, track };
+  if (commandAttempt) heartbeat.commandAttempt = commandAttempt;
+  bridge.receiveHeartbeat(heartbeat);
+}
 test('returns_not_ready_then_stale_after_2500ms', () => {
   const { createPlayerBridge } = loadPlayerBridge();
   assert.equal(typeof createPlayerBridge, 'function');
@@ -163,6 +173,7 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
     },
     dispatchCommand(command) {
       dispatched.push(command);
+      publishPostCommandHeartbeat(bridge, { commandAttempt: command.attempt });
     },
   });
 
@@ -203,7 +214,12 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   assert.deepEqual(await first, {
     requestId: 'same',
     ok: true,
-    result: { accepted: true },
+    result: {
+      accepted: true,
+      revision: 1,
+      state: { playback: { status: 'paused' } },
+      track: { source: 'netease', title: '桥接测试歌曲' },
+    },
   });
   assert.equal(timers[0].delay, 1_500);
   assert.equal(timers[0].cleared, true);
@@ -219,7 +235,16 @@ test('serializes_deduplicates_and_bounds_command_results', async () => {
   await queued;
   assert.deepEqual(
     await bridge.enqueueCommand({ requestId: 'same', command: 'play', payload: { at: 0 } }),
-    { requestId: 'same', ok: true, result: { accepted: true } },
+    {
+      requestId: 'same',
+      ok: true,
+      result: {
+        accepted: true,
+        revision: 1,
+        state: { playback: { status: 'paused' } },
+        track: { source: 'netease', title: '桥接测试歌曲' },
+      },
+    },
   );
   assert.equal(dispatched.length, 2);
 
@@ -518,6 +543,7 @@ test('requires_attempt_to_complete_reused_request_id', async () => {
     },
     dispatchCommand(command) {
       dispatched.push(command);
+      publishPostCommandHeartbeat(bridge, { commandAttempt: command.attempt });
     },
   });
 
@@ -562,7 +588,13 @@ test('requires_attempt_to_complete_reused_request_id', async () => {
   assert.deepEqual(await second, {
     requestId: 'reuse',
     ok: true,
-    result: { current: true },
+    result: {
+      accepted: true,
+      current: true,
+      revision: 1,
+      state: { playback: { status: 'paused' } },
+      track: { source: 'netease', title: '桥接测试歌曲' },
+    },
   });
 });
 
@@ -665,6 +697,214 @@ test('dispose_clears_timers_and_completes_pending_commands', async () => {
   assert.equal(dispatched.length, 1);
 });
 
+test('requires a post-dispatch heartbeat and caches bridge-owned command state', async () => {
+  const dispatched = [];
+  let now = 90_000;
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({
+    clock: () => now,
+    createAttemptId: () => 'post-state-attempt-' + (dispatched.length + 1),
+    clearTimeoutFn() {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+    setTimeoutFn: () => ({}),
+  });
+  bridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { source: 'netease', title: '命令前歌曲' },
+  });
+  const missingPostState = bridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'post-state-missing',
+  });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[0].attempt,
+    ok: true,
+    requestId: 'post-state-missing',
+    result: { accepted: true },
+  }), true);
+  assert.deepEqual(await missingPostState, {
+    error: { code: 'post-state-missing' },
+    ok: false,
+    requestId: 'post-state-missing',
+  });
+  const terminalPending = bridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'bridge-owned-terminal-state',
+  });
+  now += 1;
+  bridge.receiveHeartbeat({
+    commandAttempt: dispatched[1].attempt,
+    state: { authToken: 'renderer-secret', playback: { status: 'playing' } },
+    track: { localPath: 'C:/private/song.mp3', source: 'netease', title: '命令后歌曲' },
+  });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[1].attempt,
+    ok: true,
+    requestId: 'bridge-owned-terminal-state',
+    result: {
+      accepted: false,
+      revision: 999,
+      state: { authToken: 'forged-secret', playback: { status: 'forged' } },
+      track: { localPath: 'C:/forged/song.mp3', title: '伪造歌曲' },
+    },
+  }), true);
+  const terminal = await terminalPending;
+  assert.deepEqual(terminal, {
+    ok: true,
+    requestId: 'bridge-owned-terminal-state',
+    result: {
+      accepted: true,
+      revision: 2,
+      state: { playback: { status: 'playing' } },
+      track: { source: 'netease', title: '命令后歌曲' },
+    },
+  });
+  assert.deepEqual(
+    await bridge.enqueueCommand({
+      command: 'play',
+      payload: {},
+      requestId: 'bridge-owned-terminal-state',
+    }),
+    terminal,
+  );
+  assert.equal(dispatched.length, 2);
+  assert.doesNotMatch(JSON.stringify(terminal), /secret|private|forged/i);
+});
+test('requires a matching command attempt on the post-dispatch snapshot', async () => {
+  const dispatched = [];
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({
+    clearTimeoutFn() {},
+    createAttemptId: () => `attempt-${dispatched.length + 1}`,
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+    setTimeoutFn: () => ({}),
+  });
+
+  bridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { source: 'netease', title: '命令前歌曲' },
+  });
+  const delayedPreCommand = bridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'delayed-pre-command-heartbeat',
+  });
+  bridge.receiveHeartbeat({
+    state: { playback: { status: 'playing' } },
+    track: { source: 'netease', title: '未绑定的晚到心跳' },
+  });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[0].attempt,
+    ok: true,
+    requestId: 'delayed-pre-command-heartbeat',
+    result: { accepted: true },
+  }), true);
+  assert.deepEqual(await delayedPreCommand, {
+    error: { code: 'post-state-missing' },
+    ok: false,
+    requestId: 'delayed-pre-command-heartbeat',
+  });
+
+  const confirmed = bridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'attempt-bound-heartbeat',
+  });
+  bridge.receiveHeartbeat({
+    commandAttempt: dispatched[1].attempt,
+    state: { playback: { status: 'playing' } },
+    track: { source: 'netease', title: '命令后歌曲' },
+  });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[1].attempt,
+    ok: true,
+    requestId: 'attempt-bound-heartbeat',
+    result: { accepted: true },
+  }), true);
+  assert.deepEqual(await confirmed, {
+    ok: true,
+    requestId: 'attempt-bound-heartbeat',
+    result: {
+      accepted: true,
+      revision: 2,
+      state: { playback: { status: 'playing' } },
+      track: { source: 'netease', title: '命令后歌曲' },
+    },
+  });
+});
+
+test('rejects unsafe cover URLs in transport, public state, and command receipts', async () => {
+  const dispatched = [];
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({
+    createAttemptId: () => 'attempt-' + (dispatched.length + 1),
+    clearTimeoutFn() {},
+    dispatchCommand(command) {
+      dispatched.push(command);
+    },
+    setTimeoutFn: () => ({}),
+  });
+  const unsafeCover = 'https://user:password@image.example/cover.jpg?token=secret';
+  const safeCover = 'https://image.example/cover.webp?width=320';
+  const transportPending = bridge.enqueueCommand({
+    command: 'play',
+    payload: {
+      coverUrl: unsafeCover,
+      track: { coverUrl: safeCover, title: '安全封面' },
+    },
+    requestId: 'cover-transport',
+  });
+  assert.deepEqual(dispatched[0].payload, {
+    track: { coverUrl: safeCover, title: '安全封面' },
+  });
+  publishPostCommandHeartbeat(bridge, { commandAttempt: dispatched[0].attempt });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[0].attempt,
+    ok: true,
+    requestId: 'cover-transport',
+    result: { accepted: true },
+  }), true);
+  await transportPending;
+  bridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { coverUrl: unsafeCover, source: 'netease', title: '不安全封面' },
+  });
+  assert.equal(bridge.getState().track.coverUrl, undefined);
+  bridge.receiveHeartbeat({
+    state: { playback: { status: 'paused' } },
+    track: { coverUrl: safeCover, source: 'netease', title: '安全封面' },
+  });
+  assert.equal(bridge.getState().track.coverUrl, safeCover);
+  const receiptPending = bridge.enqueueCommand({
+    command: 'play',
+    payload: {},
+    requestId: 'cover-receipt',
+  });
+  publishPostCommandHeartbeat(bridge, {
+    state: { playback: { status: 'playing' } },
+    commandAttempt: dispatched[1].attempt,
+    track: { coverUrl: safeCover, source: 'netease', title: '安全封面' },
+  });
+  assert.equal(bridge.receiveCommandReceipt({
+    attempt: dispatched[1].attempt,
+    ok: true,
+    requestId: 'cover-receipt',
+    result: {
+      state: { coverUrl: unsafeCover, playing: true },
+      track: { coverUrl: safeCover, title: '安全封面' },
+    },
+  }), true);
+  const receipt = await receiptPending;
+  assert.equal(receipt.result.state.coverUrl, undefined);
+  assert.equal(receipt.result.track.coverUrl, safeCover);
+  assert.doesNotMatch(JSON.stringify(receipt), /password|token=secret/);
+});
 test('projects_sensitive_command_results_without_media_or_credentials', async () => {
   const dispatched = [];
   const bridge = loadPlayerBridge().createPlayerBridge({
@@ -683,6 +923,7 @@ test('projects_sensitive_command_results_without_media_or_credentials', async ()
     command: 'play',
     payload: {},
   });
+  publishPostCommandHeartbeat(bridge, { commandAttempt: dispatched[0].attempt });
   assert.equal(
     bridge.receiveCommandReceipt({
       requestId: 'safe-result',
@@ -719,6 +960,9 @@ test('projects_sensitive_command_results_without_media_or_credentials', async ()
         progress: 0.5,
         variants: [{ name: 'fallback' }],
       },
+      revision: 1,
+      state: { playback: { status: 'paused' } },
+      track: { source: 'netease', title: '桥接测试歌曲' },
     },
   });
   assert.doesNotMatch(
@@ -821,6 +1065,7 @@ test('projects_command_results_to_explicit_public_dto', async () => {
     command: 'play',
     payload: {},
   });
+  publishPostCommandHeartbeat(bridge, { commandAttempt: dispatched[0].attempt });
   assert.equal(
     bridge.receiveCommandReceipt({
       requestId: 'dto-result',
@@ -859,6 +1104,9 @@ test('projects_command_results_to_explicit_public_dto', async () => {
         variants: [{ name: 'fallback' }],
       },
       progress: 0.75,
+      revision: 1,
+      state: { playback: { status: 'paused' } },
+      track: { source: 'netease', title: '桥接测试歌曲' },
     },
   });
   assert.doesNotMatch(
@@ -882,6 +1130,15 @@ test('restricts_nested_command_result_cover_urls_to_http', async () => {
     requestId: 'nested-cover-url',
     command: 'play',
     payload: {},
+  });
+  publishPostCommandHeartbeat(bridge, {
+    commandAttempt: dispatched[0].attempt,
+    state: {
+      coverUrl: 'blob:https://audio.example/private',
+      metadata: { coverUrl: 'https://image.example/nested-cover.jpg' },
+      progress: 0.5,
+    },
+    track: { coverUrl: 'file:///C:/private-cover.jpg', title: 'Song A' },
   });
   assert.equal(
     bridge.receiveCommandReceipt({
@@ -913,7 +1170,9 @@ test('restricts_nested_command_result_cover_urls_to_http', async () => {
     requestId: 'nested-cover-url',
     ok: true,
     result: {
+      accepted: true,
       playbackState: { playing: true },
+      revision: 1,
       state: {
         metadata: { coverUrl: 'https://image.example/nested-cover.jpg' },
         progress: 0.5,
@@ -924,5 +1183,106 @@ test('restricts_nested_command_result_cover_urls_to_http', async () => {
   assert.doesNotMatch(
     JSON.stringify(response),
     /data:audio|blob:|file:|javascript:/i,
+  );
+});
+
+test('keeps_only_canonical_track_sources', () => {
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 115_000 });
+
+  for (const [rawSource, expectedSource] of [
+    ['NETEASE', 'netease'],
+    ['QQ', 'qq'],
+    ['local', 'local'],
+    ['podcast', 'podcast'],
+  ]) {
+    bridge.receiveHeartbeat({
+      state: { visible: true },
+      track: { id: `song-${expectedSource}`, source: rawSource, title: '安全歌曲' },
+      lyrics: { lines: [], trackId: `song-${expectedSource}` },
+    });
+    assert.equal(bridge.getState().track.source, expectedSource);
+  }
+
+  bridge.receiveHeartbeat({
+    state: { visible: true },
+    track: { id: 'unsafe-source', source: 'file:///C:/private/song.mp3', title: '安全歌曲' },
+    lyrics: { lines: [], trackId: 'unsafe-source' },
+  });
+  const unsafeSnapshot = bridge.getState();
+  assert.equal(Object.hasOwn(unsafeSnapshot.track, 'source'), false);
+  assert.doesNotMatch(JSON.stringify(unsafeSnapshot), /private\/song\.mp3/);
+});
+
+test('preserves_runtime_v1_public_shape_through_heartbeat_and_command_receipt', async () => {
+  const player = {
+    audio: { currentTime: 42.125, duration: 240, ended: false, paused: false, playbackRate: 1 },
+    currentIdx: 0,
+    lyricsLines: [{ durationMs: 5_000, t: 12.5, text: '完整歌词', translation: 'Complete lyric' }],
+    playQueue: [{
+      album: '专辑', artist: '歌手', cover: 'https://image.example/cover.jpg', cookie: 'runtime-cookie',
+      durationMs: 240_000, id: 123, localPath: 'C:/private/runtime-song.mp3', name: '运行时歌曲',
+      source: 'netease', url: 'https://audio.example/private-song.mp3',
+    }],
+    trackSwitchToken: 3,
+  };
+  const snapshot = createEislandBridgeRuntime({ getPlayer: () => player }).createSnapshot();
+  const { createPlayerBridge } = loadPlayerBridge();
+  const bridge = createPlayerBridge({ clock: () => 50_000 });
+
+  bridge.receiveHeartbeat({
+    ...snapshot,
+    lyrics: { ...snapshot.lyrics, cookie: 'lyrics-cookie' },
+    state: { ...snapshot.state, mediaUrl: 'file:///C:/private/runtime-state.mp3' },
+    track: { ...snapshot.track, localPath: 'C:/private/runtime-song.mp3' },
+  });
+
+  const heartbeatState = bridge.getState();
+  assert.equal(heartbeatState.track.durationMs, 240_000);
+  assert.equal(heartbeatState.state.playback.durationMs, 240_000);
+  assert.equal(heartbeatState.state.playback.positionMs, 42_125);
+  assert.deepEqual(heartbeatState.state.capabilities, {
+    next: true, pause: true, play: true, previous: true, seek: true,
+  });
+  assert.deepEqual(heartbeatState.lyrics.lines, [{
+    endMs: 17_500, startMs: 12_500, text: '完整歌词', translation: 'Complete lyric',
+  }]);
+  assert.doesNotMatch(
+    JSON.stringify(heartbeatState),
+    /runtime-cookie|lyrics-cookie|private\/runtime|private-song\.mp3/i,
+  );
+
+  const dispatched = [];
+  const commandBridge = createPlayerBridge({
+    clock: () => 50_000,
+    createAttemptId: () => 'runtime-attempt',
+    clearTimeoutFn: () => {},
+    dispatchCommand(command) { dispatched.push(command); },
+    setTimeoutFn: () => ({}),
+  });
+  const pending = commandBridge.enqueueCommand({
+    command: 'play', payload: {}, requestId: 'runtime-command-result',
+  });
+  commandBridge.receiveHeartbeat({ ...snapshot, commandAttempt: dispatched[0].attempt });
+  assert.equal(commandBridge.receiveCommandReceipt({
+    attempt: dispatched[0].attempt,
+    ok: true,
+    requestId: 'runtime-command-result',
+    result: {
+      accepted: true,
+      state: { ...snapshot.state, authToken: 'private-command-token' },
+      track: { ...snapshot.track, mediaUrl: 'file:///C:/private/command-song.mp3' },
+    },
+  }), true);
+
+  const response = await pending;
+  assert.deepEqual(response, {
+    ok: true,
+    requestId: 'runtime-command-result',
+    result: { accepted: true, revision: 1, state: snapshot.state, track: snapshot.track },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /private-command-token|private\/command-song\.mp3/i,
   );
 });

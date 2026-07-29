@@ -8,8 +8,10 @@ const COMMAND_RESULT_CACHE_MAX_ENTRIES = 256;
 const COMMAND_QUEUE_MAX_ENTRIES = 256;
 
 const DROP_VALUE = Symbol('drop-value');
+const CANONICAL_TRACK_SOURCES = new Set(['netease', 'qq', 'local', 'podcast']);
 const PUBLIC_CONTAINER_KEYS = new Set([
   'audio',
+  'capabilities',
   'colors',
   'media',
   'metadata',
@@ -34,8 +36,10 @@ const PUBLIC_VALUE_KEYS = new Set([
   'coverurl',
   'currenttime',
   'duration',
+  'durationms',
   'enabled',
   'end',
+  'endms',
   'glow',
   'highlight',
   'id',
@@ -48,21 +52,29 @@ const PUBLIC_VALUE_KEYS = new Set([
   'moved',
   'muted',
   'name',
+  'next',
   'offset',
   'ok',
+  'pause',
   'paused',
+  'play',
   'playing',
   'position',
+  'positionms',
   'primary',
+  'previous',
   'progress',
   'rate',
   'repeat',
   'romanized',
   'secondary',
+  'seek',
+  'source',
   'seconds',
   'seeked',
   'shuffle',
   'start',
+  'startms',
   'status',
   'text',
   'time',
@@ -117,10 +129,45 @@ function normalizeKey(key) {
   return String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
 
+function normalizeTrackSource(value) {
+  if (typeof value !== 'string') return '';
+  const source = value.trim().toLowerCase();
+  return CANONICAL_TRACK_SOURCES.has(source) ? source : '';
+}
+
 function isExternalUrl(value) {
   return typeof value === 'string' && /^(?:https?|blob|file):|^data:audio\//i.test(value);
 }
 
+function isSafeCoverUrl(value) {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  if (!text || text.length > 2_048) return false;
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return false;
+  }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username
+    || parsed.password
+    || parsed.hash
+  ) return false;
+  for (const key of parsed.searchParams.keys()) {
+    if (/(?:token|auth|secret|cookie|credential|signature|api[-_]?key|session)|(?:^|[-_])sig(?:$|[-_])/i.test(key)) {
+      return false;
+    }
+  }
+  let pathname = parsed.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return !/(?:^|\/)(?:audio|stream)(?:\/|$)|\.(?:mp3|m4a|aac|flac|ogg|opus|wav|webm)$/i.test(pathname);
+}
 function isMediaContextKey(key) {
   return /^(audio|stream|music|media|playback|player)$/.test(normalizeKey(key));
 }
@@ -149,6 +196,16 @@ function sanitizeTransportValue(value, inMediaContext = false) {
 
   const normalized = {};
   for (const key of Object.keys(value).sort()) {
+    const normalizedKey = normalizeKey(key);
+    if (normalizedKey === 'source') {
+      const source = normalizeTrackSource(value[key]);
+      if (source) normalized[key] = source;
+      continue;
+    }
+    if (normalizedKey === 'coverurl') {
+      if (isSafeCoverUrl(value[key])) normalized[key] = value[key];
+      continue;
+    }
     if (isSensitiveTransportKey(key)) continue;
     const next = sanitizeTransportValue(value[key], inMediaContext || isMediaContextKey(key));
     if (next !== DROP_VALUE) normalized[key] = next;
@@ -156,15 +213,15 @@ function sanitizeTransportValue(value, inMediaContext = false) {
   return normalized;
 }
 
-function projectPublicValue(value, allowUrl = false) {
+function projectPublicValue(value) {
   if (value === undefined) return DROP_VALUE;
   if (value == null || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return !allowUrl && isExternalUrl(value) ? DROP_VALUE : value;
+  if (typeof value === 'string') return isExternalUrl(value) ? DROP_VALUE : value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (Array.isArray(value)) {
     const projected = [];
     for (const item of value) {
-      const next = projectPublicValue(item, allowUrl);
+      const next = projectPublicValue(item);
       if (next !== DROP_VALUE) projected.push(next);
     }
     return projected;
@@ -175,6 +232,15 @@ function projectPublicValue(value, allowUrl = false) {
   for (const key of Object.keys(value).sort()) {
     const normalizedKey = normalizeKey(key);
     const rawValue = value[key];
+    if (normalizedKey === 'source') {
+      const source = normalizeTrackSource(rawValue);
+      if (source) projected[key] = source;
+      continue;
+    }
+    if (normalizedKey === 'coverurl') {
+      if (isSafeCoverUrl(rawValue)) projected[key] = rawValue;
+      continue;
+    }
     if (PUBLIC_CONTAINER_KEYS.has(normalizedKey)) {
       if (!rawValue || typeof rawValue !== 'object') continue;
       const next = projectPublicValue(rawValue);
@@ -182,14 +248,14 @@ function projectPublicValue(value, allowUrl = false) {
       continue;
     }
     if (!PUBLIC_VALUE_KEYS.has(normalizedKey)) continue;
-    const next = projectPublicValue(rawValue, normalizedKey === 'coverurl');
+    const next = projectPublicValue(rawValue);
     if (next !== DROP_VALUE) projected[key] = next;
   }
   return projected;
 }
 
 function isCommandResultCoverUrl(value) {
-  return typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value);
+  return isSafeCoverUrl(value);
 }
 
 function projectCommandResultSection(value) {
@@ -211,6 +277,11 @@ function projectCommandResultSection(value) {
   for (const key of Object.keys(value).sort()) {
     const normalizedKey = normalizeKey(key);
     const rawValue = value[key];
+    if (normalizedKey === 'source') {
+      const source = normalizeTrackSource(rawValue);
+      if (source) projected[key] = source;
+      continue;
+    }
     if (PUBLIC_CONTAINER_KEYS.has(normalizedKey)) {
       if (!rawValue || typeof rawValue !== 'object') continue;
       const next = projectCommandResultSection(rawValue);
@@ -322,6 +393,7 @@ function createPlayerBridge({
   let trackRevision = 0;
   let lyricsRevision = 0;
   let requiresTrackBoundLyrics = false;
+  let heartbeatSequence = 0;
   let disposed = false;
   let activeCommand = null;
   const queuedCommands = [];
@@ -334,6 +406,10 @@ function createPlayerBridge({
   const sendCommand = typeof dispatchCommand === 'function' ? dispatchCommand : () => {};
 
   function receiveHeartbeat(payload = {}) {
+    heartbeatSequence += 1;
+    const commandAttempt = typeof payload?.commandAttempt === 'string'
+      ? payload.commandAttempt.slice(0, 128)
+      : '';
     const nextState = normalizeSection(payload.state);
     const nextTrack = normalizeSection(payload.track);
     const nextLyrics = normalizeSection(payload.lyrics);
@@ -361,6 +437,13 @@ function createPlayerBridge({
       lyricsRevision += 1;
     }
     updatedAtMs = clock();
+    if (
+      activeCommand
+      && commandAttempt === activeCommand.attempt
+      && heartbeatSequence > activeCommand.heartbeatSequence
+    ) {
+      activeCommand.postCommandSnapshot = getState();
+    }
   }
 
   function getState() {
@@ -452,6 +535,8 @@ function createPlayerBridge({
 
     const command = queuedCommands.shift();
     activeCommand = command;
+    command.heartbeatSequence = heartbeatSequence;
+    command.postCommandSnapshot = null;
     try {
       const rawAttempt = makeAttemptId();
       command.attempt = rawAttempt == null ? '' : String(rawAttempt);
@@ -560,6 +645,16 @@ function createPlayerBridge({
     resultCache.clear();
     return true;
   }
+  function postCommandSnapshot(command) {
+    const snapshot = command.postCommandSnapshot;
+    if (!snapshot || (
+      snapshot.status !== 'ready'
+      || !snapshot.state
+      || typeof snapshot.state !== 'object'
+      || Array.isArray(snapshot.state)
+    )) return null;
+    return snapshot;
+  }
   function receiveCommandReceipt(receipt) {
     const requestId = receipt?.requestId == null ? '' : String(receipt.requestId);
     const attempt = receipt?.attempt == null ? '' : String(receipt.attempt);
@@ -569,17 +664,30 @@ function createPlayerBridge({
       || activeCommand.attempt !== attempt
     ) return false;
 
-    const response = receipt?.ok === false
-      ? {
+    let response;
+    if (receipt?.ok === false) {
+      response = {
         requestId,
         ok: false,
         error: normalizeCommandError(receipt.error, 'renderer-command-failed'),
-      }
-      : {
-        requestId,
-        ok: true,
-        result: projectCommandResult(receipt?.result),
       };
+    } else {
+      const snapshot = postCommandSnapshot(activeCommand);
+      if (!snapshot) {
+        response = {
+          requestId,
+          ok: false,
+          error: { code: 'post-state-missing' },
+        };
+      } else {
+        const result = projectCommandResult(receipt?.result) || {};
+        result.accepted = true;
+        result.revision = snapshot.revision;
+        result.state = snapshot.state;
+        result.track = snapshot.track;
+        response = { requestId, ok: true, result };
+      }
+    }
     return completeCommand(activeCommand, response);
   }
 
