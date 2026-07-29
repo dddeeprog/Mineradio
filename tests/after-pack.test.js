@@ -64,3 +64,86 @@ test('after-pack builds deterministic rcedit resource arguments', () => {
     '--set-product-version', '1.1.0'
   ]);
 });
+
+test('after-pack generates installer manifests only after executable resources are final', async () => {
+  const projectDir = makeTempProject();
+  const appOutDir = path.join(projectDir, 'dist', 'win-unpacked');
+  const buildResourcesDir = path.join(projectDir, 'build');
+  const rceditPath = path.join(projectDir, 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe');
+  touch(rceditPath);
+  touch(path.join(appOutDir, 'Mineradio.exe'));
+  touch(path.join(buildResourcesDir, 'icon.ico'));
+  const events = [];
+
+  const result = await afterPack({
+    electronPlatformName: 'win32',
+    appOutDir,
+    packager: {
+      projectDir,
+      appInfo: {
+        id: 'com.mineradio.desktop',
+        productFilename: 'Mineradio',
+        productName: 'Mineradio',
+        version: '1.1.0',
+      },
+      info: { buildResourcesDir },
+    },
+  }, {
+    env: {
+      MINERADIO_BUILD_COMMIT: 'd61cc2e',
+      MINERADIO_BUILD_ID: 'fixture-build',
+      SOURCE_DATE_EPOCH: '1785283200',
+    },
+    execFileSync(executable) {
+      assert.equal(executable, rceditPath);
+      events.push('rcedit');
+    },
+    generateInstallerManifest(options) {
+      events.push('manifest');
+      assert.equal(options.appOutDir, appOutDir);
+      assert.equal(options.productName, 'Mineradio');
+      assert.equal(options.appId, 'com.mineradio.desktop');
+      assert.equal(options.version, '1.1.0');
+      assert.equal(options.channel, 'stable');
+      assert.equal(options.commit, 'd61cc2e');
+      assert.equal(options.buildId, 'fixture-build');
+      assert.equal(options.createdAt, '2026-07-29T00:00:00.000Z');
+      assert.equal(
+        options.jsonPath,
+        path.join(buildResourcesDir, '.generated', 'installer-manifest.json'),
+      );
+      assert.equal(
+        options.nsisPath,
+        path.join(buildResourcesDir, '.generated', 'installer-files.nsh'),
+      );
+      return { manifest: { manifestSha256: 'A'.repeat(64) } };
+    },
+  });
+
+  assert.deepEqual(events, ['rcedit', 'manifest']);
+  assert.equal(result.manifest.manifestSha256, 'A'.repeat(64));
+});
+
+test('after-pack resolves stable build identity without accepting unsafe metadata', () => {
+  assert.deepEqual(afterPack.resolveInstallerBuildIdentity({
+    version: '1.1.0',
+    env: {
+      MINERADIO_BUILD_COMMIT: 'abcdef123456',
+      MINERADIO_BUILD_ID: 'ci-100',
+      SOURCE_DATE_EPOCH: '1785283200',
+    },
+  }), {
+    channel: 'stable',
+    commit: 'abcdef123456',
+    buildId: 'ci-100',
+    createdAt: '2026-07-29T00:00:00.000Z',
+  });
+
+  assert.throws(
+    () => afterPack.resolveInstallerBuildIdentity({
+      version: '1.1.0',
+      env: { MINERADIO_BUILD_COMMIT: 'bad"\ncommit' },
+    }),
+    /build commit/i,
+  );
+});

@@ -16,8 +16,8 @@ Mineradio 使用了以下第三方项目或服务。各项目版权归其原作�
 
 ## Upstream Reference Adaptations
 
-- [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio)，固定参考 commit `4abaa19`，许可证为 GPL-3.0-only。
-  本批参考其 `desktop/main.js` 与 `server.js`，改编了稳定用户数据目录、平台能力模型和账号隔离概念；Mineradio 保留了现有播放、Folia、本地音乐库、安全与发布架构。
+- [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio)，固定参考 commit `4abaa190de42c632365ae4244e041bad16443224`，许可证为 GPL-3.0-only。
+  本批参考其 `desktop/main.js`、`server.js`、`build/installer.nsh` 与 `build/after-pack.js`，改编了稳定用户数据目录、平台能力模型、账号隔离概念和安装器视觉/资源注入流程；安装归属、危险路径、生成式清单、事务恢复与卸载保护由本地重写实现。
 
 ## Third-party Services
 

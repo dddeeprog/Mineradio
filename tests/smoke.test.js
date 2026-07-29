@@ -37,6 +37,7 @@ test('maintenance baseline scripts are wired', () => {
     Array.isArray(pkg.build && pkg.build.files) && pkg.build.files.includes('server/**/*'),
     'Windows packaged app must include server modules required by server.js'
   );
+  assert.ok(pkg.build.files.includes('!build/.generated/**/*'));
 });
 
 test('palette helpers load before page initialization', () => {

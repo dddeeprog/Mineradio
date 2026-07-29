@@ -44,6 +44,7 @@ function options(appOutDir) {
     channel: 'stable',
     commit: 'd61cc2e',
     buildId: 'fixture-build',
+    createdAt: '2026-07-29T00:00:00.000Z',
   };
 }
 
@@ -57,10 +58,12 @@ test('generates a complete deterministic manifest from the packaged app director
   assert.equal(first.productName, 'Mineradio');
   assert.equal(first.appId, 'com.mineradio.desktop');
   assert.equal(first.channel, 'stable');
+  assert.equal(first.createdAt, '2026-07-29T00:00:00.000Z');
   assert.match(first.manifestSha256, /^[A-F0-9]{64}$/);
   assert.deepEqual(
     first.files.map((entry) => entry.path),
     [
+      '.mineradio-install-manifest.json',
       '.mineradio-install-owner.json',
       'Mineradio.exe',
       'resources\\app\\server.js',
@@ -84,24 +87,60 @@ test('generates a complete deterministic manifest from the packaged app director
 test('renders allowlisted NSIS cleanup without recursive installation-directory removal', () => {
   const manifest = createInstallerManifest(options(fixtureTree()));
   const include = renderNsisDeleteInclude(manifest);
+  const removal = include.slice(include.indexOf('!macro MineradioRemoveManagedFiles'));
 
-  assert.match(include, /Delete "\$INSTDIR\\Mineradio\.exe"/);
-  assert.match(include, /Delete "\$INSTDIR\\resources\\app\\server\\route\.js"/);
-  assert.match(include, /RMDir "\$INSTDIR\\resources\\app\\server"/);
+  assert.match(removal, /StrCpy \$MineradioGuardInput "\$INSTDIR\\Mineradio\.exe"/);
+  assert.match(include, /MINERADIO_INSTALL_BUILD_CREATED_AT/);
+  assert.match(include, /MINERADIO_INSTALL_BUILD_ID/);
+  assert.match(include, /MINERADIO_INSTALL_COMMIT/);
+  assert.match(removal, /StrCpy \$MineradioGuardInput "\$INSTDIR\\resources\\app\\server\\route\.js"/);
+  assert.match(removal, /StrCpy \$MineradioGuardInput "\$INSTDIR\\resources\\app\\server"/);
   assert.doesNotMatch(include, /RMDir\s+\/r/i);
   assert.doesNotMatch(include, /RMDir\s+"\$INSTDIR"\s*$/im);
   assert.ok(
-    include.indexOf('resources\\app\\server"') < include.indexOf('resources\\app"'),
+    removal.indexOf('resources\\app\\server"') < removal.indexOf('resources\\app"'),
     'nested directories must be removed before their parents',
   );
   assert.ok(
-    include.lastIndexOf('RMDir ') < include.lastIndexOf('.mineradio-install-owner.json'),
+    removal.lastIndexOf('Call un.MineradioRemoveManagedDirectory')
+      < removal.lastIndexOf('.mineradio-install-owner.json'),
     'the ownership marker must be the final managed entry deleted',
   );
   assert.match(
-    include,
-    /Delete "\$INSTDIR\\\.mineradio-install-owner\.json"\n!macroend\n$/,
+    removal,
+    /StrCpy \$MineradioGuardInput "\$INSTDIR\\\.mineradio-install-owner\.json"[\s\S]*Call un\.MineradioRemoveManagedFile[\s\S]*MineradioRemoveManagedFilesDone:[\s\S]*!macroend\n$/,
   );
+});
+
+test('generated cleanup rejects managed junctions and preserves ownership on deletion failure', () => {
+  const manifest = createInstallerManifest(options(fixtureTree()));
+  const include = renderNsisDeleteInclude(manifest);
+  const validation = include.slice(
+    include.indexOf('!macro MineradioValidateManagedPaths'),
+    include.indexOf('!macro MineradioRemoveManagedFiles')
+  );
+  const removal = include.slice(include.indexOf('!macro MineradioRemoveManagedFiles'));
+  const marker = '$INSTDIR\\.mineradio-install-owner.json';
+
+  assert.match(validation, /Call un\.MineradioValidateManagedDirectory/);
+  for (const directory of manifest.directories) {
+    assert.ok(
+      validation.includes(`StrCpy $MineradioGuardInput "$INSTDIR\\${directory}"`),
+      `missing reparse validation for ${directory}`
+    );
+  }
+  assert.match(validation, /MineradioValidateManagedPathsFailed:[\s\S]*Abort/);
+
+  assert.match(removal, /Call un\.MineradioRemoveManagedFile/);
+  assert.match(removal, /Call un\.MineradioRemoveManagedDirectory/);
+  assert.match(removal, /StrCmp "\$0" "1" 0 MineradioRemoveManagedFilesFailed/);
+  assert.match(removal, /MineradioRemoveManagedFilesFailed:[\s\S]*Abort/);
+  assert.ok(
+    removal.lastIndexOf(`StrCpy $MineradioGuardInput "${marker}"`)
+      > removal.lastIndexOf('Call un.MineradioRemoveManagedDirectory'),
+    'ownership marker must not be attempted until all other cleanup succeeds'
+  );
+  assert.doesNotMatch(removal, /^\s*(?:Delete|RMDir)\s/m);
 });
 
 test('writes JSON and NSIS output files from one manifest snapshot', () => {
@@ -114,9 +153,21 @@ test('writes JSON and NSIS output files from one manifest snapshot', () => {
   });
 
   const writtenManifest = JSON.parse(fs.readFileSync(result.jsonPath, 'utf8'));
+  const writtenManifestBytes = fs.readFileSync(result.jsonPath);
   const writtenInclude = fs.readFileSync(result.nsisPath, 'utf8');
+  const manifestFileSha256 = crypto
+    .createHash('sha256')
+    .update(writtenManifestBytes)
+    .digest('hex')
+    .toUpperCase();
   assert.deepEqual(writtenManifest, result.manifest);
   assert.equal(writtenInclude, renderNsisDeleteInclude(result.manifest));
+  assert.match(
+    writtenInclude,
+    new RegExp(
+      `!define MINERADIO_INSTALL_MANIFEST_FILE_SHA256 "${manifestFileSha256}"`,
+    ),
+  );
 });
 
 test('hashes packaged files with a bounded reusable read buffer', () => {

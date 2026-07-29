@@ -17,7 +17,7 @@
 
 | 上游项目 | 固定 commit | 参考文件 | 本地改编范围 | 许可证 |
 | --- | --- | --- | --- | --- |
-| `https://github.com/XxHuberrr/Mineradio` | `4abaa190de42c632365ae4244e041bad16443224` | `desktop/main.js`、`server.js`、上游多平台搜索实现 | 稳定用户数据目录、平台能力与账号隔离模型、酷狗/汽水/Spotify 只读目录搜索适配 | GPL-3.0-only |
+| `https://github.com/XxHuberrr/Mineradio` | `4abaa190de42c632365ae4244e041bad16443224` | `desktop/main.js`、`server.js`、`build/installer.nsh`、`build/after-pack.js`、上游多平台搜索实现 | 稳定用户数据目录、平台能力与账号隔离模型、酷狗/汽水/Spotify 只读目录搜索适配，以及经本地安全重写的安装器视觉、资源注入、归属与清理流程 | GPL-3.0-only |
 
 ## 更新流程
 
