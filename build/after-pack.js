@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { generateInstallerManifest } = require('./generate-installer-manifest.js');
+const { resolveSourceIdentity } = require('./source-identity.js');
 
 function projectRceditCandidates(projectDir) {
   return [
@@ -44,6 +45,44 @@ function buildRceditArgs(options) {
   ];
 }
 
+function readProjectPackageJson(projectDir) {
+  const packagePath = path.join(projectDir, 'package.json');
+  const maxBytes = 1024 * 1024;
+  const initialStat = fs.lstatSync(packagePath);
+  if (initialStat.isSymbolicLink() || !initialStat.isFile()) {
+    throw new Error(`Project package.json must be a regular file: ${packagePath}`);
+  }
+  if (!Number.isSafeInteger(initialStat.size) || initialStat.size < 0 || initialStat.size > maxBytes) {
+    throw new Error(`Project package.json exceeds the ${maxBytes}-byte size limit.`);
+  }
+
+  const descriptor = fs.openSync(packagePath, 'r');
+  try {
+    const descriptorStat = fs.fstatSync(descriptor);
+    if (!descriptorStat.isFile() || descriptorStat.size !== initialStat.size) {
+      throw new Error('Project package.json changed while it was opened.');
+    }
+    const buffer = Buffer.alloc(descriptorStat.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = fs.readSync(descriptor, buffer, offset, buffer.length - offset, null);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset !== buffer.length) throw new Error('Project package.json changed while it was read.');
+    return JSON.parse(buffer.toString('utf8'));
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function resolvePackagedFileRules(context) {
+  const config = context && context.packager && context.packager.config;
+  if (config && config.files !== undefined) return config.files;
+  const projectDir = context && context.packager && context.packager.projectDir;
+  return readProjectPackageJson(projectDir).build.files;
+}
+
 function requireBuildIdentity(value, label, pattern) {
   var normalized = String(value || '').trim();
   if (!pattern.test(normalized)) {
@@ -56,23 +95,18 @@ function resolveInstallerBuildIdentity(options) {
   var input = options || {};
   var env = input.env || process.env;
   var version = String(input.version || '');
+  var sourceIdentity = resolveSourceIdentity({
+    repoDir: input.projectDir,
+    env,
+    buildFiles: input.buildFiles,
+    gitRunner: input.gitRunner,
+  });
   var channel = env.MINERADIO_BUILD_CHANNEL
     || (/(?:^|[-.])beta(?:[.-]|$)/i.test(version) ? 'beta' : 'stable');
   channel = requireBuildIdentity(channel, 'Build channel', /^(?:stable|beta)$/);
 
-  var commit = env.MINERADIO_BUILD_COMMIT;
-  if (!commit) {
-    var gitRunner = input.gitRunner || execFileSync;
-    commit = gitRunner('git', ['rev-parse', 'HEAD'], {
-      cwd: input.projectDir,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  }
-  commit = requireBuildIdentity(commit, 'Build commit', /^[A-Fa-f0-9]{7,64}$/);
-
   var buildId = env.MINERADIO_BUILD_ID
-    || `${channel}-${version}-${commit.slice(0, 12)}`;
+    || `${channel}-${version}-${sourceIdentity.commit.slice(0, 12)}`;
   buildId = requireBuildIdentity(
     buildId,
     'Build ID',
@@ -91,7 +125,7 @@ function resolveInstallerBuildIdentity(options) {
     createdAt = new Date(now()).toISOString();
   }
 
-  return { channel, commit, buildId, createdAt };
+  return { channel, ...sourceIdentity, buildId, createdAt };
 }
 
 async function afterPack(context, dependencies) {
@@ -116,9 +150,11 @@ async function afterPack(context, dependencies) {
     { stdio: 'inherit' },
   );
 
+  const buildFiles = resolvePackagedFileRules(context);
   const identity = resolveInstallerBuildIdentity({
     version,
     projectDir: context.packager.projectDir,
+    buildFiles,
     env: deps.env,
     gitRunner: deps.gitRunner,
     now: deps.now,
@@ -140,6 +176,7 @@ async function afterPack(context, dependencies) {
 
 afterPack.buildRceditArgs = buildRceditArgs;
 afterPack.projectRceditCandidates = projectRceditCandidates;
+afterPack.resolvePackagedFileRules = resolvePackagedFileRules;
 afterPack.resolveRceditExecutable = resolveRceditExecutable;
 afterPack.resolveInstallerBuildIdentity = resolveInstallerBuildIdentity;
 

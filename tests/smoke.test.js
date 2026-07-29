@@ -18,6 +18,7 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check desktop\/app-paths\.js/);
   assert.match(scripts.check, /node --check desktop\/credential-store\.js/);
   assert.match(scripts.check, /node --check build\/installer-safety\.js/);
+  assert.match(scripts.check, /node --check build\/source-identity\.js/);
   assert.match(scripts.check, /node --check build\/generate-installer-manifest\.js/);
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
@@ -29,15 +30,49 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.test, /tests\/\*\.test\.js/);
   assert.match(scripts.test, /desktop\/\*\.test\.js/);
   assert.equal(scripts['verify:artifacts'], 'node build/verify-release-artifacts.js');
+  assert.equal(scripts['build:win'], 'electron-builder --win nsis --publish never');
+  assert.equal(scripts['build:win:dir'], 'electron-builder --win dir --publish never');
   assert.equal(
     scripts['verify:release'],
-    'npm run check && npm run test && npm run audit:prod && npm run build:win:dir'
+    'npm run check && npm run test && npm run audit:prod && npm run build:win && npm run verify:artifacts -- --fresh'
   );
+  assert.equal(pkg.build.afterAllArtifactBuild, 'build/verify-release-artifacts.js');
+  const githubPublisher = pkg.build.publish.find(
+    (publisher) => publisher && publisher.provider === 'github'
+  );
+  assert.ok(githubPublisher, 'electron-builder GitHub publisher must remain configured');
+  assert.equal(githubPublisher.publishAutoUpdate, false);
+  assert.equal(pkg.build.nsis.differentialPackage, false);
+  assert.equal(pkg.mineradio.release.signingPolicy, 'allow-unsigned');
+  assert.equal(pkg.mineradio.release.freshnessMaxAgeMinutes, 240);
+  assert.deepEqual(pkg.mineradio.release.trustedSignerThumbprints, []);
   assert.ok(
     Array.isArray(pkg.build && pkg.build.files) && pkg.build.files.includes('server/**/*'),
     'Windows packaged app must include server modules required by server.js'
   );
+  for (const releaseMaterial of [
+    'LICENSE',
+    'NOTICE.md',
+    'THIRD_PARTY_NOTICES.md',
+    'docs/VENDOR_MANIFEST.md',
+  ]) {
+    assert.ok(
+      pkg.build.files.includes(releaseMaterial),
+      `Windows packaged app must include ${releaseMaterial}`
+    );
+  }
   assert.ok(pkg.build.files.includes('!build/.generated/**/*'));
+});
+
+test('release workflow explicitly disables electron-builder publishing', () => {
+  const release = fs.readFileSync(path.join(repoRoot, 'RELEASE.md'), 'utf8');
+
+  assert.match(release, /--publish never/);
+  assert.match(release, /不会自动上传|不得自动上传/);
+  assert.match(release, /仅.*人工上传|人工.*仅上传/);
+  assert.match(release, /Mineradio-1\.1\.0-Setup\.exe\.mineradio-attestation\.json/);
+  assert.doesNotMatch(release, /Setup\.exe\.blockmap.*(?:可选|上传)/i);
+  assert.doesNotMatch(release, /SHA256SUMS.*(?:建议|上传)/i);
 });
 
 test('palette helpers load before page initialization', () => {

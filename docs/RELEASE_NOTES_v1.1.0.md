@@ -2,6 +2,8 @@
 
 这是 Mineradio 1.1.0 的纯净安装发布版。安装包从当前可信源码重新构建，旧 `dist`、旧安装包、旧备份包和旧 packaged build 都没有作为本次发布来源。
 
+<!-- mineradio-release-signing:{"version":"1.1.0","status":"unsigned"} -->
+
 ## 重要安全说明
 
 - `v1.0.10` 及更早旧安装包不再建议继续安装或传播，请先隔离旧 `.exe` 安装包。
@@ -12,7 +14,7 @@
 ## 下载
 
 - Windows 安装包：`Mineradio-1.1.0-Setup.exe`
-- 校验文件：`Mineradio-1.1.0-SHA256SUMS.txt`
+- 构建证明：`Mineradio-1.1.0-Setup.exe.mineradio-attestation.json`（内含安装包 SHA256，并绑定本次源码与 installer manifest）
 
 ## 主要更新
 
@@ -34,6 +36,6 @@
 2. 先卸载旧版 Mineradio。
 3. 隔离旧 `.exe` 安装包和旧打包目录。
 4. 下载并安装 `Mineradio-1.1.0-Setup.exe`。
-5. 安装后如需对照校验，请使用 Release 中提供的 SHA256 文件。
+5. 安装后如需对照校验，请核对 attestation sidecar 中记录的安装包 SHA256。
 
 > 当前安装包暂未进行代码签名，Windows 可能显示安全提示。

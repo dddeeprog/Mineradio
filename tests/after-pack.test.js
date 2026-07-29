@@ -6,6 +6,14 @@ const test = require('node:test');
 
 const afterPack = require('../build/after-pack.js');
 
+const COMMIT = 'd61cc2e0123456789abcdef0123456789abcdef0';
+const SOURCE_TREE = 'a61cc2e0123456789abcdef0123456789abcdef0';
+const BUILD_FILES = [
+  'public/**/*',
+  '!public/index.*.html',
+  'public/index.html',
+];
+
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'mineradio-after-pack-'));
 }
@@ -65,6 +73,26 @@ test('after-pack builds deterministic rcedit resource arguments', () => {
   ]);
 });
 
+test('after-pack resolves build.files from packager config or package.json', () => {
+  const projectDir = makeTempProject();
+  fs.writeFileSync(path.join(projectDir, 'package.json'), JSON.stringify({
+    build: { files: BUILD_FILES },
+  }));
+
+  assert.deepEqual(afterPack.resolvePackagedFileRules({
+    packager: {
+      projectDir,
+      config: { files: ['desktop/**/*'] },
+    },
+  }), ['desktop/**/*']);
+  assert.deepEqual(afterPack.resolvePackagedFileRules({
+    packager: {
+      projectDir,
+      config: {},
+    },
+  }), BUILD_FILES);
+});
+
 test('after-pack generates installer manifests only after executable resources are final', async () => {
   const projectDir = makeTempProject();
   const appOutDir = path.join(projectDir, 'dist', 'win-unpacked');
@@ -80,6 +108,7 @@ test('after-pack generates installer manifests only after executable resources a
     appOutDir,
     packager: {
       projectDir,
+      config: { files: BUILD_FILES },
       appInfo: {
         id: 'com.mineradio.desktop',
         productFilename: 'Mineradio',
@@ -90,13 +119,21 @@ test('after-pack generates installer manifests only after executable resources a
     },
   }, {
     env: {
-      MINERADIO_BUILD_COMMIT: 'd61cc2e',
+      MINERADIO_BUILD_COMMIT: COMMIT,
       MINERADIO_BUILD_ID: 'fixture-build',
       SOURCE_DATE_EPOCH: '1785283200',
     },
     execFileSync(executable) {
       assert.equal(executable, rceditPath);
       events.push('rcedit');
+    },
+    gitRunner(command, args) {
+      assert.equal(command, 'git');
+      if (args.join(' ') === 'rev-parse --verify HEAD^{commit}') return `${COMMIT}\n`;
+      if (args.join(' ') === 'rev-parse --verify HEAD^{tree}') return `${SOURCE_TREE}\n`;
+      if (args.join(' ') === 'status --porcelain=v1 --untracked-files=all') return '';
+      if (args[0] === 'ls-files') return '';
+      throw new Error(`Unexpected git arguments: ${args.join(' ')}`);
     },
     generateInstallerManifest(options) {
       events.push('manifest');
@@ -105,7 +142,7 @@ test('after-pack generates installer manifests only after executable resources a
       assert.equal(options.appId, 'com.mineradio.desktop');
       assert.equal(options.version, '1.1.0');
       assert.equal(options.channel, 'stable');
-      assert.equal(options.commit, 'd61cc2e');
+      assert.equal(options.commit, COMMIT);
       assert.equal(options.buildId, 'fixture-build');
       assert.equal(options.createdAt, '2026-07-29T00:00:00.000Z');
       assert.equal(
@@ -127,14 +164,24 @@ test('after-pack generates installer manifests only after executable resources a
 test('after-pack resolves stable build identity without accepting unsafe metadata', () => {
   assert.deepEqual(afterPack.resolveInstallerBuildIdentity({
     version: '1.1.0',
+    projectDir: 'C:\\repo',
+    buildFiles: BUILD_FILES,
     env: {
-      MINERADIO_BUILD_COMMIT: 'abcdef123456',
+      MINERADIO_BUILD_COMMIT: COMMIT,
       MINERADIO_BUILD_ID: 'ci-100',
       SOURCE_DATE_EPOCH: '1785283200',
     },
+    gitRunner(command, args) {
+      if (args.join(' ') === 'rev-parse --verify HEAD^{commit}') return `${COMMIT}\n`;
+      if (args.join(' ') === 'rev-parse --verify HEAD^{tree}') return `${SOURCE_TREE}\n`;
+      if (args.join(' ') === 'status --porcelain=v1 --untracked-files=all') return '';
+      if (args[0] === 'ls-files') return '';
+      throw new Error(`Unexpected git arguments: ${args.join(' ')}`);
+    },
   }), {
     channel: 'stable',
-    commit: 'abcdef123456',
+    commit: COMMIT,
+    sourceTree: SOURCE_TREE,
     buildId: 'ci-100',
     createdAt: '2026-07-29T00:00:00.000Z',
   });
@@ -142,7 +189,14 @@ test('after-pack resolves stable build identity without accepting unsafe metadat
   assert.throws(
     () => afterPack.resolveInstallerBuildIdentity({
       version: '1.1.0',
+      projectDir: 'C:\\repo',
+      buildFiles: BUILD_FILES,
       env: { MINERADIO_BUILD_COMMIT: 'bad"\ncommit' },
+      gitRunner(command, args) {
+        if (args.includes('HEAD^{commit}')) return `${COMMIT}\n`;
+        if (args.includes('HEAD^{tree}')) return `${SOURCE_TREE}\n`;
+        return '';
+      },
     }),
     /build commit/i,
   );

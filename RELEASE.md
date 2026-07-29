@@ -26,12 +26,13 @@
 - 确认 `docs/VENDOR_MANIFEST.md` 中的 vendor hash 与 `Get-FileHash public\vendor\* -Algorithm SHA256` 一致。
 - 使用干净依赖树：`npm ci`。
 - 运行发布门禁：`npm run verify:release`。
+- Windows 构建脚本固定传入 `--publish never`；构建和验证阶段不会自动上传任何产物，保留 `build.publish` 仅供 electron-builder 描述目标仓库。
 - 确认生产审计为 clean；当前依赖例外处理为 `NeteaseCloudMusicApi -> music-metadata@11.13.0`。如果 `npm run audit:prod` 不为 clean，必须在 Release 记录 advisory、依赖路径、严重级别、运行时可达性、影响面、临时接受理由、补偿控制、负责人和到期日期。
 - 运行语法检查：`git diff --check`、`node --check server.js`、前端内联脚本解析。
 - 运行 Git 跟踪风险残留检查，确认没有跟踪 `.exe/.dll/.scr/.bat/.cmd/.ps1/.vbs/.jse/.wsf/.hta/.xlsm` 等可执行/脚本残留。
 - 从当前源码执行 `npm run build:win` 生成 Windows 安装包。
 - 对新生成的安装包和当前源码执行安全扫描。
-- 运行安装包验证：`npm run verify:artifacts`。
+- 运行安装包验证：`npm run verify:artifacts -- --fresh`。
 - 生成并记录新安装包 SHA256、Authenticode 签名状态和安装包路径。
 
 ## Release Artifact 验证
@@ -43,15 +44,15 @@ Get-AuthenticodeSignature dist\Mineradio-*-Setup.exe
 Get-FileHash dist\Mineradio-*-Setup.exe -Algorithm SHA256
 ```
 
-也可以运行：
+完成手工交叉检查后，必须运行发布验证门禁：
 
 ```powershell
-npm run verify:artifacts
+npm run verify:artifacts -- --fresh
 ```
 
-`npm run verify:artifacts` 会查找 `dist\Mineradio-*-Setup.exe`，输出等价的 Authenticode 和 SHA256 信息。未生成安装包时该命令必须失败。
+该命令只接受当前版本的唯一安装包及其 attestation sidecar，校验源码身份、安装包 SHA256、Windows 版本信息、签名策略、发布材料、时间新鲜度，并拒绝 `dist` 顶层残留的发布类产物。未生成安装包或任一检查失败时不得发布。
 
-如果官方安装包暂时未签名，Release 正文必须明确写出“未签名”，并把 GitHub Release 来源和 SHA256 作为完整性依据；如果签名失败但未记录接受理由，不得发布。
+如果官方安装包暂时未签名，对应 `docs/RELEASE_NOTES_v1.1.0.md` 必须同时包含当前版本的 unsigned 机器标记和面向用户的“未签名”声明，GitHub Release 正文也必须明确披露未签名状态；如果签名失败但未记录接受理由，不得发布。
 
 ## GitHub Release
 
@@ -73,15 +74,14 @@ Release 标题：
 Mineradio v1.1.0 纯净安装版
 ```
 
-建议上传资产：
+`npm run verify:artifacts -- --fresh` 成功后，仅由发布负责人人工上传以下两个资产：
 
 - `dist/Mineradio-1.1.0-Setup.exe`
-- `dist/Mineradio-1.1.0-Setup.exe.blockmap`（可选；本次不作为旧版软件内更新使用）
-- `dist/Mineradio-1.1.0-SHA256SUMS.txt`
+- `dist/Mineradio-1.1.0-Setup.exe.mineradio-attestation.json`（sidecar 内含安装包 SHA256，并绑定当前源码与 installer manifest）
 
-本次不要上传：
+构建和验证命令绝不上传产物；除上述两个文件外，本次明确禁止上传其他资产，尤其包括：
 
-- `latest.yml`
+- `latest.yml` 及其他 `latest*.yml`
 - `v1.0.10 -> v1.1.0` 快速补丁
 
 ## 更新检测
