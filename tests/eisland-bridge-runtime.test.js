@@ -662,11 +662,11 @@ test('wires_web_player_to_restricted_eisland_runtime', () => {
   assert.match(localImport, /\} catch \(localBridgeImportError\) \{\s*settleEislandBridgeTrackTransition\(token, false\);\s*throw localBridgeImportError;\s*\}/);
 });
 
-test('checks_eisland_bridge_runtime_syntax', () => {
+test('checks_eisland_bridge_runtime_and_lifecycle_syntax', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-  assert.equal(packageJson.scripts.precheck, 'node --check public/eisland-bridge-runtime.js');
+  assert.equal(packageJson.scripts.precheck, 'node --check public/eisland-bridge-runtime.js && node --check desktop/eisland-bridge-lifecycle.js');
 });
 
 test('plays_queue_backed_player_without_audio_and_rejects_pause_or_seek_without_audio', async () => {
