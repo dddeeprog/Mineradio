@@ -288,10 +288,186 @@ test('source identity mirrors electron-builder bare directory expansion', async 
   });
 });
 
+test('source identity accepts electron-builder normalized default file sets', () => {
+  assert.doesNotThrow(() => resolve({
+    buildFiles: [{ filter: BUILD_FILES }],
+    repoDir: 'C:\\repo',
+    env: {},
+    gitRunner: makeGitRunner(),
+  }));
+});
+
+test('source identity preserves normalized file set filter order', () => {
+  const buildFiles = [{
+    filter: [
+      'public/**/*',
+      '!public/index.*.html',
+      'public/index.html',
+    ],
+  }];
+
+  assert.doesNotThrow(() => resolve({
+    buildFiles,
+    repoDir: 'C:\\repo',
+    env: {},
+    gitRunner: makeGitRunner({ ignoredPaths: ['public/index.preview.html'] }),
+  }));
+  assert.throws(
+    () => resolve({
+      buildFiles,
+      repoDir: 'C:\\repo',
+      env: {},
+      gitRunner: makeGitRunner({ ignoredPaths: ['public/index.html'] }),
+    }),
+    /ignored|package|build\.files|source/i,
+  );
+});
+
+test('source identity rejects disguised normalized file sets without invoking accessors', async (t) => {
+  const callableRule = Object.assign(function callableRule() {}, { filter: BUILD_FILES });
+  const nullPrototypeRule = Object.assign(Object.create(null), { filter: BUILD_FILES });
+  const hiddenPropertyRule = { filter: BUILD_FILES };
+  Object.defineProperty(hiddenPropertyRule, 'hidden', {
+    configurable: true,
+    enumerable: false,
+    value: true,
+  });
+  const symbolPropertyRule = { filter: BUILD_FILES };
+  symbolPropertyRule[Symbol('hidden')] = true;
+  let accessorReads = 0;
+  const accessorRule = {};
+  Object.defineProperty(accessorRule, 'filter', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return BUILD_FILES;
+    },
+  });
+
+  for (const [name, buildFiles] of [
+    ['callable object', [callableRule]],
+    ['null prototype', [nullPrototypeRule]],
+    ['non-enumerable property', [hiddenPropertyRule]],
+    ['symbol property', [symbolPropertyRule]],
+    ['accessor property', [accessorRule]],
+  ]) {
+    await t.test(name, () => {
+      assert.throws(
+        () => resolve({
+          buildFiles,
+          repoDir: 'C:\\repo',
+          env: {},
+          gitRunner: makeGitRunner(),
+        }),
+        /build\.files|file set|object|property|supported/i,
+      );
+    });
+  }
+  assert.equal(accessorReads, 0);
+});
+
+test('source identity rejects virtualized rule containers without invoking accessors', async (t) => {
+  let ruleProxyReads = 0;
+  const ruleProxy = new Proxy({ filter: BUILD_FILES }, {
+    get(target, property, receiver) {
+      ruleProxyReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const filterWithIterator = [...BUILD_FILES];
+  filterWithIterator[Symbol.iterator] = function* divergentFilterIterator() {
+    yield 'public/**/*';
+  };
+  const filterWithMap = [...BUILD_FILES];
+  filterWithMap.map = () => ['node_modules/**/*'];
+  let filterAccessorReads = 0;
+  const filterWithAccessor = new Array(1);
+  Object.defineProperty(filterWithAccessor, '0', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      filterAccessorReads += 1;
+      return 'public/**/*';
+    },
+  });
+  const filterProxy = new Proxy([...BUILD_FILES], {});
+  const topLevelWithIterator = [{ filter: BUILD_FILES }];
+  topLevelWithIterator[Symbol.iterator] = function* divergentTopLevelIterator() {
+    yield { filter: ['node_modules/**/*'] };
+  };
+  let topLevelAccessorReads = 0;
+  const topLevelWithAccessor = new Array(1);
+  Object.defineProperty(topLevelWithAccessor, '0', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      topLevelAccessorReads += 1;
+      return { filter: BUILD_FILES };
+    },
+  });
+  const topLevelProxy = new Proxy([{ filter: BUILD_FILES }], {});
+
+  for (const [name, buildFiles] of [
+    ['proxy file set', [ruleProxy]],
+    ['filter custom iterator', [{ filter: filterWithIterator }]],
+    ['filter custom map', [{ filter: filterWithMap }]],
+    ['filter index accessor', [{ filter: filterWithAccessor }]],
+    ['filter proxy', [{ filter: filterProxy }]],
+    ['top-level custom iterator', topLevelWithIterator],
+    ['top-level index accessor', topLevelWithAccessor],
+    ['top-level proxy', topLevelProxy],
+  ]) {
+    await t.test(name, () => {
+      assert.throws(
+        () => resolve({
+          buildFiles,
+          repoDir: 'C:\\repo',
+          env: {},
+          gitRunner: makeGitRunner(),
+        }),
+        /build\.files|file set|array|proxy|property|supported/i,
+      );
+    });
+  }
+  assert.equal(ruleProxyReads, 0);
+  assert.equal(filterAccessorReads, 0);
+  assert.equal(topLevelAccessorReads, 0);
+});
+
+test('source identity enforces the expanded rule limit regardless of input order', async (t) => {
+  const maximumFilter = Array.from(
+    { length: 512 },
+    (_, index) => `public/file-${index}.js`,
+  );
+
+  for (const [name, buildFiles] of [
+    ['normalized file set before string', [{ filter: maximumFilter }, 'server.js']],
+    ['string before normalized file set', ['server.js', { filter: maximumFilter }]],
+  ]) {
+    await t.test(name, () => {
+      assert.throws(
+        () => resolve({
+          buildFiles,
+          repoDir: 'C:\\repo',
+          env: {},
+          gitRunner: makeGitRunner(),
+        }),
+        /512|expanded|rules|build\.files/i,
+      );
+    });
+  }
+});
+
 test('source identity fails closed for unsupported package.build.files rules', async (t) => {
   const scenarios = [
     ['missing files array', undefined],
     ['object form', [...BUILD_FILES, { from: 'public', to: '.' }]],
+    ['empty normalized filter', [{ filter: [] }]],
+    ['string normalized filter', [{ filter: 'public/**/*' }]],
+    ['custom normalized source', [{ from: 'public', filter: ['**/*'] }]],
+    ['custom normalized target', [{ to: 'app', filter: ['public/**/*'] }]],
+    ['object unparsed glob', [{ filter: ['public/**/secrets/*.json'] }]],
     ['macro', [...BUILD_FILES, 'public/${arch}/**/*']],
     ['wide glob', ['**/*']],
     ['node_modules input', [...BUILD_FILES, 'node_modules/**/*']],

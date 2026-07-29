@@ -1,9 +1,11 @@
 const { execFileSync } = require('node:child_process');
+const { types } = require('node:util');
 
 const FULL_GIT_OBJECT = /^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$/;
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const UNSUPPORTED_INPUT_ROOTS = new Set(['dist', 'node_modules']);
 const BASENAME_GLOB = /^[A-Za-z0-9._-]*\*[A-Za-z0-9._-]*$/;
+const MAX_PACKAGED_FILE_RULES = 512;
 
 function commandErrorText(error) {
   const output = [];
@@ -46,12 +48,90 @@ function requireSafeRelativePath(value, label) {
   return segments.join('/');
 }
 
-function parsePackagedFileRules(buildFiles) {
-  if (!Array.isArray(buildFiles) || buildFiles.length === 0) {
-    throw new Error('package.build.files must be a non-empty array of supported string rules.');
+function snapshotDenseDataArray(value, label) {
+  if (!Array.isArray(value) || types.isProxy(value)
+      || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new Error(`${label} must be a supported plain data array.`);
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  const length = lengthDescriptor && lengthDescriptor.value;
+  if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value')
+      || !Number.isSafeInteger(length) || length <= 0 || length > MAX_PACKAGED_FILE_RULES) {
+    throw new Error(
+      `${label} must contain between 1 and ${MAX_PACKAGED_FILE_RULES} data entries.`,
+    );
+  }
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== length + 1
+      || ownKeys.some((key) => (
+        key !== 'length'
+        && (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key)
+          || Number(key) >= length)
+      ))) {
+    throw new Error(`${label} must be dense and cannot contain extra properties.`);
   }
 
-  const rules = buildFiles.map((rawRule, index) => {
+  const snapshot = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      throw new Error(`${label} entries must be enumerable data properties.`);
+    }
+    snapshot.push(descriptor.value);
+  }
+  return snapshot;
+}
+
+function expandPackagedFileRules(buildFiles) {
+  const inputRules = snapshotDenseDataArray(buildFiles, 'package.build.files');
+  const expanded = [];
+  for (let index = 0; index < inputRules.length; index += 1) {
+    const rawRule = inputRules[index];
+    if (typeof rawRule === 'string') {
+      if (expanded.length >= MAX_PACKAGED_FILE_RULES) {
+        throw new Error(
+          `package.build.files cannot exceed ${MAX_PACKAGED_FILE_RULES} expanded rules.`,
+        );
+      }
+      expanded.push(rawRule);
+      continue;
+    }
+
+    const label = `package.build.files rule ${index + 1}`;
+    if (!rawRule || typeof rawRule !== 'object' || types.isProxy(rawRule)
+        || Array.isArray(rawRule)
+        || Object.getPrototypeOf(rawRule) !== Object.prototype) {
+      throw new Error(`${label} must be a supported string or normalized file set.`);
+    }
+    const properties = Object.create(null);
+    for (const key of Reflect.ownKeys(rawRule)) {
+      if (typeof key !== 'string' || !['filter', 'from', 'to'].includes(key)) {
+        throw new Error(`${label} contains unsupported file set properties.`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(rawRule, key);
+      if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+        throw new Error(`${label} properties must be enumerable data properties.`);
+      }
+      properties[key] = descriptor.value;
+    }
+    const hasDefaultPath = (value) => value === undefined || value === null || value === '.';
+    if (!hasDefaultPath(properties.from) || !hasDefaultPath(properties.to)) {
+      throw new Error(`${label} contains unsupported custom file set paths.`);
+    }
+    const filterRules = snapshotDenseDataArray(properties.filter, `${label} filter`);
+    if (expanded.length + filterRules.length > MAX_PACKAGED_FILE_RULES) {
+      throw new Error(
+        `package.build.files cannot exceed ${MAX_PACKAGED_FILE_RULES} expanded rules.`,
+      );
+    }
+    expanded.push(...filterRules);
+  }
+  return expanded;
+}
+
+function parsePackagedFileRules(buildFiles) {
+  const expandedRules = expandPackagedFileRules(buildFiles);
+  const rules = expandedRules.map((rawRule, index) => {
     const label = `package.build.files rule ${index + 1}`;
     if (typeof rawRule !== 'string' || rawRule.trim() !== rawRule || !rawRule) {
       throw new Error(`${label} must be a non-empty supported string rule.`);

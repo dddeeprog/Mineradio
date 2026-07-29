@@ -108,7 +108,7 @@ test('after-pack generates installer manifests only after executable resources a
     appOutDir,
     packager: {
       projectDir,
-      config: { files: BUILD_FILES },
+      config: { files: [{ filter: BUILD_FILES }] },
       appInfo: {
         id: 'com.mineradio.desktop',
         productFilename: 'Mineradio',
