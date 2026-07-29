@@ -17,6 +17,8 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check server\/routes\/platform\.js/);
   assert.match(scripts.check, /node --check desktop\/app-paths\.js/);
   assert.match(scripts.check, /node --check desktop\/credential-store\.js/);
+  assert.match(scripts.check, /node --check build\/installer-safety\.js/);
+  assert.match(scripts.check, /node --check build\/generate-installer-manifest\.js/);
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
