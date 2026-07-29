@@ -1,29 +1,21 @@
 'use strict';
 
+const {
+  IMPLEMENTATION_CAPABILITIES,
+  IMPLEMENTATION_PROVIDERS,
+  createBaselineImplementationRegistry,
+  createImplementationRegistry,
+  isImplementationRegistry,
+} = require('./implementation-registry');
+const {
+  createFeatureFlags,
+  isFeatureFlags,
+} = require('./feature-flags');
+
 const PLATFORM_CAPABILITY_SCHEMA = 1;
 
-const PLATFORM_ORDER = Object.freeze([
-  'netease',
-  'qq',
-  'kugou',
-  'qishui',
-  'spotify',
-]);
-
-const CAPABILITY_KEYS = Object.freeze([
-  'search',
-  'playback',
-  'sourceMatch',
-  'albumDetail',
-  'albumCollect',
-  'playlistSubscribe',
-  'playlistWrite',
-  'commentsRead',
-  'commentsLike',
-  'commentsCreate',
-  'recentPlayReport',
-  'listenDurationReport',
-]);
+const PLATFORM_ORDER = IMPLEMENTATION_PROVIDERS;
+const CAPABILITY_KEYS = IMPLEMENTATION_CAPABILITIES;
 
 const AUTHENTICATED_CAPABILITIES = new Set([
   'albumCollect',
@@ -35,18 +27,38 @@ const AUTHENTICATED_CAPABILITIES = new Set([
   'listenDurationReport',
 ]);
 
-function createCapabilityMap(enabledCapabilities) {
-  const enabled = new Set(enabledCapabilities);
+const PLATFORM_WRITE_CAPABILITIES = new Set([
+  'albumCollect',
+  'playlistSubscribe',
+  'playlistWrite',
+  'commentsLike',
+  'commentsCreate',
+]);
+
+const LISTEN_REPORTING_CAPABILITIES = new Set([
+  'recentPlayReport',
+  'listenDurationReport',
+]);
+
+const DEFAULT_IMPLEMENTATION_REGISTRY = createBaselineImplementationRegistry();
+const EMPTY_IMPLEMENTATION_REGISTRY = createImplementationRegistry();
+const DEFAULT_FEATURE_FLAGS = createFeatureFlags();
+const FAIL_CLOSED_FEATURE_FLAGS = createFeatureFlags({
+  platformWrites: false,
+});
+
+function createCapabilityMap(supportedCapabilities) {
+  const supported = new Set(supportedCapabilities);
   return Object.freeze(Object.fromEntries(
-    CAPABILITY_KEYS.map(capability => [capability, enabled.has(capability)]),
+    CAPABILITY_KEYS.map(capability => [capability, supported.has(capability)]),
   ));
 }
 
-function createDefinition(label, authMethods, enabledCapabilities) {
+function createDefinition(label, authMethods, supportedCapabilities) {
   return Object.freeze({
     label,
     authMethods: Object.freeze(authMethods.slice()),
-    capabilities: createCapabilityMap(enabledCapabilities),
+    capabilities: createCapabilityMap(supportedCapabilities),
   });
 }
 
@@ -76,20 +88,6 @@ const PLATFORM_DEFINITIONS = Object.freeze({
     ['pkce', 'external-window'],
     ['search'],
   ),
-});
-
-const DEFAULT_ENABLED_CAPABILITIES = Object.freeze({
-  netease: Object.freeze([
-    'search',
-    'playback',
-    'sourceMatch',
-    'playlistWrite',
-    'commentsRead',
-  ]),
-  qq: Object.freeze(['search', 'playback', 'sourceMatch', 'commentsRead']),
-  kugou: Object.freeze(['search']),
-  qishui: Object.freeze(['search']),
-  spotify: Object.freeze(['search']),
 });
 
 function isRecord(value) {
@@ -164,20 +162,42 @@ function sanitizeAccount(status) {
   };
 }
 
-function enabledCapabilitiesFor(provider, options) {
-  // This allowlist is server-owned configuration and must never come from request input.
-  const configured = isRecord(options) && isRecord(options.enabledCapabilities)
-    ? options.enabledCapabilities
-    : null;
-  const selected = configured && hasOwn(configured, provider)
-    ? configured[provider]
-    : DEFAULT_ENABLED_CAPABILITIES[provider];
+function readExplicitOption(options, key) {
+  if (!isRecord(options)) return { present: false, value: undefined };
+  try {
+    if (!Object.prototype.hasOwnProperty.call(options, key)) {
+      return { present: false, value: undefined };
+    }
+    return { present: true, value: options[key] };
+  } catch (_) {
+    return { present: true, value: undefined };
+  }
+}
 
-  if (!Array.isArray(selected)) return new Set();
-  return new Set(selected.filter(capability => (
-    typeof capability === 'string'
-    && CAPABILITY_KEYS.includes(capability)
-  )));
+function implementationRegistryFor(options) {
+  const configured = readExplicitOption(options, 'implementationRegistry');
+  if (!configured.present) return DEFAULT_IMPLEMENTATION_REGISTRY;
+  return isImplementationRegistry(configured.value)
+    ? configured.value
+    : EMPTY_IMPLEMENTATION_REGISTRY;
+}
+
+function featureFlagsFor(options) {
+  const configured = readExplicitOption(options, 'featureFlags');
+  if (!configured.present) return DEFAULT_FEATURE_FLAGS;
+  return isFeatureFlags(configured.value)
+    ? configured.value
+    : FAIL_CLOSED_FEATURE_FLAGS;
+}
+
+function featureAllowsCapability(capability, featureFlags) {
+  if (PLATFORM_WRITE_CAPABILITIES.has(capability)) {
+    return featureFlags.isEnabled('platformWrites');
+  }
+  if (LISTEN_REPORTING_CAPABILITIES.has(capability)) {
+    return featureFlags.isEnabled('listenReporting');
+  }
+  return true;
 }
 
 function requiresLogin(capability) {
@@ -208,15 +228,20 @@ function cloneProvider(item) {
   };
 }
 
-function createProviderCapability(provider, status, options) {
+function createProviderCapability(
+  provider,
+  status,
+  implementationRegistry,
+  featureFlags,
+) {
   const definition = PLATFORM_DEFINITIONS[provider];
   const account = sanitizeAccount(status);
-  const enabled = enabledCapabilitiesFor(provider, options);
   const capabilities = cloneCapabilityMap(definition.capabilities);
   const availability = Object.fromEntries(CAPABILITY_KEYS.map(capability => [
     capability,
     capabilities[capability]
-      && enabled.has(capability)
+      && implementationRegistry.has(provider, capability)
+      && featureAllowsCapability(capability, featureFlags)
       && (!requiresLogin(capability) || account.loggedIn),
   ]));
 
@@ -234,6 +259,8 @@ function createCapabilitySnapshot(statusByProvider, options) {
   statusByProvider = isRecord(statusByProvider) ? statusByProvider : {};
   options = isRecord(options) ? options : {};
   const now = typeof options.now === 'function' ? options.now : Date.now;
+  const implementationRegistry = implementationRegistryFor(options);
+  const featureFlags = featureFlagsFor(options);
 
   return {
     schema: PLATFORM_CAPABILITY_SCHEMA,
@@ -241,7 +268,8 @@ function createCapabilitySnapshot(statusByProvider, options) {
     providers: PLATFORM_ORDER.map(provider => createProviderCapability(
       provider,
       hasOwn(statusByProvider, provider) ? statusByProvider[provider] : {},
-      options,
+      implementationRegistry,
+      featureFlags,
     )),
   };
 }

@@ -8,20 +8,37 @@ const {
 const {
   providerCapability,
 } = require('../server/platform/capabilities');
+const {
+  createImplementationRegistry,
+} = require('../server/platform/implementation-registry');
+const {
+  createFeatureFlags,
+} = require('../server/platform/feature-flags');
 
 function createResponseHarness(options) {
+  options = options || {};
   let response = null;
-  const routes = createPlatformRoutes({
+  const deps = {
     sendJSON(_res, body, status) {
       response = {
         body,
         status: status || 200,
       };
     },
-    getAccountStatuses: options && options.getAccountStatuses
+    getAccountStatuses: options.getAccountStatuses
       ? options.getAccountStatuses
       : async () => ({}),
-  });
+  };
+  for (const dependency of [
+    'implementationRegistry',
+    'featureFlags',
+    'createCapabilitySnapshot',
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(options, dependency)) {
+      deps[dependency] = options[dependency];
+    }
+  }
+  const routes = createPlatformRoutes(deps);
   return {
     routes,
     response: () => response,
@@ -164,6 +181,80 @@ test('request data cannot enable metadata-provider playback or writes', async ()
     assert.equal(capability.availability.playback, false, provider);
     assert.equal(capability.availability.playlistWrite, false, provider);
   }
+});
+
+test('platform route only uses a constructor-captured private registry and flags', async () => {
+  const implementationRegistry = createImplementationRegistry();
+  implementationRegistry.register('netease', 'albumDetail');
+  implementationRegistry.register('netease', 'albumCollect');
+  const featureFlags = createFeatureFlags({ platformWrites: false });
+  const harness = createResponseHarness({
+    implementationRegistry,
+    featureFlags,
+    getAccountStatuses: async () => ({
+      netease: { loggedIn: true },
+    }),
+  });
+
+  await harness.routes.handleRoute(
+    '/api/platform/capabilities',
+    {
+      method: 'GET',
+      implementationRegistry: createImplementationRegistry(),
+      featureFlags: createFeatureFlags({ platformWrites: true }),
+      body: {
+        enabledCapabilities: { netease: ['albumCollect'] },
+      },
+    },
+    {},
+    new URL(
+      'http://localhost/api/platform/capabilities'
+        + '?enabledCapabilities[netease]=albumCollect',
+    ),
+  );
+
+  const netease = providerCapability(harness.response().body, 'netease');
+  assert.equal(netease.availability.albumDetail, true);
+  assert.equal(netease.availability.albumCollect, false);
+  assert.equal(netease.availability.search, false);
+});
+
+test('platform route fails closed for lookalike registry and feature flag objects', async () => {
+  const harness = createResponseHarness({
+    implementationRegistry: {
+      has() {
+        return true;
+      },
+      snapshot() {
+        return {};
+      },
+    },
+    featureFlags: {
+      isEnabled() {
+        return true;
+      },
+      snapshot() {
+        return {};
+      },
+    },
+    getAccountStatuses: async () => ({
+      netease: { loggedIn: true },
+    }),
+  });
+
+  await harness.routes.handleRoute(
+    '/api/platform/capabilities',
+    { method: 'GET' },
+    {},
+    new URL('http://localhost/api/platform/capabilities'),
+  );
+
+  assert.equal(
+    Object.values(
+      providerCapability(harness.response().body, 'netease').availability,
+    ).some(Boolean),
+    false,
+  );
 });
 
 test('platform route rejects non-GET methods without loading account state', async () => {

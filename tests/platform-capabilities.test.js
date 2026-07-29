@@ -9,6 +9,13 @@ const {
   createCapabilitySnapshot,
   providerCapability,
 } = capabilityModule;
+const {
+  createBaselineImplementationRegistry,
+  createImplementationRegistry,
+} = require('../server/platform/implementation-registry');
+const {
+  createFeatureFlags,
+} = require('../server/platform/feature-flags');
 
 const CAPABILITY_KEYS = [
   'search',
@@ -202,56 +209,182 @@ test('metadata-only providers never advertise playback, matching or writes even 
   }
 });
 
-test('unwired Netease operations require an allowlist while only writes require login', () => {
+test('plain options cannot enable unwired Netease operations', () => {
   const unwired = [
     'albumDetail',
     'albumCollect',
     'playlistSubscribe',
     'commentsLike',
     'commentsCreate',
+    'recentPlayReport',
+    'listenDurationReport',
   ];
   const defaultLoggedIn = providerCapability(createCapabilitySnapshot({
     netease: { loggedIn: true },
   }), 'netease');
-  const explicitlyEnabled = providerCapability(createCapabilitySnapshot({
+  const forged = providerCapability(createCapabilitySnapshot({
     netease: { loggedIn: true },
   }, {
     enabledCapabilities: { netease: unwired },
-  }), 'netease');
-  const loggedOut = providerCapability(createCapabilitySnapshot({}, {
-    enabledCapabilities: { netease: unwired },
+    implementationRegistry: {
+      has: () => true,
+      snapshot: () => ({ netease: unwired }),
+    },
   }), 'netease');
 
   for (const capability of unwired) {
     assert.equal(defaultLoggedIn.capabilities[capability], true, capability);
     assert.equal(defaultLoggedIn.availability[capability], false, capability);
-    assert.equal(explicitlyEnabled.availability[capability], true, capability);
-  }
-  assert.equal(loggedOut.availability.albumDetail, true);
-  for (const capability of [
-    'albumCollect',
-    'playlistSubscribe',
-    'commentsLike',
-    'commentsCreate',
-  ]) {
-    assert.equal(loggedOut.availability[capability], false, capability);
+    assert.equal(forged.availability[capability], false, capability);
   }
 });
 
-test('public reads and playback do not require login while writes and reports do', () => {
-  const enabledCapabilities = {
-    netease: CAPABILITY_KEYS,
+test('only a private implementation registry can expose implemented operations', () => {
+  const registry = createImplementationRegistry();
+  registry.register('netease', 'albumDetail');
+  registry.register('netease', 'albumCollect');
+  registry.register('kugou', 'playback');
+  const featureFlags = createFeatureFlags({ platformWrites: true });
+
+  const loggedOut = createCapabilitySnapshot({}, {
+    implementationRegistry: registry,
+    featureFlags,
+  });
+  const loggedIn = createCapabilitySnapshot({
+    netease: { loggedIn: true },
+    kugou: { loggedIn: true },
+  }, {
+    implementationRegistry: registry,
+    featureFlags,
+  });
+
+  assert.equal(
+    providerCapability(loggedOut, 'netease').availability.albumDetail,
+    true,
+  );
+  assert.equal(
+    providerCapability(loggedOut, 'netease').availability.albumCollect,
+    false,
+  );
+  assert.equal(
+    providerCapability(loggedIn, 'netease').availability.albumCollect,
+    true,
+  );
+  assert.equal(
+    providerCapability(loggedIn, 'kugou').availability.playback,
+    false,
+  );
+});
+
+test('invalid explicit registry and feature flag objects fail closed', () => {
+  const invalidRegistry = {
+    register() {},
+    unregister() {},
+    has() {
+      return true;
+    },
+    snapshot() {
+      return {};
+    },
   };
+  const invalidFlags = {
+    isEnabled() {
+      return true;
+    },
+    snapshot() {
+      return {};
+    },
+  };
+  const snapshot = createCapabilitySnapshot({
+    netease: { loggedIn: true },
+  }, {
+    implementationRegistry: invalidRegistry,
+    featureFlags: invalidFlags,
+    enabledCapabilities: { netease: CAPABILITY_KEYS },
+  });
+
+  assert.equal(
+    Object.values(providerCapability(snapshot, 'netease').availability)
+      .some(Boolean),
+    false,
+  );
+});
+
+test('feature flags disable registered operations but never invent platform support', () => {
+  const registry = createBaselineImplementationRegistry();
+  registry.register('netease', 'recentPlayReport');
+  registry.register('kugou', 'playback');
+
+  const writesOff = createFeatureFlags({
+    platformWrites: false,
+    listenReporting: false,
+  });
+  const writesOn = createFeatureFlags({
+    platformWrites: true,
+    listenReporting: true,
+  });
+  const status = {
+    netease: { loggedIn: true },
+    kugou: { loggedIn: true },
+  };
+  const disabled = createCapabilitySnapshot(status, {
+    implementationRegistry: registry,
+    featureFlags: writesOff,
+  });
+  const enabled = createCapabilitySnapshot(status, {
+    implementationRegistry: registry,
+    featureFlags: writesOn,
+  });
+
+  assert.equal(
+    providerCapability(disabled, 'netease').availability.playlistWrite,
+    false,
+  );
+  assert.equal(
+    providerCapability(disabled, 'netease').availability.recentPlayReport,
+    false,
+  );
+  assert.equal(
+    providerCapability(enabled, 'netease').availability.playlistWrite,
+    true,
+  );
+  assert.equal(
+    providerCapability(enabled, 'netease').availability.recentPlayReport,
+    true,
+  );
+  assert.equal(
+    providerCapability(enabled, 'kugou').availability.playback,
+    false,
+  );
+});
+
+test('public reads and playback do not require login while writes and reports do', () => {
+  const implementationRegistry = createImplementationRegistry();
+  for (const capability of CAPABILITY_KEYS) {
+    implementationRegistry.register('netease', capability);
+  }
+  const featureFlags = createFeatureFlags({
+    platformWrites: true,
+    listenReporting: true,
+  });
   const loggedOut = providerCapability(createCapabilitySnapshot({}, {
-    enabledCapabilities,
+    implementationRegistry,
+    featureFlags,
   }), 'netease');
   const loggedIn = providerCapability(createCapabilitySnapshot({
     netease: { loggedIn: true },
   }, {
-    enabledCapabilities,
+    implementationRegistry,
+    featureFlags,
   }), 'netease');
 
-  for (const capability of ['search', 'playback', 'sourceMatch', 'commentsRead']) {
+  for (const capability of [
+    'search',
+    'playback',
+    'sourceMatch',
+    'albumDetail',
+    'commentsRead',
+  ]) {
     assert.equal(loggedOut.availability[capability], true, capability);
   }
   for (const capability of [
@@ -352,7 +485,8 @@ test('ignores unknown platforms and unknown capabilities', () => {
   assert.equal(Object.hasOwn(netease.capabilities, 'imaginaryWrite'), false);
   assert.equal(Object.hasOwn(netease.availability, 'imaginaryWrite'), false);
   assert.equal(netease.availability.search, true);
-  assert.equal(netease.availability.playback, false);
+  assert.equal(netease.availability.playback, true);
+  assert.equal(netease.availability.albumDetail, false);
 });
 
 test('returns fresh deep copies for snapshots and provider lookups', () => {

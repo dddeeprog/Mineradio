@@ -10,6 +10,12 @@ function requireFunction(deps, name) {
   return fn;
 }
 
+function hasOwn(value, key) {
+  return value !== null
+    && typeof value === 'object'
+    && Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function createPlatformRoutes(deps) {
   deps = deps || {};
   const sendJSON = requireFunction(deps, 'sendJSON');
@@ -17,6 +23,11 @@ function createPlatformRoutes(deps) {
   const createCapabilitySnapshot = deps.createCapabilitySnapshot === undefined
     ? defaultCreateCapabilitySnapshot
     : requireFunction(deps, 'createCapabilitySnapshot');
+  const capabilityOptions = {};
+  for (const key of ['implementationRegistry', 'featureFlags']) {
+    if (hasOwn(deps, key)) capabilityOptions[key] = deps[key];
+  }
+  Object.freeze(capabilityOptions);
 
   async function handleCapabilities(res) {
     let statuses = {};
@@ -29,9 +40,9 @@ function createPlatformRoutes(deps) {
     let snapshot;
     try {
       // Implementation availability is server-owned; request data never reaches this call.
-      snapshot = createCapabilitySnapshot(statuses);
+      snapshot = createCapabilitySnapshot(statuses, capabilityOptions);
     } catch (_) {
-      snapshot = defaultCreateCapabilitySnapshot();
+      snapshot = defaultCreateCapabilitySnapshot({}, capabilityOptions);
     }
     sendJSON(res, snapshot, 200);
   }
