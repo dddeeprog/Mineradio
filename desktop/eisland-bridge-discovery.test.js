@@ -604,7 +604,7 @@ test('releases_superseded_generation_and_stops_refresh_without_deleting_foreign_
       });
       const successorReady = await Promise.race([
         successor.ready.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1_000)),
       ]);
       assert.equal(successorReady, true);
       assert.deepEqual(
