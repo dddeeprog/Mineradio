@@ -7,6 +7,7 @@ const test = require('node:test');
 const { Platform } = require('electron-builder');
 
 const artifactVerifier = require('../build/verify-release-artifacts.js');
+const windowsTest = process.platform === 'win32' ? test : test.skip;
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'mineradio-artifacts-'));
@@ -246,17 +247,20 @@ test('release artifact verifier records signature and SHA256 commands', () => {
   const installer = 'C:\\repo\\dist\\Mineradio-1.1.0-Setup.exe';
   const command = artifactVerifier.buildArtifactVerificationCommand(installer);
 
-  assert.match(command, /Import-Module Microsoft\.PowerShell\.Security/);
+  assert.match(command, /Join-Path \$PSHOME .*Microsoft\.PowerShell\.Security\.psd1/);
+  assert.match(command, /Import-Module -Name \$securityModule -Force -ErrorAction Stop/);
   assert.match(command, /Get-AuthenticodeSignature/);
-  assert.match(command, /Get-FileHash/);
-  assert.match(command, /-Algorithm SHA256/);
+  assert.match(command, /System\.Security\.Cryptography\.SHA256/);
+  assert.match(command, /ComputeHash\(\$hashStream\)/);
+  assert.doesNotMatch(command, /Get-FileHash/);
   assert.match(command, /Mineradio-1\.1\.0-Setup\.exe/);
 });
 
 test('release artifact verifier imports the Authenticode module before querying signature status', () => {
   const command = artifactVerifier.buildAuthenticodeStatusCommand('C:\\repo\\dist\\Mineradio-1.1.0-Setup.exe');
 
-  assert.match(command, /Import-Module Microsoft\.PowerShell\.Security -ErrorAction Stop/);
+  assert.match(command, /Join-Path \$PSHOME .*Microsoft\.PowerShell\.Security\.psd1/);
+  assert.match(command, /Import-Module -Name \$securityModule -Force -ErrorAction Stop/);
   assert.match(command, /Get-AuthenticodeSignature/);
 });
 
@@ -1309,9 +1313,15 @@ test('release artifact verifier imports Authenticode and reads Windows VersionIn
   const installer = 'C:\\repo\\dist\\Mineradio-1.1.0-Setup.exe';
   const metadataCommand = artifactVerifier.buildWindowsMetadataCommand(installer);
 
-  assert.match(metadataCommand, /Import-Module Microsoft\.PowerShell\.Security -ErrorAction Stop/);
+  assert.match(metadataCommand, /Join-Path \$PSHOME .*Microsoft\.PowerShell\.Security\.psd1/);
+  assert.match(
+    metadataCommand,
+    /Import-Module -Name \$securityModule -Force -ErrorAction Stop/,
+  );
   assert.match(metadataCommand, /Get-AuthenticodeSignature/);
-  assert.match(metadataCommand, /Get-FileHash/);
+  assert.match(metadataCommand, /System\.Security\.Cryptography\.SHA256/);
+  assert.match(metadataCommand, /ComputeHash\(\$stream\)/);
+  assert.doesNotMatch(metadataCommand, /Get-FileHash/);
   assert.match(metadataCommand, /FileShare.*Read/i);
   assert.match(metadataCommand, /ArtifactSha256/);
   assert.match(metadataCommand, /VersionInfo/);
@@ -1321,6 +1331,20 @@ test('release artifact verifier imports Authenticode and reads Windows VersionIn
   assert.match(metadataCommand, /SignerCertificate/);
   assert.match(metadataCommand, /Subject/);
   assert.match(metadataCommand, /Thumbprint/);
+});
+
+windowsTest('Windows metadata reader uses the system Security module under inherited module paths', () => {
+  const metadata = artifactVerifier.readWindowsArtifactMetadata(process.execPath);
+  const signature = metadata.Signature || metadata.signature;
+  const versionInfo = metadata.VersionInfo || metadata.versionInfo;
+  const artifactSha256 = metadata.ArtifactSha256 || metadata.artifactSha256;
+
+  assert.notEqual(signature.Status, 'Unavailable', signature.StatusMessage);
+  assert.equal(path.resolve(signature.Path), path.resolve(process.execPath));
+  assert.match(artifactSha256, /^[A-F0-9]{64}$/);
+  assert.ok(versionInfo);
+  assert.equal(typeof versionInfo.ProductName, 'string');
+  assert.notEqual(versionInfo.ProductName, '');
 });
 
 test('allow-unsigned accepts the repository current-version wording for no code signature', async () => {

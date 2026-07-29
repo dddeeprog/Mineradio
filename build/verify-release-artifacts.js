@@ -24,6 +24,10 @@ const TEXT_FILE_LIMITS = Object.freeze({
   releaseNotes: 1 * 1024 * 1024,
   packageJson: 1 * 1024 * 1024,
 });
+const SYSTEM_SECURITY_MODULE_IMPORT = [
+  "$securityModule = Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'",
+  'Import-Module -Name $securityModule -Force -ErrorAction Stop',
+];
 const ALLOWED_BUILDER_TOP_LEVEL_OUTPUTS = Object.freeze(new Set([
   'win-unpacked',
   'builder-effective-config.yaml',
@@ -47,9 +51,10 @@ function buildArtifactVerificationCommand(installerPath) {
   const escaped = escapePowerShellSingleQuoted(installerPath);
   return [
     `$artifact = '${escaped}'`,
-    'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop',
+    ...SYSTEM_SECURITY_MODULE_IMPORT,
     'Get-AuthenticodeSignature -LiteralPath $artifact | Select-Object Status, StatusMessage, Path',
-    'Get-FileHash -LiteralPath $artifact -Algorithm SHA256 | Select-Object Algorithm, Hash, Path',
+    '$hashStream = [System.IO.File]::Open($artifact, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)',
+    'try { $hasher = [System.Security.Cryptography.SHA256]::Create(); try { $hashBytes = $hasher.ComputeHash($hashStream) } finally { $hasher.Dispose() }; [pscustomobject]@{ Algorithm = "SHA256"; Hash = [System.BitConverter]::ToString($hashBytes).Replace("-", ""); Path = $artifact } } finally { $hashStream.Dispose() }',
   ].join('; ');
 }
 
@@ -57,7 +62,7 @@ function buildAuthenticodeStatusCommand(installerPath) {
   const escaped = escapePowerShellSingleQuoted(installerPath);
   return [
     `$artifact = '${escaped}'`,
-    'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop',
+    ...SYSTEM_SECURITY_MODULE_IMPORT,
     'Get-AuthenticodeSignature -LiteralPath $artifact | Select-Object Status, StatusMessage, Path | ConvertTo-Json -Compress',
   ].join('; ');
 }
@@ -66,14 +71,16 @@ function buildWindowsMetadataCommand(installerPath) {
   const escaped = escapePowerShellSingleQuoted(installerPath);
   return [
     `$artifact = '${escaped}'`,
-    'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop',
+    ...SYSTEM_SECURITY_MODULE_IMPORT,
     '$stream = [System.IO.File]::Open($artifact, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)',
     'try {',
     '  $signature = Get-AuthenticodeSignature -LiteralPath $artifact',
     '  $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($artifact)',
-    '  $fileHash = Get-FileHash -LiteralPath $artifact -Algorithm SHA256',
+    '  $hasher = [System.Security.Cryptography.SHA256]::Create()',
+    '  try { $hashBytes = $hasher.ComputeHash($stream) } finally { $hasher.Dispose() }',
+    "  $artifactSha256 = [System.BitConverter]::ToString($hashBytes).Replace('-', '')",
     '  $signerCertificate = if ($null -eq $signature.SignerCertificate) { $null } else { [pscustomobject]@{ Subject = [string]$signature.SignerCertificate.Subject; Thumbprint = [string]$signature.SignerCertificate.Thumbprint } }',
-    '  $result = [pscustomobject]@{ ArtifactSha256 = [string]$fileHash.Hash; Signature = [pscustomobject]@{ Status = [string]$signature.Status; StatusMessage = [string]$signature.StatusMessage; Path = [string]$signature.Path; SignerCertificate = $signerCertificate }; VersionInfo = [pscustomobject]@{ ProductName = [string]$versionInfo.ProductName; ProductVersion = [string]$versionInfo.ProductVersion; FileVersion = [string]$versionInfo.FileVersion } }',
+    '  $result = [pscustomobject]@{ ArtifactSha256 = [string]$artifactSha256; Signature = [pscustomobject]@{ Status = [string]$signature.Status; StatusMessage = [string]$signature.StatusMessage; Path = [string]$signature.Path; SignerCertificate = $signerCertificate }; VersionInfo = [pscustomobject]@{ ProductName = [string]$versionInfo.ProductName; ProductVersion = [string]$versionInfo.ProductVersion; FileVersion = [string]$versionInfo.FileVersion } }',
     '  $result | ConvertTo-Json -Compress -Depth 4',
     '} finally {',
     '  $stream.Dispose()',
