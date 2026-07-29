@@ -48,6 +48,12 @@
 !include "installer-guard.nsh"
 
 !ifndef BUILD_UNINSTALLER
+!macro customHeader
+  !insertmacro MineradioDefineInstalledManifestValidator
+!macroend
+!endif
+
+!ifndef BUILD_UNINSTALLER
   Var MineradioWelcomePage
   Var MineradioHeroFont
   Var MineradioTitleFont

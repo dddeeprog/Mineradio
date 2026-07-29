@@ -192,10 +192,8 @@ function registryCapability(key) {
   return { available: true };
 }
 
-function commonDefines(key) {
+function guardDefines(key) {
   return [
-    `!addplugindir /x86-unicode "${nsisPath(findStdUtilsPluginDirectory())}"`,
-    `!include "${nsisPath(stdUtilsIncludePath)}"`,
     '!include "LogicLib.nsh"',
     '!include "FileFunc.nsh"',
     `!define INSTALL_REGISTRY_KEY "${key}"`,
@@ -211,6 +209,14 @@ function commonDefines(key) {
     '!define MINERADIO_INSTALL_COMMIT "runtime-fixture"',
     '!define MINERADIO_INSTALL_BUILD_ID "runtime-fixture"',
     '!define MINERADIO_INSTALL_BUILD_CREATED_AT "2026-07-29T00:00:00.000Z"',
+  ].join('\n');
+}
+
+function commonDefines(key) {
+  return [
+    `!addplugindir /x86-unicode "${nsisPath(findStdUtilsPluginDirectory())}"`,
+    `!include "${nsisPath(stdUtilsIncludePath)}"`,
+    guardDefines(key),
   ].join('\n');
 }
 
@@ -240,6 +246,7 @@ InstallDir "${nsisPath(installRoot)}"
 
 ${commonDefines(key)}
 !include "${nsisPath(guardPath)}"
+!insertmacro MineradioDefineInstalledManifestValidator
 
 Section
   SetShellVarContext current
@@ -692,6 +699,29 @@ test.after(() => {
   for (const directory of tempDirectories) {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+windowsTest('NSIS guard defers plugin calls until electron-builder adds plugin directories', (t) => {
+  const directory = createTempDirectory('mineradio-nsis-plugin-order-');
+  const compiler = executableCapability(findMakensis(), ['/VERSION']);
+  if (!compiler.available) {
+    t.skip(compiler.reason);
+    return;
+  }
+
+  compileFixture(directory, 'plugin-order', `
+Unicode true
+Name "Mineradio plugin order fixture"
+OutFile "plugin-order.exe"
+RequestExecutionLevel user
+!include "${nsisPath(stdUtilsIncludePath)}"
+${guardDefines(registryKey())}
+!include "${nsisPath(guardPath)}"
+!addplugindir /x86-unicode "${nsisPath(findStdUtilsPluginDirectory())}"
+!insertmacro MineradioDefineInstalledManifestValidator
+Section
+SectionEnd
+`);
 });
 
 windowsTest('NSIS fresh and upgrade reservations reject corrupt manifests before promotion', (t) => {

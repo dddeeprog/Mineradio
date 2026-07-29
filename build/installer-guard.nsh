@@ -1156,6 +1156,7 @@ Function MineradioPrepareUpgrade
     Pop $0
 FunctionEnd
 
+!macro MineradioDefineInstalledManifestValidator
 Function MineradioValidateInstalledManifest
   Push $0
   Push $1
@@ -1170,9 +1171,10 @@ Function MineradioValidateInstalledManifest
 
   MineradioValidateInstalledManifestDone:
     Pop $1
-    Pop $0
-    Push "$MineradioGuardResult"
+  Pop $0
+  Push "$MineradioGuardResult"
 FunctionEnd
+!macroend
 
 !macro MineradioInstallOwnedManifest
   SetOutPath "$INSTDIR"
