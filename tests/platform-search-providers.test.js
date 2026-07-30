@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -193,24 +195,22 @@ test('Qishui adapter ranks relevant public metadata and paginates locally', asyn
   assert.equal(page.pagination.nextOffset, 2);
 });
 
-test('Spotify adapter exchanges and caches client credentials without exposing them', async () => {
+test('Spotify adapter searches with the encrypted-session access token', async () => {
   const calls = [];
-  const env = {
-    SPOTIFY_CLIENT_ID: 'client-id',
-    SPOTIFY_CLIENT_SECRET: 'client-secret',
-    SPOTIFY_MARKET: 'GB',
-  };
   const adapter = createSpotifySearchAdapter({
-    env,
+    env: { SPOTIFY_MARKET: 'GB' },
     now: () => 1000,
-    async requestJson(url, options, body) {
-      calls.push({ url, options, body });
-      if (url.endsWith('/api/token')) {
-        return {
-          access_token: 'client-token',
-          expires_in: 3600,
-        };
-      }
+    getCredential() {
+      return {
+        accessToken: 'session-access',
+        refreshToken: 'session-refresh',
+        expiresAt: 3_601_000,
+        clientId: 'public-client',
+        scope: 'user-read-private',
+      };
+    },
+    async requestJson(url, options) {
+      calls.push({ url, options });
       return {
         tracks: {
           total: 2,
@@ -250,47 +250,100 @@ test('Spotify adapter exchanges and caches client credentials without exposing t
     offset: 10,
   });
 
-  const tokenCalls = calls.filter(call => call.url.endsWith('/api/token'));
   const searchCalls = calls.filter(call => call.url.includes('/search?'));
-  assert.equal(tokenCalls.length, 1);
-  assert.equal(tokenCalls[0].options.method, 'POST');
-  assert.equal(tokenCalls[0].body, 'grant_type=client_credentials');
-  assert.equal(
-    tokenCalls[0].options.headers.Authorization,
-    'Basic ' + Buffer.from('client-id:client-secret').toString('base64'),
-  );
+  assert.equal(calls.filter(call => call.url.endsWith('/api/token')).length, 0);
   assert.equal(searchCalls.length, 2);
-  assert.equal(searchCalls[0].options.headers.Authorization, 'Bearer client-token');
+  assert.equal(searchCalls[0].options.headers.Authorization, 'Bearer session-access');
   assert.equal(new URL(searchCalls[0].url).searchParams.get('market'), 'GB');
   assert.equal(new URL(searchCalls[1].url).searchParams.get('offset'), '10');
   assert.equal(first.records[0].cover, 'https://img.example/large.jpg');
   assert.equal(first.records[0].playable, false);
   assert.equal(second.provider, 'spotify');
-  assert.equal(JSON.stringify(first).includes('client-secret'), false);
-  assert.equal(JSON.stringify(first).includes('client-token'), false);
+  assert.equal(JSON.stringify(first).includes('session-access'), false);
+  assert.equal(JSON.stringify(first).includes('session-refresh'), false);
 });
 
-test('Spotify adapter accepts an injected access token without client credentials', async () => {
+test('Spotify adapter refreshes expired PKCE credentials and persists the rotation', async () => {
   const calls = [];
+  const persisted = [];
   const adapter = createSpotifySearchAdapter({
-    env: {
-      SPOTIFY_ACCESS_TOKEN: 'access-only',
+    now: () => 100_000,
+    getCredential() {
+      return {
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-value',
+        expiresAt: 99_000,
+        clientId: 'public-client',
+        scope: 'user-read-private',
+      };
     },
-    async requestJson(url, options) {
-      calls.push({ url, options });
+    async persistCredential(credential) {
+      persisted.push(credential);
+    },
+    async requestJson(url, options, body) {
+      calls.push({ url, options, body });
+      if (url.endsWith('/api/token')) {
+        return {
+          access_token: 'refreshed-access',
+          expires_in: 1800,
+          token_type: 'Bearer',
+        };
+      }
       return { tracks: { total: 0, next: null, items: [] } };
     },
   });
 
   await adapter.search({ query: 'empty', limit: 5, offset: 0 });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].options.headers.Authorization, 'Bearer access-only');
+  assert.equal(calls.length, 2);
+  const tokenBody = new URLSearchParams(calls[0].body);
+  assert.equal(calls[0].url, 'https://accounts.spotify.com/api/token');
+  assert.equal(tokenBody.get('grant_type'), 'refresh_token');
+  assert.equal(tokenBody.get('refresh_token'), 'refresh-value');
+  assert.equal(tokenBody.get('client_id'), 'public-client');
+  assert.equal(tokenBody.has('client_secret'), false);
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer refreshed-access');
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].accessToken, 'refreshed-access');
+  assert.equal(persisted[0].refreshToken, 'refresh-value');
+});
+
+test('Spotify adapter rejects a refresh response that expands the minimal scope', async () => {
+  const persisted = [];
+  const adapter = createSpotifySearchAdapter({
+    now: () => 100_000,
+    getCredential() {
+      return {
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-value',
+        expiresAt: 99_000,
+        clientId: 'public-client',
+        scope: 'user-read-private',
+      };
+    },
+    async persistCredential(credential) {
+      persisted.push(credential);
+    },
+    async requestJson(url) {
+      assert.equal(url, 'https://accounts.spotify.com/api/token');
+      return {
+        access_token: 'expanded-access',
+        expires_in: 1800,
+        scope: 'user-read-private user-library-read',
+      };
+    },
+  });
+
+  await assert.rejects(
+    adapter.search({ query: 'scope', limit: 5, offset: 0 }),
+    error => error.code === 'AUTH_REQUIRED',
+  );
+  assert.deepEqual(persisted, []);
 });
 
 test('Spotify adapter fails with a stable secret-free code when auth is absent', async () => {
   const adapter = createSpotifySearchAdapter({
-    env: {},
+    getCredential: () => null,
     async requestJson() {
       throw new Error('must not request');
     },
@@ -299,10 +352,56 @@ test('Spotify adapter fails with a stable secret-free code when auth is absent',
   await assert.rejects(
     adapter.search({ query: 'Signal', limit: 10, offset: 0 }),
     error => {
-      assert.equal(error.code, 'SPOTIFY_AUTH_REQUIRED');
+      assert.equal(error.code, 'AUTH_REQUIRED');
+      assert.equal(error.provider, 'spotify');
       assert.equal(error.retryable, false);
       assert.equal(JSON.stringify(error).includes('secret'), false);
       return true;
     },
   );
+});
+
+test('Spotify adapter treats an empty search payload as an empty page', async () => {
+  const adapter = createSpotifySearchAdapter({
+    now: () => 100_000,
+    getCredential() {
+      return {
+        accessToken: 'session-access',
+        refreshToken: 'session-refresh',
+        expiresAt: 200_000,
+        clientId: 'public-client',
+        scope: 'user-read-private',
+      };
+    },
+    async requestJson() {
+      return null;
+    },
+  });
+
+  const page = await adapter.search({
+    query: 'empty',
+    limit: 10,
+    offset: 0,
+  });
+
+  assert.equal(page.provider, 'spotify');
+  assert.deepEqual(page.records, []);
+  assert.equal(page.pagination.total, 0);
+  assert.equal(page.pagination.hasMore, false);
+});
+
+test('Spotify adapter source has no client-secret or client-credentials path', () => {
+  const source = fs.readFileSync(
+    path.join(
+      __dirname,
+      '..',
+      'server',
+      'platform',
+      'providers',
+      'spotify-search.js',
+    ),
+    'utf8',
+  );
+
+  assert.doesNotMatch(source, /client_secret|client_credentials/i);
 });

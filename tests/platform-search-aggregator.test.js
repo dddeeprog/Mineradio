@@ -181,8 +181,8 @@ test('sanitizes unknown upstream errors and preserves expected auth codes', asyn
   const secretError = new Error('token=very-secret');
   secretError.code = 'TOKEN_very-secret';
   secretError.body = 'cookie=also-secret';
-  const authError = new Error('client-secret');
-  authError.code = 'SPOTIFY_AUTH_REQUIRED';
+  const authError = new Error('authorization required');
+  authError.code = 'AUTH_REQUIRED';
   authError.retryable = false;
   const search = createSearchAggregator({
     providers: adapters({
@@ -216,7 +216,7 @@ test('sanitizes unknown upstream errors and preserves expected auth codes', asyn
     },
     {
       provider: 'spotify',
-      code: 'SPOTIFY_AUTH_REQUIRED',
+      code: 'AUTH_REQUIRED',
       retryable: false,
     },
   ]);

@@ -14,6 +14,8 @@ const POST_ONLY_ROUTES = new Set([
   '/api/qq/logout',
   '/api/login/cookie',
   '/api/qq/login/cookie',
+  '/api/platform/login/import',
+  '/api/platform/logout',
   '/api/song/like',
   '/api/playlist/create',
   '/api/playlist/add-song',

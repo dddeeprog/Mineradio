@@ -8,6 +8,9 @@ const {
   isAllowedLoginUrl,
   isSafeExternalUrl,
 } = require('../desktop/navigation-guard');
+const {
+  createLoginWindowPolicy,
+} = require('../desktop/platform-login-window');
 
 test('main app navigation is limited to the active loopback origin', () => {
   assert.equal(isAllowedAppUrl('http://127.0.0.1:34567/', 34567), true);
@@ -33,6 +36,43 @@ test('provider login windows only load provider-owned hosts', () => {
   assert.equal(isAllowedLoginUrl('https://y.qq.com/n/ryqq/profile', 'qq'), true);
   assert.equal(isAllowedLoginUrl('https://xui.ptlogin2.qq.com/cgi-bin/xlogin', 'qq'), true);
   assert.equal(isAllowedLoginUrl('https://example.com/login', 'qq'), false);
+
+  assert.equal(isAllowedLoginUrl('https://www.kugou.com/newuc/user/uc/type=edit', 'kugou'), true);
+  assert.equal(isAllowedLoginUrl('https://login-user.kugou.com/login', 'kugou'), true);
+  assert.equal(isAllowedLoginUrl('https://www.kugou.com.evil.test/', 'kugou'), false);
+
+  assert.equal(isAllowedLoginUrl('https://qishui.douyin.com/', 'qishui'), true);
+  assert.equal(isAllowedLoginUrl('https://bff-pc.qishui.com/ucenter_web/app/sdk-next', 'qishui'), true);
+  assert.equal(isAllowedLoginUrl('https://evil.test/?next=qishui.douyin.com', 'qishui'), false);
+
+  assert.equal(isAllowedLoginUrl('https://accounts.spotify.com/authorize', 'spotify'), true);
+  assert.equal(isAllowedLoginUrl('https://accounts.spotify.com/api/token', 'spotify'), false);
+  assert.equal(isAllowedLoginUrl('https://accounts.spotify.com.evil.test/authorize', 'spotify'), false);
+  assert.equal(isAllowedLoginUrl('https://music.163.com/api/login', 'unknown'), false);
+});
+
+test('generic login policy fixes dedicated partitions and hardened preferences', () => {
+  const expected = {
+    netease: 'persist:mineradio-netease-login',
+    qq: 'persist:mineradio-qqmusic-login',
+    kugou: 'persist:mineradio-kugou-login',
+    qishui: 'persist:mineradio-qishui-login',
+    spotify: 'persist:mineradio-spotify-login',
+  };
+
+  for (const [provider, partition] of Object.entries(expected)) {
+    const policy = createLoginWindowPolicy(provider);
+    assert.equal(policy.partition, partition);
+    assert.equal(policy.webPreferences.partition, partition);
+    assert.equal(policy.webPreferences.contextIsolation, true);
+    assert.equal(policy.webPreferences.nodeIntegration, false);
+    assert.equal(policy.webPreferences.sandbox, true);
+    assert.equal(Object.isFrozen(policy), true);
+  }
+  assert.throws(
+    () => createLoginWindowPolicy('unknown'),
+    error => error.code === 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+  );
 });
 
 test('desktop credentials initialize after ready and before the local server', () => {
@@ -79,6 +119,35 @@ test('desktop exposes credential set clear and redacted status but no read-back 
   );
   assert.match(main, /commitLoginWindowCredential/);
   assert.doesNotMatch(renderer, /result\.cookie/);
+});
+
+test('desktop login runtime uses the generic guarded window and PKCE without secrets', () => {
+  const projectRoot = path.join(__dirname, '..');
+  const main = fs.readFileSync(path.join(projectRoot, 'desktop', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(projectRoot, 'desktop', 'preload.js'), 'utf8');
+  const loginWindow = fs.readFileSync(
+    path.join(projectRoot, 'desktop', 'platform-login-window.js'),
+    'utf8',
+  );
+  const pkce = fs.readFileSync(
+    path.join(projectRoot, 'desktop', 'spotify-pkce.js'),
+    'utf8',
+  );
+
+  assert.match(main, /require\('\.\/platform-login-window'\)/);
+  assert.match(main, /require\('\.\/spotify-pkce'\)/);
+  assert.match(main, /platform-music-open-login/);
+  assert.match(main, /platform-music-clear-login/);
+  assert.match(main, /typeof opener !== 'function'/);
+  assert.match(preload, /platform-music-open-login/);
+  assert.match(preload, /platform-music-clear-login/);
+  assert.match(loginWindow, /setPermissionRequestHandler/);
+  assert.match(loginWindow, /setPermissionCheckHandler/);
+  assert.match(loginWindow, /will-navigate/);
+  assert.match(loginWindow, /will-redirect/);
+  assert.match(loginWindow, /setWindowOpenHandler/);
+  assert.doesNotMatch(pkce, /client_secret|client_credentials/i);
+  assert.doesNotMatch(main, /SPOTIFY_CLIENT_SECRET|client_secret|client_credentials/i);
 });
 
 test('in-process server uses the credential session and one account-scoped runtime', () => {

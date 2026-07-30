@@ -2776,13 +2776,111 @@ function logoutQQCredential() {
   return accountLifecycle.logout('qq');
 }
 
+function metadataAccountFor(provider, credential) {
+  credential = credential && typeof credential === 'object' ? credential : {};
+  const cookie = typeof credential.cookie === 'string'
+    ? parseCookieString(credential.cookie)
+    : {};
+  if (provider === 'kugou') {
+    return {
+      loggedIn: true,
+      accountId: cookie.userid || cookie.KugooID || '',
+      nickname: cookie.NickName || '酷狗音乐用户',
+      avatar: '',
+      membership: { known: false },
+    };
+  }
+  return {
+    loggedIn: true,
+    accountId: '',
+    nickname: '汽水音乐用户',
+    avatar: '',
+    membership: { known: false },
+  };
+}
+
+async function spotifyAccountFor(credential) {
+  const accessToken = credential
+    && typeof credential.accessToken === 'string'
+    ? credential.accessToken
+    : '';
+  if (!accessToken) return { loggedIn: false };
+  const profile = await requestJson('https://api.spotify.com/v1/me', {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'Mineradio/1.1 (Spotify account bridge)',
+    },
+  });
+  const images = Array.isArray(profile && profile.images)
+    ? profile.images
+    : [];
+  const product = String(profile && profile.product || '').toLowerCase();
+  return {
+    loggedIn: Boolean(profile && profile.id),
+    accountId: profile && profile.id,
+    nickname: profile && profile.display_name,
+    avatar: images.find(item => item && typeof item.url === 'string')?.url || '',
+    membership: {
+      vipLevel: product === 'premium' ? 'vip' : 'none',
+      isVip: product === 'premium',
+      isSvip: false,
+      known: Boolean(product),
+    },
+  };
+}
+
+function loginPlatformCredential(provider, credential, method) {
+  if (provider === 'netease') {
+    return loginNeteaseCredential(credential && credential.cookie);
+  }
+  if (provider === 'qq') {
+    return loginQQCredential(credential && credential.cookie);
+  }
+  if (provider === 'kugou' || provider === 'qishui') {
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => metadataAccountFor(provider, credential),
+    );
+  }
+  if (provider === 'spotify' && (method === 'pkce' || method === 'external-window')) {
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => spotifyAccountFor(credential),
+    );
+  }
+  const error = new Error('Unknown platform login provider');
+  error.code = 'PLATFORM_LOGIN_PROVIDER_UNKNOWN';
+  return Promise.reject(error);
+}
+
+function logoutPlatformCredential(provider) {
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    const error = new Error('Unknown platform login provider');
+    error.code = 'PLATFORM_LOGIN_PROVIDER_UNKNOWN';
+    return Promise.reject(error);
+  }
+  return accountLifecycle.logout(provider);
+}
+
 function mergePublishedAccount(provider, liveStatus) {
   const published = platformAccountStates.get(provider);
-  if (!published || liveStatus.loggedIn === true) return liveStatus;
-  return {
-    provider,
-    ...published,
-  };
+  if (liveStatus.loggedIn === true) return liveStatus;
+  if (published) return { provider, ...published };
+  const credential = providerCredential(provider);
+  if (Object.keys(credential).length > 0) {
+    return {
+      provider,
+      loggedIn: true,
+      accountId: credential.accountId || '',
+      nickname: '',
+      avatar: '',
+      membership: { known: false },
+    };
+  }
+  return liveStatus;
 }
 
 async function getPlatformAccountStatuses() {
@@ -2843,6 +2941,10 @@ const platformSearchAdapters = {
   }),
   spotify: createSpotifySearchAdapter({
     requestJson,
+    getCredential: () => providerCredential('spotify'),
+    persistCredential: credential => (
+      credentialSession.replace('spotify', credential)
+    ),
   }),
 };
 const runPlatformSearch = createSearchAggregator({
@@ -2856,6 +2958,9 @@ const platformSearchRoutes = createPlatformSearchRoutes({
 const platformRoutes = createPlatformRoutes({
   sendJSON,
   getAccountStatuses: getPlatformAccountStatuses,
+  readRequestBody,
+  loginCredential: loginPlatformCredential,
+  logoutCredential: logoutPlatformCredential,
 });
 const weatherRadioRoutes = createWeatherRadioRoutes({
   sendJSON,

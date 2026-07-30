@@ -9,6 +9,7 @@ const SEARCH_SCHEMA = 1;
 const SAFE_ERROR_CODES = new Set([
   'PROVIDER_TIMEOUT',
   'PROVIDER_UNAVAILABLE',
+  'AUTH_REQUIRED',
   'SPOTIFY_AUTH_REQUIRED',
   'SPOTIFY_TOKEN_INVALID',
   'UPSTREAM_RATE_LIMITED',
@@ -55,7 +56,8 @@ function stableError(provider, error) {
   const code = SAFE_ERROR_CODES.has(inputCode)
     ? inputCode
     : 'PROVIDER_REQUEST_FAILED';
-  const retryable = code === 'SPOTIFY_AUTH_REQUIRED'
+  const retryable = code === 'AUTH_REQUIRED'
+    || code === 'SPOTIFY_AUTH_REQUIRED'
     || code === 'PROVIDER_UNAVAILABLE'
     ? false
     : error && typeof error.retryable === 'boolean'

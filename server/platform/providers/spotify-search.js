@@ -10,10 +10,15 @@ const { normalizeSearchPage } = require('../search-model');
 
 const DEFAULT_ACCOUNTS_BASE = 'https://accounts.spotify.com';
 const DEFAULT_API_BASE = 'https://api.spotify.com/v1';
+const MINIMAL_SCOPE = 'user-read-private';
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} is required`);
   return value;
+}
+
+function optionalFunction(value, fallback) {
+  return typeof value === 'function' ? value : fallback;
 }
 
 function boundedInteger(value, fallback, min, max) {
@@ -22,17 +27,22 @@ function boundedInteger(value, fallback, min, max) {
   return Math.max(min, Math.min(max, number));
 }
 
+function cleanString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function envString(env, names) {
   for (const name of names) {
-    const value = String(env && env[name] || '').trim();
+    const value = cleanString(env && env[name]);
     if (value) return value;
   }
   return '';
 }
 
 function spotifyAuthError() {
-  const error = new Error('Spotify search authentication is required');
-  error.code = 'SPOTIFY_AUTH_REQUIRED';
+  const error = new Error('Spotify login is required');
+  error.code = 'AUTH_REQUIRED';
+  error.provider = 'spotify';
   error.retryable = false;
   return error;
 }
@@ -71,9 +81,36 @@ function mapSpotifyTrack(track) {
   };
 }
 
+function refreshedCredential(payload, previous, now) {
+  payload = payload && typeof payload === 'object' ? payload : {};
+  const accessToken = cleanString(payload.access_token || payload.accessToken);
+  if (!accessToken) throw spotifyAuthError();
+  const expiresIn = Math.max(
+    60,
+    Math.min(24 * 60 * 60, Number(payload.expires_in) || 3600),
+  );
+  const scope = cleanString(payload.scope || previous.scope) || MINIMAL_SCOPE;
+  if (scope !== MINIMAL_SCOPE) throw spotifyAuthError();
+  return {
+    accessToken,
+    refreshToken: cleanString(
+      payload.refresh_token || previous.refreshToken,
+    ),
+    tokenType: cleanString(payload.token_type || previous.tokenType) || 'Bearer',
+    scope,
+    expiresAt: Number(now()) + expiresIn * 1000,
+    clientId: cleanString(previous.clientId),
+  };
+}
+
 function createSpotifySearchAdapter(options) {
   options = options && typeof options === 'object' ? options : {};
   const requestJson = requireFunction(options.requestJson, 'requestJson');
+  const getCredential = optionalFunction(options.getCredential, () => null);
+  const persistCredential = optionalFunction(
+    options.persistCredential,
+    async () => {},
+  );
   const env = options.env && typeof options.env === 'object'
     ? options.env
     : process.env;
@@ -84,71 +121,83 @@ function createSpotifySearchAdapter(options) {
   const apiBase = String(
     options.apiBase || DEFAULT_API_BASE,
   ).replace(/\/+$/, '');
-  const accessToken = envString(env, [
-    'SPOTIFY_ACCESS_TOKEN',
-    'MINERADIO_SPOTIFY_ACCESS_TOKEN',
-  ]);
-  const clientId = envString(env, [
-    'SPOTIFY_CLIENT_ID',
-    'MINERADIO_SPOTIFY_CLIENT_ID',
-  ]);
-  const clientSecret = envString(env, [
-    'SPOTIFY_CLIENT_SECRET',
-    'MINERADIO_SPOTIFY_CLIENT_SECRET',
-  ]);
   const market = (envString(env, [
     'SPOTIFY_MARKET',
     'MINERADIO_SPOTIFY_MARKET',
   ]) || 'US').toUpperCase();
-  let clientToken = '';
-  let clientTokenExpiresAt = 0;
-  let tokenPromise = null;
+  let refreshPromise = null;
 
-  async function resolveToken() {
-    if (accessToken) return accessToken;
-    if (!clientId || !clientSecret) throw spotifyAuthError();
-    const timestamp = Number(now()) || Date.now();
-    if (clientToken && timestamp < clientTokenExpiresAt - 30000) {
-      return clientToken;
-    }
-    if (tokenPromise) return tokenPromise;
-    tokenPromise = requestJson(accountsBase + '/api/token', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        Authorization: 'Basic ' + Buffer
-          .from(clientId + ':' + clientSecret)
-          .toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    }, 'grant_type=client_credentials')
-      .then(payload => {
-        const token = String(payload && payload.access_token || '').trim();
-        if (!token) {
-          const error = new Error('Spotify token response was invalid');
-          error.code = 'SPOTIFY_TOKEN_INVALID';
-          error.retryable = true;
-          throw error;
-        }
-        const expiresIn = Math.max(60, Number(payload.expires_in) || 3600);
-        clientToken = token;
-        clientTokenExpiresAt = (Number(now()) || Date.now()) + expiresIn * 1000;
-        return token;
+  async function refresh(credential) {
+    if (refreshPromise) return refreshPromise;
+    const refreshToken = cleanString(credential.refreshToken);
+    const clientId = cleanString(credential.clientId);
+    if (!refreshToken || !clientId) throw spotifyAuthError();
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+    }).toString();
+    refreshPromise = Promise.resolve()
+      .then(() => requestJson(accountsBase + '/api/token', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }, body))
+      .then(payload => refreshedCredential(payload, credential, now))
+      .then(async nextCredential => {
+        await persistCredential(nextCredential);
+        return nextCredential;
+      })
+      .catch(() => {
+        throw spotifyAuthError();
       })
       .finally(() => {
-        tokenPromise = null;
+        refreshPromise = null;
       });
-    return tokenPromise;
+    return refreshPromise;
+  }
+
+  async function resolveToken() {
+    let credential;
+    try {
+      credential = getCredential();
+    } catch (_error) {
+      throw spotifyAuthError();
+    }
+    credential = credential && typeof credential === 'object'
+      ? credential
+      : {};
+    const accessToken = cleanString(credential.accessToken);
+    if (cleanString(credential.scope) !== MINIMAL_SCOPE) {
+      throw spotifyAuthError();
+    }
+    const expiresAt = Number(credential.expiresAt) || 0;
+    const timestamp = Number(now());
+    if (accessToken && expiresAt > timestamp + 30000) return accessToken;
+    const nextCredential = await refresh(credential);
+    return nextCredential.accessToken;
   }
 
   return {
     provider: 'spotify',
     isReady() {
-      return Boolean(accessToken || (clientId && clientSecret));
+      try {
+        const credential = getCredential();
+        return Boolean(
+          credential
+          && typeof credential === 'object'
+          && cleanString(credential.accessToken)
+          && cleanString(credential.scope) === MINIMAL_SCOPE,
+        );
+      } catch (_error) {
+        return false;
+      }
     },
     async search(params) {
       params = params && typeof params === 'object' ? params : {};
-      const query = String(params.query || '').trim();
+      const query = cleanString(params.query);
       const limit = boundedInteger(params.limit, 10, 1, 20);
       const offset = boundedInteger(params.offset, 0, 0, 500);
       const token = await resolveToken();
@@ -166,10 +215,7 @@ function createSpotifySearchAdapter(options) {
           'User-Agent': 'Mineradio/1.1 (Spotify Web API bridge)',
         },
       });
-      const tracks = payload && payload.tracks
-        && typeof payload.tracks === 'object'
-        ? payload.tracks
-        : {};
+      const tracks = tracksObject(payload && payload.tracks);
       const items = Array.isArray(tracks.items) ? tracks.items : [];
       const songs = items
         .filter(track => !track || track.is_local !== true)
@@ -185,6 +231,10 @@ function createSpotifySearchAdapter(options) {
       });
     },
   };
+}
+
+function tracksObject(value) {
+  return value && typeof value === 'object' ? value : {};
 }
 
 module.exports = {

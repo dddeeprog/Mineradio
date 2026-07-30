@@ -271,9 +271,9 @@ test('tracks partial provider failures without exposing raw error messages', () 
     {},
     [{
       provider: 'spotify',
-      code: 'SPOTIFY_AUTH_REQUIRED',
+      code: 'AUTH_REQUIRED',
       retryable: false,
-      message: 'client-secret',
+      message: 'authorization required',
     }],
   ));
 
@@ -282,10 +282,10 @@ test('tracks partial provider failures without exposing raw error messages', () 
     label: 'SPOTIFY',
     status: 'error',
     count: 0,
-    errorCode: 'SPOTIFY_AUTH_REQUIRED',
+    errorCode: 'AUTH_REQUIRED',
     hasMore: false,
   }]);
-  assert.equal(JSON.stringify(session).includes('client-secret'), false);
+  assert.equal(JSON.stringify(session).includes('authorization required'), false);
 
   const failure = new Error('token=network-secret');
   failure.code = 'SECRET_CODE';

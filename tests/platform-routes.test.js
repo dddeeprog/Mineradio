@@ -18,6 +18,7 @@ const {
 function createResponseHarness(options) {
   options = options || {};
   let response = null;
+  const calls = [];
   const deps = {
     sendJSON(_res, body, status) {
       response = {
@@ -28,6 +29,21 @@ function createResponseHarness(options) {
     getAccountStatuses: options.getAccountStatuses
       ? options.getAccountStatuses
       : async () => ({}),
+    readRequestBody: options.readRequestBody
+      ? options.readRequestBody
+      : async req => req.body || {},
+    loginCredential: options.loginCredential
+      ? options.loginCredential
+      : async (provider, credential, method) => {
+        calls.push({ type: 'login', provider, credential, method });
+        return { provider, loggedIn: true, accountId: `${provider}-user` };
+      },
+    logoutCredential: options.logoutCredential
+      ? options.logoutCredential
+      : async provider => {
+        calls.push({ type: 'logout', provider });
+        return { provider, loggedIn: false };
+      },
   };
   for (const dependency of [
     'implementationRegistry',
@@ -41,6 +57,7 @@ function createResponseHarness(options) {
   const routes = createPlatformRoutes(deps);
   return {
     routes,
+    calls,
     response: () => response,
   };
 }
@@ -280,6 +297,150 @@ test('platform route rejects non-GET methods without loading account state', asy
     },
   });
   assert.equal(statusCalls, 0);
+});
+
+test('platform login import validates the provider method and returns no credential', async () => {
+  const harness = createResponseHarness();
+
+  assert.equal(await harness.routes.handleRoute(
+    '/api/platform/login/import',
+    {
+      method: 'POST',
+      body: {
+        provider: 'qishui',
+        method: 'token',
+        value: '  qishui-token-value  ',
+      },
+    },
+    {},
+    new URL('http://localhost/api/platform/login/import'),
+  ), true);
+
+  assert.deepEqual(harness.calls, [{
+    type: 'login',
+    provider: 'qishui',
+    credential: { token: 'qishui-token-value' },
+    method: 'token',
+  }]);
+  assert.deepEqual(harness.response(), {
+    status: 200,
+    body: {
+      ok: true,
+      provider: 'qishui',
+      loggedIn: true,
+      accountId: 'qishui-user',
+      nickname: '',
+      avatar: '',
+      membership: {
+        vipLevel: 'none',
+        isVip: false,
+        isSvip: false,
+        known: false,
+      },
+    },
+  });
+  assert.equal(
+    JSON.stringify(harness.response()).includes('qishui-token-value'),
+    false,
+  );
+});
+
+test('platform login import rejects unknown providers and unsupported methods', async () => {
+  for (const body of [
+    { provider: 'unknown', method: 'cookie', value: 'a=b' },
+    { provider: 'spotify', method: 'token', value: 'token-value' },
+    { provider: 'qq', method: 'cookie', value: '' },
+    { provider: 'netease', method: 'cookie', value: 'not-a-cookie' },
+  ]) {
+    const harness = createResponseHarness();
+    await harness.routes.handleRoute(
+      '/api/platform/login/import',
+      { method: 'POST', body },
+      {},
+      new URL('http://localhost/api/platform/login/import'),
+    );
+    assert.equal(harness.response().status, 400);
+    assert.match(
+      harness.response().body.error,
+      /^PLATFORM_LOGIN_(?:PROVIDER_UNKNOWN|METHOD_UNAVAILABLE|VALUE_INVALID)$/,
+    );
+    assert.equal(harness.calls.length, 0);
+  }
+});
+
+test('platform PKCE import accepts structured tokens only through the PKCE method', async () => {
+  const harness = createResponseHarness();
+  const credential = {
+    accessToken: 'spotify-access',
+    refreshToken: 'spotify-refresh',
+    expiresAt: Date.now() + 3600000,
+    clientId: 'public-client',
+    scope: 'user-read-private',
+  };
+
+  await harness.routes.handleRoute(
+    '/api/platform/login/import',
+    {
+      method: 'POST',
+      body: {
+        provider: 'spotify',
+        method: 'pkce',
+        credential,
+      },
+    },
+    {},
+    new URL('http://localhost/api/platform/login/import'),
+  );
+
+  assert.deepEqual(harness.calls[0], {
+    type: 'login',
+    provider: 'spotify',
+    credential: {
+      ...credential,
+      tokenType: 'Bearer',
+    },
+    method: 'pkce',
+  });
+  assert.equal(
+    JSON.stringify(harness.response()).includes('spotify-access'),
+    false,
+  );
+});
+
+test('platform logout is per-provider and unknown providers do not fall back', async () => {
+  const harness = createResponseHarness();
+  await harness.routes.handleRoute(
+    '/api/platform/logout',
+    {
+      method: 'POST',
+      body: { provider: 'kugou' },
+    },
+    {},
+    new URL('http://localhost/api/platform/logout'),
+  );
+
+  assert.deepEqual(harness.calls, [{
+    type: 'logout',
+    provider: 'kugou',
+  }]);
+  assert.equal(harness.response().body.provider, 'kugou');
+
+  const unknown = createResponseHarness();
+  await unknown.routes.handleRoute(
+    '/api/platform/logout',
+    {
+      method: 'POST',
+      body: { provider: 'unknown' },
+    },
+    {},
+    new URL('http://localhost/api/platform/logout'),
+  );
+  assert.equal(unknown.response().status, 400);
+  assert.equal(
+    unknown.response().body.error,
+    'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+  );
+  assert.equal(unknown.calls.length, 0);
 });
 
 test('platform route ignores unrelated paths', async () => {

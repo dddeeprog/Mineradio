@@ -12,9 +12,16 @@ const {
 } = require('./platform-credential-runtime');
 const {
   isAllowedAppUrl,
-  isAllowedLoginUrl,
   isSafeExternalUrl,
 } = require('./navigation-guard');
+const {
+  clearPlatformLoginSession,
+  openPlatformLoginWindow,
+} = require('./platform-login-window');
+const {
+  createSpotifyPkceFlow,
+  startSpotifyLoopbackServer,
+} = require('./spotify-pkce');
 const { assertAllowedIpcSender } = require('./ipc-auth');
 const {
   createLocalAssetsManager,
@@ -70,10 +77,6 @@ const MIN_WINDOWED_HEIGHT = 540;
 const APP_NAME = 'Mineradio';
 const APP_USER_MODEL_ID = 'com.mineradio.desktop';
 const APP_ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico');
-const NETEASE_LOGIN_PARTITION = 'persist:mineradio-netease-login';
-const NETEASE_LOGIN_URL = 'https://music.163.com/#/login';
-const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
-const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
 const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
 const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
 const APP_PATHS = configureStableAppPaths(app);
@@ -143,6 +146,25 @@ const NETEASE_LOGIN_COOKIE_PRIORITY = [
   'WEVNSM',
   'WNMCID',
   'JSESSIONID-WYYY',
+];
+const KUGOU_LOGIN_COOKIE_PRIORITY = [
+  'KuGoo',
+  'token',
+  'userid',
+  'KugooID',
+  'kg_mid',
+  'kg_dfid',
+  'Kugou',
+  'NickName',
+];
+const QISHUI_LOGIN_COOKIE_PRIORITY = [
+  'sessionid',
+  'sessionid_ss',
+  'sid_guard',
+  'sid_tt',
+  'passport_csrf_token',
+  'passport_csrf_token_default',
+  'ttwid',
 ];
 const localAssetsManager = createLocalAssetsManager();
 let localFileProtocolRegistered = false;
@@ -344,12 +366,6 @@ function openSafeExternal(url) {
 
 function guardMainNavigation(event, url) {
   if (isAllowedAppUrl(url, mainServerPort)) return;
-  if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  openSafeExternal(url);
-}
-
-function guardLoginNavigation(provider, event, url) {
-  if (isAllowedLoginUrl(url, provider)) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   openSafeExternal(url);
 }
@@ -644,6 +660,19 @@ function isNeteaseCookieDomain(domain) {
     normalized === 'netease.com' || normalized.endsWith('.netease.com');
 }
 
+function isKugouCookieDomain(domain) {
+  const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
+  return normalized === 'kugou.com' || normalized.endsWith('.kugou.com');
+}
+
+function isQishuiCookieDomain(domain) {
+  const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
+  return normalized === 'qishui.com'
+    || normalized.endsWith('.qishui.com')
+    || normalized === 'douyin.com'
+    || normalized.endsWith('.douyin.com');
+}
+
 function buildCookieHeaderFor(cookies, isAllowedDomain, priority) {
   const picked = new Map();
   (cookies || []).forEach((cookie) => {
@@ -680,216 +709,97 @@ async function readNeteaseLoginCookieHeader(cookieSession) {
   return buildCookieHeaderFor(cookies, isNeteaseCookieDomain, NETEASE_LOGIN_COOKIE_PRIORITY);
 }
 
+async function readKugouLoginCookieHeader(cookieSession) {
+  const cookies = await cookieSession.cookies.get({});
+  return buildCookieHeaderFor(
+    cookies,
+    isKugouCookieDomain,
+    KUGOU_LOGIN_COOKIE_PRIORITY,
+  );
+}
+
+async function readQishuiLoginCookieHeader(cookieSession) {
+  const cookies = await cookieSession.cookies.get({});
+  return buildCookieHeaderFor(
+    cookies,
+    isQishuiCookieDomain,
+    QISHUI_LOGIN_COOKIE_PRIORITY,
+  );
+}
+
+function kugouCookieHasLogin(cookieText) {
+  const value = parseCookieHeader(cookieText);
+  return Boolean(
+    (value.token || value.KuGoo)
+    && (value.userid || value.KugooID || value.KuGoo),
+  );
+}
+
+function qishuiCookieHasLogin(cookieText) {
+  const value = parseCookieHeader(cookieText);
+  return Boolean(
+    value.sessionid
+    || value.sessionid_ss
+    || value.sid_guard
+    || value.sid_tt,
+  );
+}
+
 async function openNeteaseMusicLoginWindow(owner) {
-  const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
-  const initialCookie = await readNeteaseLoginCookieHeader(cookieSession);
-  if (neteaseCookieHasLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let pollTimer = null;
-
-    const loginWindow = new BrowserWindow({
-      width: 940,
-      height: 760,
-      minWidth: 780,
-      minHeight: 580,
-      parent: owner && !owner.isDestroyed() ? owner : undefined,
-      modal: false,
-      show: false,
-      autoHideMenuBar: true,
-      title: '网易云音乐登录',
-      backgroundColor: '#111111',
-      icon: APP_ICON_ICO,
-      webPreferences: {
-        partition: NETEASE_LOGIN_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-
-    const finish = async (result) => {
-      if (settled) return;
-      settled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (loginWindow && !loginWindow.isDestroyed()) {
-        loginWindow.close();
-      }
-      resolve(result);
-    };
-
-    const checkCookies = async () => {
-      try {
-        const cookie = await readNeteaseLoginCookieHeader(cookieSession);
-        if (neteaseCookieHasLogin(cookie)) {
-          finish({ ok: true, cookie });
-        }
-      } catch (e) {
-        console.warn('Netease login cookie check failed:', e.message);
-      }
-    };
-
-    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (isAllowedLoginUrl(url, 'netease')) {
-        loginWindow.loadURL(url).catch((e) => console.warn('Netease login popup navigation failed:', e.message));
-      } else {
-        openSafeExternal(url);
-      }
-      return { action: 'deny' };
-    });
-    loginWindow.webContents.on('will-navigate', (event, url) => guardLoginNavigation('netease', event, url));
-    loginWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) guardLoginNavigation('netease', event, url);
-    });
-
-    loginWindow.webContents.on('did-finish-load', () => {
-      checkCookies();
-      if (!isAllowedLoginUrl(loginWindow.webContents.getURL(), 'netease')) return;
-      loginWindow.webContents.executeJavaScript(`
-        setTimeout(() => {
-          const docs = [document];
-          document.querySelectorAll('iframe').forEach((frame) => {
-            try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (_) {}
-          });
-          for (const doc of docs) {
-            const nodes = Array.from(doc.querySelectorAll('a, button, span, div'));
-            const loginNode = nodes.find((node) => {
-              const text = (node.textContent || '').trim();
-              if (!/登录|立即登录/.test(text)) return false;
-              const rect = node.getBoundingClientRect();
-              return rect.width > 0 && rect.height > 0;
-            });
-            if (loginNode) { loginNode.click(); return true; }
-          }
-          return false;
-        }, 900);
-      `, true).catch(() => {});
-    });
-
-    loginWindow.on('ready-to-show', () => loginWindow.show());
-    loginWindow.on('closed', async () => {
-      if (settled) return;
-      if (pollTimer) clearInterval(pollTimer);
-      try {
-        const cookie = await readNeteaseLoginCookieHeader(cookieSession);
-        resolve(neteaseCookieHasLogin(cookie)
-          ? { ok: true, cookie, partial: !qqCookieHasPlaybackLogin(cookie) }
-          : { ok: false, cancelled: true, message: '网易云登录窗口已关闭' });
-      } catch (e) {
-        resolve({ ok: false, error: e.message || '网易云登录窗口已关闭' });
-      }
-    });
-
-    pollTimer = setInterval(checkCookies, 1200);
-    loginWindow.loadURL(NETEASE_LOGIN_URL).catch((e) => finish({ ok: false, error: e.message }));
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'netease',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readNeteaseLoginCookieHeader,
+    credentialComplete: neteaseCookieHasLogin,
+    credentialAcceptOnClose: neteaseCookieHasLogin,
   });
 }
 
 async function openQQMusicLoginWindow(owner) {
-  const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
-  const initialCookie = await readQQLoginCookieHeader(cookieSession);
-  if (qqCookieHasPlaybackLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'qq',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readQQLoginCookieHeader,
+    credentialComplete: qqCookieHasPlaybackLogin,
+    credentialHasIdentity: qqCookieHasLogin,
+    credentialAcceptOnClose: qqCookieHasLogin,
+  });
+}
 
-  return new Promise((resolve) => {
-    let settled = false;
-    let pollTimer = null;
-    let warmupStarted = false;
+async function openKugouMusicLoginWindow(owner) {
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'kugou',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readKugouLoginCookieHeader,
+    credentialComplete: kugouCookieHasLogin,
+    credentialHasIdentity: kugouCookieHasLogin,
+    credentialAcceptOnClose: kugouCookieHasLogin,
+  });
+}
 
-    const loginWindow = new BrowserWindow({
-      width: 900,
-      height: 720,
-      minWidth: 760,
-      minHeight: 560,
-      parent: owner && !owner.isDestroyed() ? owner : undefined,
-      modal: false,
-      show: false,
-      autoHideMenuBar: true,
-      title: 'QQ 音乐登录',
-      backgroundColor: '#111111',
-      icon: APP_ICON_ICO,
-      webPreferences: {
-        partition: QQ_LOGIN_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-
-    const finish = async (result) => {
-      if (settled) return;
-      settled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (loginWindow && !loginWindow.isDestroyed()) {
-        loginWindow.close();
-      }
-      resolve(result);
-    };
-
-    const checkCookies = async () => {
-      try {
-        const cookie = await readQQLoginCookieHeader(cookieSession);
-        if (qqCookieHasPlaybackLogin(cookie)) {
-          finish({ ok: true, cookie });
-        } else if (qqCookieHasLogin(cookie) && !warmupStarted) {
-          warmupStarted = true;
-          setTimeout(() => {
-            if (!settled && loginWindow && !loginWindow.isDestroyed()) {
-              loginWindow.loadURL('https://y.qq.com/n/ryqq/player').catch((e) => console.warn('QQ login warmup navigation failed:', e.message));
-            }
-          }, 900);
-        }
-      } catch (e) {
-        console.warn('QQ login cookie check failed:', e.message);
-      }
-    };
-
-    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (isAllowedLoginUrl(url, 'qq')) {
-        loginWindow.loadURL(url).catch((e) => console.warn('QQ login popup navigation failed:', e.message));
-      } else {
-        openSafeExternal(url);
-      }
-      return { action: 'deny' };
-    });
-    loginWindow.webContents.on('will-navigate', (event, url) => guardLoginNavigation('qq', event, url));
-    loginWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) guardLoginNavigation('qq', event, url);
-    });
-
-    loginWindow.webContents.on('did-finish-load', () => {
-      checkCookies();
-      if (!isAllowedLoginUrl(loginWindow.webContents.getURL(), 'qq')) return;
-      loginWindow.webContents.executeJavaScript(`
-        setTimeout(() => {
-          const nodes = Array.from(document.querySelectorAll('a, button, span, div'));
-          const loginNode = nodes.find((node) => {
-            const text = (node.textContent || '').trim();
-            if (!/登录|登陆/.test(text)) return false;
-            const rect = node.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0;
-          });
-          if (loginNode) loginNode.click();
-        }, 700);
-      `, true).catch(() => {});
-    });
-
-    loginWindow.on('ready-to-show', () => loginWindow.show());
-    loginWindow.on('closed', async () => {
-      if (settled) return;
-      if (pollTimer) clearInterval(pollTimer);
-      try {
-        const cookie = await readQQLoginCookieHeader(cookieSession);
-        resolve(qqCookieHasLogin(cookie)
-          ? { ok: true, cookie }
-          : { ok: false, cancelled: true, message: 'QQ 登录窗口已关闭' });
-      } catch (e) {
-        resolve({ ok: false, error: e.message || 'QQ 登录窗口已关闭' });
-      }
-    });
-
-    pollTimer = setInterval(checkCookies, 1200);
-    loginWindow.loadURL(QQ_LOGIN_URL).catch((e) => finish({ ok: false, error: e.message }));
+async function openQishuiMusicLoginWindow(owner) {
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'qishui',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readQishuiLoginCookieHeader,
+    credentialComplete: qishuiCookieHasLogin,
+    credentialAcceptOnClose: qishuiCookieHasLogin,
   });
 }
 
@@ -902,47 +812,70 @@ async function readLoopbackJson(response) {
   }
 }
 
-async function commitLoginWindowCredential(provider, capture) {
-  if (!capture || capture.ok !== true || typeof capture.cookie !== 'string') {
-    return {
-      ok: false,
-      cancelled: capture && capture.cancelled === true,
-      error: capture && capture.error || 'PLATFORM_LOGIN_CANCELLED',
-      message: capture && capture.message || '',
-    };
+async function desktopRequestJson(url, options, body) {
+  const response = await fetch(url, {
+    ...options,
+    body,
+  });
+  const payload = await readLoopbackJson(response);
+  if (!response.ok) {
+    const error = new Error('PLATFORM_REQUEST_FAILED');
+    error.code = 'PLATFORM_REQUEST_FAILED';
+    throw error;
   }
-  if (!mainServerPort) return credentialRuntimeUnavailable();
+  return payload;
+}
 
-  const endpoint = provider === 'qq' ? '/api/qq/login/cookie' : '/api/login/cookie';
+async function commitPlatformCredential(provider, method, credential) {
+  if (!mainServerPort) return credentialRuntimeUnavailable();
+  const body = method === 'pkce'
+    ? { provider, method, credential }
+    : method === 'external-window'
+      ? { provider, method, credential }
+      : {
+        provider,
+        method,
+        value: method === 'token'
+          ? credential && credential.token
+          : credential && credential.cookie,
+      };
   try {
-    const response = await fetch(`http://127.0.0.1:${mainServerPort}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: capture.cookie }),
-    });
+    const response = await fetch(
+      `http://127.0.0.1:${mainServerPort}/api/platform/login/import`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
     const info = await readLoopbackJson(response);
     if (!response.ok || info.loggedIn !== true) {
       return {
         ok: false,
         provider,
         error: info.error || 'PLATFORM_LOGIN_COMMIT_FAILED',
-        message: info.message || '',
       };
     }
+    const membership = info.membership
+      && typeof info.membership === 'object'
+      ? info.membership
+      : {};
     return {
       ok: true,
       provider,
       loggedIn: true,
-      accountId: info.accountId ?? info.userId ?? '',
-      userId: info.userId ?? info.accountId ?? '',
+      accountId: info.accountId || '',
+      userId: info.accountId || '',
       nickname: typeof info.nickname === 'string' ? info.nickname : '',
       avatar: typeof info.avatar === 'string' ? info.avatar : '',
-      vipType: Number(info.vipType) || 0,
-      vipLevel: typeof info.vipLevel === 'string' ? info.vipLevel : 'none',
-      isVip: info.isVip === true,
-      isSvip: info.isSvip === true,
-      playbackKeyReady: info.playbackKeyReady === true,
-      partial: capture.partial === true,
+      vipLevel: typeof membership.vipLevel === 'string'
+        ? membership.vipLevel
+        : 'none',
+      isVip: membership.isVip === true,
+      isSvip: membership.isSvip === true,
+      metadataOnly: provider === 'kugou'
+        || provider === 'qishui'
+        || provider === 'spotify',
     };
   } catch (_error) {
     return {
@@ -953,38 +886,153 @@ async function commitLoginWindowCredential(provider, capture) {
   }
 }
 
+async function commitLoginWindowCredential(provider, capture) {
+  if (!capture || capture.ok !== true
+    || typeof capture.credential !== 'string') {
+    return {
+      ok: false,
+      cancelled: capture && capture.cancelled === true,
+      error: capture && capture.error || 'PLATFORM_LOGIN_CANCELLED',
+    };
+  }
+  const result = await commitPlatformCredential(
+    provider,
+    'external-window',
+    { cookie: capture.credential },
+  );
+  if (result.ok) {
+    result.partial = capture.partial === true;
+    if (provider === 'qq') {
+      result.playbackKeyReady = qqCookieHasPlaybackLogin(capture.credential);
+    }
+  }
+  return result;
+}
+
+function spotifyClientId(options) {
+  options = options && typeof options === 'object' ? options : {};
+  const value = String(
+    options.clientId
+    || process.env.MINERADIO_SPOTIFY_CLIENT_ID
+    || process.env.SPOTIFY_CLIENT_ID
+    || '',
+  ).trim();
+  return /^[A-Za-z0-9]{16,128}$/.test(value) ? value : '';
+}
+
+async function openSpotifyMusicLoginWindow(owner, options) {
+  const clientId = spotifyClientId(options);
+  if (!clientId) {
+    return {
+      ok: false,
+      provider: 'spotify',
+      error: 'SPOTIFY_CLIENT_ID_REQUIRED',
+    };
+  }
+  const callback = await startSpotifyLoopbackServer();
+  const flow = createSpotifyPkceFlow({
+    clientId,
+    requestJson: desktopRequestJson,
+  });
+  const pending = flow.begin(callback.redirectUri);
+  let capture;
+  try {
+    capture = await openPlatformLoginWindow({
+      BrowserWindow,
+      session,
+      provider: 'spotify',
+      owner,
+      icon: APP_ICON_ICO,
+      loginUrl: pending.authorizationUrl,
+      redirectUri: pending.redirectUri,
+      callbackPromise: callback.waitForCallback,
+      openExternal: openSafeExternal,
+    });
+    if (!capture || capture.ok !== true || !capture.callbackUrl) {
+      flow.cancel();
+      return capture || {
+        ok: false,
+        error: 'SPOTIFY_LOGIN_CANCELLED',
+      };
+    }
+    const credential = await flow.consumeCallback(capture.callbackUrl);
+    return commitPlatformCredential('spotify', 'pkce', credential);
+  } catch (_error) {
+    flow.cancel();
+    return {
+      ok: false,
+      provider: 'spotify',
+      error: 'SPOTIFY_LOGIN_FAILED',
+    };
+  } finally {
+    callback.close();
+  }
+}
+
+async function openPlatformMusicLogin(owner, provider, options) {
+  if (provider === 'spotify') {
+    return openSpotifyMusicLoginWindow(owner, options);
+  }
+  const openers = {
+    netease: openNeteaseMusicLoginWindow,
+    qq: openQQMusicLoginWindow,
+    kugou: openKugouMusicLoginWindow,
+    qishui: openQishuiMusicLoginWindow,
+  };
+  const opener = openers[provider];
+  if (!Object.hasOwn(openers, provider)
+    || typeof opener !== 'function') {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+    };
+  }
+  const capture = await opener(owner);
+  return commitLoginWindowCredential(provider, capture);
+}
+
 async function clearServerCredential(provider) {
   if (!mainServerPort) return credentialRuntimeUnavailable();
-  const endpoint = provider === 'qq' ? '/api/qq/logout' : '/api/logout';
   try {
-    const response = await fetch(`http://127.0.0.1:${mainServerPort}${endpoint}`, {
-      method: 'POST',
-    });
+    const response = await fetch(
+      `http://127.0.0.1:${mainServerPort}/api/platform/logout`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      },
+    );
     const result = await readLoopbackJson(response);
     return response.ok && result.ok !== false
-      ? { ok: true }
+      ? { ok: true, provider }
       : { ok: false, error: result.error || 'PLATFORM_LOGOUT_FAILED' };
   } catch (_error) {
     return { ok: false, error: 'PLATFORM_LOGOUT_FAILED' };
   }
 }
 
-async function clearQQMusicLoginSession() {
-  const serverResult = await clearServerCredential('qq');
-  const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
-  await cookieSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
-  });
+async function clearPlatformMusicLoginSession(provider) {
+  const serverResult = await clearServerCredential(provider);
+  try {
+    await clearPlatformLoginSession(session, provider);
+  } catch (_error) {
+    if (serverResult.ok) {
+      return {
+        ok: false,
+        provider,
+        error: 'PLATFORM_LOGIN_SESSION_CLEAR_FAILED',
+      };
+    }
+  }
   return serverResult;
 }
 
-async function clearNeteaseMusicLoginSession() {
-  const serverResult = await clearServerCredential('netease');
-  const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
-  await cookieSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
-  });
-  return serverResult;
+function clearQQMusicLoginSession() {
+  return clearPlatformMusicLoginSession('qq');
+}
+
+function clearNeteaseMusicLoginSession() {
+  return clearPlatformMusicLoginSession('netease');
 }
 
 function getWindowedBounds(win) {
@@ -1536,30 +1584,39 @@ handleIpc('mineradio-credential-status', () => {
 
 handleIpc('mineradio-credential-set', async (_event, provider, credential) => {
   if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
-  if (provider !== 'netease' && provider !== 'qq') {
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
     return {
       ok: false,
-      error: 'PLATFORM_LOGIN_METHOD_UNAVAILABLE',
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
     };
   }
-  const descriptor = credential && typeof credential === 'object'
-    ? Object.getOwnPropertyDescriptor(credential, 'cookie')
-    : null;
-  if (!descriptor || typeof descriptor.value !== 'string') {
+  if (!credential || typeof credential !== 'object') {
     return { ok: false, error: 'PLATFORM_CREDENTIAL_INVALID' };
   }
-  return commitLoginWindowCredential(provider, {
-    ok: true,
-    cookie: descriptor.value,
+  if (provider === 'spotify') {
+    return commitPlatformCredential(provider, 'pkce', credential);
+  }
+  const token = Object.getOwnPropertyDescriptor(credential, 'token');
+  if (provider === 'qishui' && token && typeof token.value === 'string') {
+    return commitPlatformCredential(provider, 'token', {
+      token: token.value,
+    });
+  }
+  const cookie = Object.getOwnPropertyDescriptor(credential, 'cookie');
+  if (!cookie || typeof cookie.value !== 'string') {
+    return { ok: false, error: 'PLATFORM_CREDENTIAL_INVALID' };
+  }
+  return commitPlatformCredential(provider, 'cookie', {
+    cookie: cookie.value,
   });
 });
 
 handleIpc('mineradio-credential-clear', async (_event, provider) => {
   if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
-  if (provider !== 'netease' && provider !== 'qq') {
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
     return {
       ok: false,
-      error: 'PLATFORM_LOGIN_METHOD_UNAVAILABLE',
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
     };
   }
   return clearServerCredential(provider);
@@ -1661,9 +1718,28 @@ handleIpc('mineradio-local-file-read-data-url', async (_event, filePath) => {
   }
 });
 
+handleIpc('platform-music-open-login', async (event, provider, options) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    provider,
+    options,
+  );
+});
+
+handleIpc('platform-music-clear-login', async (_event, provider) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    return { ok: false, error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN' };
+  }
+  return clearPlatformMusicLoginSession(provider);
+});
+
 handleIpc('netease-music-open-login', async (event) => {
-  const capture = await openNeteaseMusicLoginWindow(getSenderWindow(event));
-  return commitLoginWindowCredential('netease', capture);
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    'netease',
+  );
 });
 
 handleIpc('netease-music-clear-login', async () => {
@@ -1671,8 +1747,10 @@ handleIpc('netease-music-clear-login', async () => {
 });
 
 handleIpc('qq-music-open-login', async (event) => {
-  const capture = await openQQMusicLoginWindow(getSenderWindow(event));
-  return commitLoginWindowCredential('qq', capture);
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    'qq',
+  );
 });
 
 handleIpc('qq-music-clear-login', async () => {
