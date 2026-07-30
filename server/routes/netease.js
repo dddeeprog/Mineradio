@@ -6,6 +6,26 @@ function requireFunction(deps, name) {
   return fn;
 }
 
+function requireLibrary(deps) {
+  const library = deps.neteaseLibrary;
+  const methods = [
+    'createComment',
+    'getAlbumDetail',
+    'setAlbumCollected',
+    'setCommentLiked',
+    'setPlaylistSubscribed',
+  ];
+  if (!library || typeof library !== 'object') {
+    throw new TypeError('neteaseLibrary is required');
+  }
+  for (const method of methods) {
+    if (typeof library[method] !== 'function') {
+      throw new TypeError(`neteaseLibrary.${method} is required`);
+    }
+  }
+  return library;
+}
+
 function createNeteaseRoutes(deps) {
   deps = deps || {};
   const sendJSON = requireFunction(deps, 'sendJSON');
@@ -46,9 +66,48 @@ function createNeteaseRoutes(deps) {
   const playlistDetail = deps.playlist_detail;
   const normalizeApiCode = requireFunction(deps, 'normalizeApiCode');
   const normalizeApiMessage = requireFunction(deps, 'normalizeApiMessage');
+  const neteaseLibrary = requireLibrary(deps);
+  const invalidateAccountCache = requireFunction(deps, 'invalidateAccountCache');
 
   function cookie() {
     return getUserCookie() || '';
+  }
+
+  function requireMethod(req, res, method) {
+    if (String(req && req.method || '').toUpperCase() === method) return true;
+    sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+    return false;
+  }
+
+  async function readBodyObject(req) {
+    const body = await readRequestBody(req);
+    return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  }
+
+  function sendLibraryError(res, error, fallback) {
+    const code = error
+      && typeof error.code === 'string'
+      && /^NETEASE_[A-Z0-9_]+$/.test(error.code)
+      ? error.code
+      : fallback;
+    const status = error && Number.isInteger(error.status)
+      && error.status >= 400
+      && error.status <= 599
+      ? error.status
+      : 500;
+    sendJSON(res, {
+      provider: 'netease',
+      success: false,
+      error: code,
+    }, status);
+  }
+
+  async function invalidateWrite(info, namespace, key) {
+    try {
+      await invalidateAccountCache(info, { namespace, key });
+    } catch (error) {
+      console.warn('[NeteaseLibrary] account cache invalidation failed:', error.message);
+    }
   }
 
   async function handleSearch(_req, res, url) {
@@ -86,7 +145,7 @@ function createNeteaseRoutes(deps) {
 
   async function handleLoginCookie(req, res) {
     try {
-      const body = await readRequestBody(req);
+      const body = await readBodyObject(req);
       const raw = body.cookie || body.data || body.text || '';
       const normalized = normalizeCookieHeader(raw);
       const obj = parseCookieString(normalized);
@@ -393,7 +452,107 @@ function createNeteaseRoutes(deps) {
     }
   }
 
-  async function handleSongComments(_req, res, url) {
+  async function handleAlbumDetail(req, res, url) {
+    if (!requireMethod(req, res, 'GET')) return;
+    try {
+      const result = await neteaseLibrary.getAlbumDetail({
+        id: url.searchParams.get('id') || url.searchParams.get('albumId'),
+        limit: url.searchParams.get('limit'),
+        cookie: cookie(),
+      });
+      sendJSON(res, result);
+    } catch (error) {
+      sendLibraryError(res, error, 'NETEASE_ALBUM_DETAIL_FAILED');
+    }
+  }
+
+  async function handleAlbumCollect(req, res) {
+    if (!requireMethod(req, res, 'POST')) return;
+    const info = await requireLogin(res);
+    if (!info) return;
+    try {
+      const body = await readBodyObject(req);
+      const result = await neteaseLibrary.setAlbumCollected({
+        id: body.id || body.albumId,
+        collected: body.collected,
+        cookie: cookie(),
+      });
+      await invalidateWrite(info, 'collection', `album:${result.id}`);
+      sendJSON(res, result);
+    } catch (error) {
+      sendLibraryError(res, error, 'NETEASE_ALBUM_COLLECT_FAILED');
+    }
+  }
+
+  async function handlePlaylistSubscribe(req, res) {
+    if (!requireMethod(req, res, 'POST')) return;
+    const info = await requireLogin(res);
+    if (!info) return;
+    try {
+      const body = await readBodyObject(req);
+      const result = await neteaseLibrary.setPlaylistSubscribed({
+        id: body.id || body.playlistId,
+        subscribed: body.subscribed,
+        cookie: cookie(),
+      });
+      await invalidateWrite(info, 'collection', `playlist:${result.id}`);
+      sendJSON(res, result);
+    } catch (error) {
+      sendLibraryError(res, error, 'NETEASE_PLAYLIST_SUBSCRIBE_FAILED');
+    }
+  }
+
+  async function handleCommentLike(req, res) {
+    if (!requireMethod(req, res, 'POST')) return;
+    const info = await requireLogin(res);
+    if (!info) return;
+    try {
+      const body = await readBodyObject(req);
+      const result = await neteaseLibrary.setCommentLiked({
+        id: body.id || body.songId,
+        commentId: body.commentId || body.cid,
+        liked: body.liked,
+        cookie: cookie(),
+      });
+      await invalidateWrite(
+        info,
+        'collection',
+        `comment:${result.id}:${result.commentId}`,
+      );
+      sendJSON(res, result);
+    } catch (error) {
+      sendLibraryError(res, error, 'NETEASE_COMMENT_LIKE_FAILED');
+    }
+  }
+
+  async function handleCommentCreate(req, res) {
+    const info = await requireLogin(res);
+    if (!info) return;
+    try {
+      const body = await readBodyObject(req);
+      const result = await neteaseLibrary.createComment({
+        id: body.id || body.songId,
+        content: body.content || body.text,
+        replyTo: body.replyTo,
+        cookie: cookie(),
+      });
+      await invalidateWrite(info, 'collection', `comments:${result.id}`);
+      sendJSON(res, result);
+    } catch (error) {
+      sendLibraryError(res, error, 'NETEASE_COMMENT_CREATE_FAILED');
+    }
+  }
+
+  async function handleSongComments(req, res, url) {
+    const method = String(req && req.method || 'GET').toUpperCase();
+    if (method === 'POST') {
+      await handleCommentCreate(req, res);
+      return;
+    }
+    if (method !== 'GET') {
+      sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+      return;
+    }
     try {
       const id = url.searchParams.get('id');
       const limitInfo = parseSongCommentLimit(url.searchParams.get('limit'), 20);
@@ -408,13 +567,11 @@ function createNeteaseRoutes(deps) {
         let currentOffset = offset;
         let total = 0;
         let hot = false;
-        let firstBody = null;
         const comments = [];
         const seen = new Set();
         while (true) {
           const r = await commentMusic({ id, limit: pageSize, offset: currentOffset, cookie: cookie(), timestamp: Date.now() });
           const body = r.body || r || {};
-          if (!firstBody) firstBody = body;
           total = Number(body.total || total) || total;
           const hotRaw = currentOffset === 0 && Array.isArray(body.hotComments) ? body.hotComments : [];
           const normalRaw = Array.isArray(body.comments) ? body.comments : [];
@@ -424,7 +581,13 @@ function createNeteaseRoutes(deps) {
           currentOffset += normalRaw.length;
           if (total && currentOffset >= total) break;
         }
-        sendJSON(res, { id, total: total || comments.length, comments, hot, unlimited: true, body: firstBody || {} });
+        sendJSON(res, {
+          id,
+          total: total || comments.length,
+          comments,
+          hot,
+          unlimited: true,
+        });
         return;
       }
 
@@ -433,10 +596,19 @@ function createNeteaseRoutes(deps) {
       const body = r.body || r || {};
       const raw = body.hotComments && offset === 0 ? body.hotComments : (body.comments || []);
       const comments = (raw || []).map(mapNeteaseComment).filter(c => c.content);
-      sendJSON(res, { id, total: body.total || 0, comments, hot: !!(body.hotComments && offset === 0), body });
+      sendJSON(res, {
+        id,
+        total: body.total || 0,
+        comments,
+        hot: !!(body.hotComments && offset === 0),
+      });
     } catch (err) {
       console.error('[SongComments]', err);
-      sendJSON(res, { error: err.message, comments: [] }, 500);
+      sendJSON(res, {
+        provider: 'netease',
+        error: 'NETEASE_COMMENT_READ_FAILED',
+        comments: [],
+      }, 500);
     }
   }
 
@@ -578,8 +750,24 @@ function createNeteaseRoutes(deps) {
       await handleLyric(req, res, url);
       return true;
     }
+    if (pn === '/api/album/detail') {
+      await handleAlbumDetail(req, res, url);
+      return true;
+    }
+    if (pn === '/api/album/collect') {
+      await handleAlbumCollect(req, res);
+      return true;
+    }
+    if (pn === '/api/playlist/subscribe') {
+      await handlePlaylistSubscribe(req, res);
+      return true;
+    }
     if (pn === '/api/song/comments') {
       await handleSongComments(req, res, url);
+      return true;
+    }
+    if (pn === '/api/song/comments/like') {
+      await handleCommentLike(req, res);
       return true;
     }
     if (pn === '/api/artist/detail') {

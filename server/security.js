@@ -3,11 +3,13 @@ const net = require('net');
 const LOOPBACK_HOST = '127.0.0.1';
 
 const GET_ONLY_ROUTES = new Set([
+  '/api/album/detail',
   '/api/platform/capabilities',
   '/api/platform/search',
 ]);
 
 const POST_ONLY_ROUTES = new Set([
+  '/api/album/collect',
   '/api/update/download',
   '/api/update/patch',
   '/api/logout',
@@ -19,7 +21,13 @@ const POST_ONLY_ROUTES = new Set([
   '/api/song/like',
   '/api/playlist/create',
   '/api/playlist/add-song',
+  '/api/playlist/subscribe',
+  '/api/song/comments/like',
   '/api/folia/theme/generate',
+]);
+
+const GET_POST_ROUTES = new Set([
+  '/api/song/comments',
 ]);
 
 function normalizeHost(value) {
@@ -138,7 +146,8 @@ function corsHeadersForOrigin(origin, port) {
 }
 
 function isStateChangingRoute(pathname) {
-  return POST_ONLY_ROUTES.has(String(pathname || ''));
+  pathname = String(pathname || '');
+  return POST_ONLY_ROUTES.has(pathname) || GET_POST_ROUTES.has(pathname);
 }
 
 function isMethodAllowedForRoute(pathname, method) {
@@ -146,6 +155,7 @@ function isMethodAllowedForRoute(pathname, method) {
   method = String(method || '').toUpperCase();
   if (GET_ONLY_ROUTES.has(pathname)) return method === 'GET';
   if (POST_ONLY_ROUTES.has(pathname)) return method === 'POST';
+  if (GET_POST_ROUTES.has(pathname)) return method === 'GET' || method === 'POST';
   return true;
 }
 

@@ -18,6 +18,7 @@ function mapSongRecord(s) {
     artists,
     artistId: artists[0] && artists[0].id,
     album: album.name || '',
+    ...(album.id != null && album.id !== '' ? { albumId: album.id } : {}),
     cover: album.picUrl || album.coverUrl || '',
     duration: s.dt || s.duration || 0,
     fee: s.fee,

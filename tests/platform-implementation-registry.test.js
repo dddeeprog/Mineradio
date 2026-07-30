@@ -97,7 +97,18 @@ test('baseline registry matches the currently wired provider implementations', (
   ]));
 
   assert.deepEqual(available, {
-    netease: ['search', 'playback', 'sourceMatch', 'playlistWrite', 'commentsRead'],
+    netease: [
+      'search',
+      'playback',
+      'sourceMatch',
+      'albumDetail',
+      'albumCollect',
+      'playlistSubscribe',
+      'playlistWrite',
+      'commentsRead',
+      'commentsLike',
+      'commentsCreate',
+    ],
     qq: ['search', 'playback', 'sourceMatch', 'commentsRead'],
     kugou: ['search'],
     qishui: ['search'],

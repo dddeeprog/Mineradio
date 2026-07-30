@@ -1107,6 +1107,11 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .detail-section{margin-top:16px;border-top:1px solid rgba(255,255,255,.07);padding-top:14px}
 .detail-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .detail-section-title{font-size:12px;font-weight:800;letter-spacing:.12em;color:rgba(255,255,255,.64)}
+.detail-section-actions{display:flex;align-items:center;gap:8px}
+.detail-action-toggle{min-height:30px;padding:0 11px;border-radius:8px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.055);color:rgba(255,255,255,.82);font-size:11px;font-weight:650;cursor:pointer;backdrop-filter:blur(16px) saturate(1.16);transition:background .18s,border-color .18s,color .18s,opacity .18s,transform .18s}
+.detail-action-toggle:hover{transform:translateY(-1px);background:rgba(255,255,255,.10);border-color:rgba(var(--fc-accent-rgb),.34)}
+.detail-action-toggle.on{color:rgb(var(--fc-accent-rgb));border-color:rgba(var(--fc-accent-rgb),.42);background:rgba(var(--fc-accent-rgb),.10)}
+.detail-action-toggle.busy{opacity:.52;pointer-events:none}
 .detail-loading,.detail-empty{padding:14px 4px;text-align:center;color:rgba(255,255,255,.34);font-size:11.5px}
 .detail-scroll{max-height:none;overflow:visible;padding-right:0;scrollbar-width:none;-ms-overflow-style:none}
 .detail-scroll::-webkit-scrollbar{width:0;height:0}
@@ -1115,6 +1120,15 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .comment-main,.artist-song-main{min-width:0;flex:1}
 .comment-meta,.artist-song-meta{font-size:10.5px;color:rgba(255,255,255,.38);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comment-text{margin-top:4px;font-size:12px;line-height:1.55;color:rgba(255,255,255,.76);word-break:break-word}
+.detail-comment-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px;margin-bottom:10px}
+.detail-comment-composer textarea{width:100%;min-height:54px;max-height:118px;resize:vertical;box-sizing:border-box;border-radius:8px;border:1px solid rgba(255,255,255,.10);background:rgba(5,6,8,.38);color:rgba(255,255,255,.90);padding:9px 10px;font:inherit;font-size:12px;line-height:1.5;outline:none;backdrop-filter:blur(18px)}
+.detail-comment-composer textarea:focus{border-color:rgba(var(--fc-accent-rgb),.42);box-shadow:0 0 0 2px rgba(var(--fc-accent-rgb),.08)}
+.detail-comment-like{width:46px;height:32px;flex:0 0 auto;align-self:center;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:8px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.035);color:rgba(255,255,255,.48);font-size:10px;cursor:pointer;transition:background .18s,border-color .18s,color .18s,opacity .18s}
+.detail-comment-like span:first-child{font-size:15px;line-height:1}
+.detail-comment-like.on{color:#ff5360;border-color:rgba(255,83,96,.32);background:rgba(255,83,96,.08)}
+.detail-comment-like.busy{opacity:.5;pointer-events:none}
+.pl-detail-subscribe.on{border-color:rgba(var(--fc-accent-rgb),.34);color:rgb(var(--fc-accent-rgb))}
+.pl-detail-subscribe.busy{opacity:.5;pointer-events:none}
 .artist-song-item{align-items:center;cursor:pointer;transition:background .18s,border-color .18s,transform .18s,box-shadow .18s}
 .artist-song-item:hover{background:rgba(255,255,255,.075);border-color:rgba(244,210,138,.25);transform:translateY(-1px);box-shadow:0 12px 32px rgba(0,0,0,.20)}
 .artist-song-rank{width:26px;color:rgba(244,210,138,.62);font-size:11px;font-variant-numeric:tabular-nums;text-align:center}
@@ -1141,6 +1155,8 @@ body.login-guide-active #login-guide-canvas{opacity:1}
   .detail-k{font-size:10.5px}
   .artist-song-actions{gap:6px}
   .artist-song-action{width:31px;height:31px;border-radius:9px}
+  .detail-comment-composer{grid-template-columns:1fr}
+  .detail-comment-composer .detail-action-toggle{justify-self:end}
 }
 .local-beat-modal{width:min(460px,90vw);max-width:min(460px,90vw);padding:28px;text-align:left}
 .local-beat-modal h2{text-align:center;margin-bottom:14px}

@@ -18,7 +18,12 @@ const {
   logout,
   user_account,
   user_playlist,
+  album,
+  album_detail_dynamic,
+  album_sub,
   comment_music,
+  comment,
+  comment_like,
   artist_detail,
   artist_top_song,
   artist_songs,
@@ -28,6 +33,7 @@ const {
   playlist_tracks,
   playlist_track_add,
   playlist_create,
+  playlist_subscribe,
   playlist_detail,
   playlist_track_all,
   personalized,
@@ -65,7 +71,10 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
-const { createAccountScopedCache } = require('./server/platform/account-cache');
+const {
+  createAccountFingerprint,
+  createAccountScopedCache,
+} = require('./server/platform/account-cache');
 const { createAccountContext } = require('./server/platform/account-context');
 const { createAccountLifecycle } = require('./server/platform/account-lifecycle');
 const {
@@ -77,6 +86,9 @@ const { createKugouSearchAdapter } = require('./server/platform/providers/kugou-
 const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
 const { createQishuiSearchAdapter } = require('./server/platform/providers/qishui-search');
 const { createSpotifySearchAdapter } = require('./server/platform/providers/spotify-search');
+const {
+  createNeteaseLibraryAdapter,
+} = require('./server/platform/providers/netease-library');
 const { createAppStatusRoutes } = require('./server/routes/app-status');
 const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
@@ -201,6 +213,18 @@ function getUserCookie() {
 function getQQCookie() {
   const value = providerCredential('qq').cookie;
   return typeof value === 'string' ? value : '';
+}
+
+function invalidateNeteaseAccountCache(info) {
+  const accountId = info && (info.userId || info.accountId);
+  const credential = getUserCookie();
+  if (!accountId || !credential) return 0;
+  const scope = createAccountFingerprint({
+    provider: 'netease',
+    accountId,
+    credential,
+  });
+  return accountScopedCache.clearScope(scope);
 }
 
 // ---------- 工具 ----------
@@ -2223,6 +2247,7 @@ function mapNeteaseComment(raw) {
     id: raw.commentId,
     content: raw.content || '',
     likedCount: raw.likedCount || 0,
+    liked: raw.liked === true,
     time: raw.time || 0,
     user: raw.user ? { id: raw.user.userId, nickname: raw.user.nickname || '', avatar: raw.user.avatarUrl || '' } : null,
   };
@@ -2951,6 +2976,16 @@ const runPlatformSearch = createSearchAggregator({
   providers: platformSearchAdapters,
   timeoutMs: 8000,
 });
+const neteaseLibrary = createNeteaseLibraryAdapter({
+  album,
+  albumDetailDynamic: album_detail_dynamic,
+  albumSub: album_sub,
+  playlistSubscribe: playlist_subscribe,
+  commentLike: comment_like,
+  // In NeteaseCloudMusicApi v4 `comment` writes; `comment_new` reads.
+  commentCreate: comment,
+  mapSongRecord,
+});
 const platformSearchRoutes = createPlatformSearchRoutes({
   sendJSON,
   search: runPlatformSearch,
@@ -3087,6 +3122,8 @@ const neteaseRoutes = createNeteaseRoutes({
   playlist_detail,
   normalizeApiCode,
   normalizeApiMessage,
+  neteaseLibrary,
+  invalidateAccountCache: invalidateNeteaseAccountCache,
 });
 
 // ====================================================================

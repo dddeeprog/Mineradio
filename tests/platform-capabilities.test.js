@@ -128,7 +128,7 @@ test('default availability only enables implemented capabilities and preserves l
     Object.entries(netease.availability)
       .filter(([, available]) => available)
       .map(([capability]) => capability),
-    ['search', 'playback', 'sourceMatch', 'commentsRead'],
+    ['search', 'playback', 'sourceMatch', 'albumDetail', 'commentsRead'],
   );
   assert.deepEqual(
     Object.entries(qq.availability)
@@ -140,7 +140,11 @@ test('default availability only enables implemented capabilities and preserves l
   const loggedIn = providerCapability(createCapabilitySnapshot({
     netease: { loggedIn: true },
   }), 'netease');
+  assert.equal(loggedIn.availability.albumCollect, true);
+  assert.equal(loggedIn.availability.playlistSubscribe, true);
   assert.equal(loggedIn.availability.playlistWrite, true);
+  assert.equal(loggedIn.availability.commentsLike, true);
+  assert.equal(loggedIn.availability.commentsCreate, true);
   assert.equal(loggedIn.availability.recentPlayReport, false);
   assert.equal(loggedIn.availability.listenDurationReport, false);
 });
@@ -209,13 +213,8 @@ test('metadata-only providers never advertise playback, matching or writes even 
   }
 });
 
-test('plain options cannot enable unwired Netease operations', () => {
+test('plain options cannot enable remaining unwired Netease reports', () => {
   const unwired = [
-    'albumDetail',
-    'albumCollect',
-    'playlistSubscribe',
-    'commentsLike',
-    'commentsCreate',
     'recentPlayReport',
     'listenDurationReport',
   ];
@@ -486,7 +485,7 @@ test('ignores unknown platforms and unknown capabilities', () => {
   assert.equal(Object.hasOwn(netease.availability, 'imaginaryWrite'), false);
   assert.equal(netease.availability.search, true);
   assert.equal(netease.availability.playback, true);
-  assert.equal(netease.availability.albumDetail, false);
+  assert.equal(netease.availability.albumDetail, true);
 });
 
 test('returns fresh deep copies for snapshots and provider lookups', () => {

@@ -33,6 +33,31 @@ test('state changing routes require POST', () => {
   assert.equal(isMethodAllowedForRoute('/api/search', 'GET'), true);
 });
 
+test('netease album and community routes enforce their exact methods', () => {
+  assert.equal(isMethodAllowedForRoute('/api/album/detail', 'GET'), true);
+  assert.equal(isMethodAllowedForRoute('/api/album/detail', 'POST'), false);
+  for (const pathname of [
+    '/api/album/collect',
+    '/api/playlist/subscribe',
+    '/api/song/comments/like',
+  ]) {
+    assert.equal(isStateChangingRoute(pathname), true);
+    assert.equal(isMethodAllowedForRoute(pathname, 'POST'), true);
+    assert.equal(isMethodAllowedForRoute(pathname, 'GET'), false);
+  }
+  assert.equal(isStateChangingRoute('/api/song/comments'), true);
+  assert.equal(isMethodAllowedForRoute('/api/song/comments', 'GET'), true);
+  assert.equal(isMethodAllowedForRoute('/api/song/comments', 'POST'), true);
+  assert.equal(isMethodAllowedForRoute('/api/song/comments', 'DELETE'), false);
+});
+
+test('write-route CSRF boundary rejects non-loopback and mismatched origins', () => {
+  assert.equal(isAllowedCorsOrigin('http://127.0.0.1:34567', 34567), true);
+  assert.equal(isAllowedCorsOrigin('http://localhost:34567', 34567), true);
+  assert.equal(isAllowedCorsOrigin('https://music.example', 34567), false);
+  assert.equal(isAllowedCorsOrigin('http://127.0.0.1:45678', 34567), false);
+});
+
 test('platform capability route is GET-only', () => {
   assert.equal(
     isMethodAllowedForRoute('/api/platform/capabilities', 'GET'),

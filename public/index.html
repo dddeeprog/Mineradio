@@ -21,6 +21,7 @@
 <script src="platform-search-ui.js"></script>
 <script src="platform-login-state.js"></script>
 <script src="platform-login-ui.js"></script>
+<script src="platform-actions-state.js"></script>
 <script src="folia-theme-state.js"></script>
 <script src="folia-fx-state.js"></script>
 <script src="folia-native-lyric-state.js"></script>
@@ -17488,6 +17489,13 @@ function currentArtistNames(song) {
 }
 var trackDetailSeq = 0;
 var detailArtistSongs = [];
+var detailAlbumSongs = [];
+var detailAlbumContext = null;
+var detailCommentSong = null;
+var detailRenderedComments = [];
+var platformActionStore = window.MineradioPlatformActions
+  ? window.MineradioPlatformActions.createOptimisticActionStore()
+  : null;
 function normalizeArtistNameForMatch(name) {
   return String(name || '')
     .toLowerCase()
@@ -17524,6 +17532,42 @@ function currentQQArtistMid(song) {
   }
   return '';
 }
+function currentAlbumId(song) {
+  if (!song || songProviderKey(song) !== 'netease') return '';
+  var value = song.albumId || song.album_id || '';
+  return /^\d+$/.test(String(value)) ? String(value) : '';
+}
+function platformActionAccess(provider, capability) {
+  if (!window.MineradioPlatformActions) {
+    return { visible: false, enabled: false, loginRequired: false };
+  }
+  return window.MineradioPlatformActions.actionAvailability(
+    platformLoginCapabilitySnapshot,
+    provider,
+    capability
+  );
+}
+function ensurePlatformAction(provider, capability) {
+  var access = platformActionAccess(provider, capability);
+  if (access.enabled) return true;
+  if (access.loginRequired) {
+    showToast('登录后可使用' + platformMeta(provider).label + '同步');
+    showLoginModal({ provider: provider, source: capability });
+  }
+  return false;
+}
+function platformActionValue(key, fallback) {
+  if (!platformActionStore) return fallback;
+  var value;
+  try { value = platformActionStore.value(key); }
+  catch (e) { value = undefined; }
+  return value === undefined ? fallback : value;
+}
+function platformActionBusy(key) {
+  if (!platformActionStore) return false;
+  try { return platformActionStore.busy(key); }
+  catch (e) { return false; }
+}
 function commentTimeLabel(ms) {
   var t = Number(ms) || 0;
   if (!t) return '';
@@ -17533,17 +17577,126 @@ function commentTimeLabel(ms) {
     return '';
   }
 }
-function renderDetailComments(comments) {
+function renderDetailComments(comments, song) {
   if (!comments || !comments.length) return '<div class="detail-empty">暂无评论</div>';
-  return '<div class="detail-scroll">' + comments.map(function(c){
+  var canLike = isCloudSong(song)
+    ? platformActionAccess('netease', 'commentsLike')
+    : { visible: false };
+  return '<div class="detail-scroll">' + comments.map(function(c, index){
     var user = c.user || {};
     var avatar = user.avatar ? coverUrlWithSize(user.avatar, 64) : '';
+    var actionKey = 'netease-comment:' + String(song && song.id || '') + ':' + String(c.id || index);
+    var commentCanWrite = canLike.visible && /^\d+$/.test(String(c.id || ''));
+    if (commentCanWrite && platformActionStore && !platformActionBusy(actionKey)) {
+      platformActionStore.set(actionKey, c.liked === true);
+    }
+    var liked = platformActionValue(actionKey, c.liked === true);
+    var likeButton = commentCanWrite
+      ? '<button class="detail-comment-like' + (liked ? ' on' : '') + (platformActionBusy(actionKey) ? ' busy' : '') + '" type="button" onclick="toggleDetailCommentLike(' + index + ')" aria-label="' + (liked ? '取消点赞' : '点赞评论') + '" title="' + (liked ? '取消点赞' : '点赞评论') + '">' +
+          '<span aria-hidden="true">' + (liked ? '♥' : '♡') + '</span><span>' + String(Math.max(0, Number(c.likedCount) || 0)) + '</span>' +
+        '</button>'
+      : '';
     return '<div class="comment-item">' +
       (avatar ? '<img class="comment-avatar" src="' + avatar + '" alt="">' : '<div class="comment-avatar"></div>') +
       '<div class="comment-main"><div class="comment-meta">' + escHtml(user.nickname || '音乐用户') + (c.likedCount ? (' · ' + c.likedCount + ' 赞') : '') + (c.time ? (' · ' + escHtml(commentTimeLabel(c.time))) : '') + '</div>' +
       '<div class="comment-text">' + escHtml(c.content || '') + '</div></div>' +
+      likeButton +
     '</div>';
   }).join('') + '</div>';
+}
+function renderDetailCommentComposer(song) {
+  var access = platformActionAccess('netease', 'commentsCreate');
+  if (!song || !isCloudSong(song) || !access.visible) return '';
+  var key = 'comment-create:' + String(song.id || '');
+  return '<div class="detail-comment-composer">' +
+    '<textarea id="detail-comment-input" maxlength="500" rows="2" placeholder="写下这一刻的感受"></textarea>' +
+    '<button class="detail-action-toggle' + (platformActionBusy(key) ? ' busy' : '') + '" type="button" onclick="submitDetailComment()">' +
+      (access.loginRequired ? '登录后评论' : (platformActionBusy(key) ? '发布中' : '发布评论')) +
+    '</button>' +
+  '</div>';
+}
+function renderDetailCommentSection() {
+  var target = document.getElementById('song-comments');
+  if (!target || !detailCommentSong) return;
+  target.innerHTML = renderDetailCommentComposer(detailCommentSong)
+    + renderDetailComments(detailRenderedComments, detailCommentSong);
+  bindTrackDetailScrollers();
+}
+async function toggleDetailCommentLike(index) {
+  var song = detailCommentSong;
+  var comment = detailRenderedComments[index];
+  if (!song || !comment || !ensurePlatformAction('netease', 'commentsLike')) return;
+  var key = 'netease-comment:' + String(song.id) + ':' + String(comment.id || index);
+  var previous = comment.liked === true;
+  var next = !previous;
+  var token = platformActionStore && platformActionStore.begin(key, next);
+  if (platformActionStore && !token) return;
+  var previousCount = Math.max(0, Number(comment.likedCount) || 0);
+  comment.liked = next;
+  comment.likedCount = Math.max(0, previousCount + (next ? 1 : -1));
+  renderDetailCommentSection();
+  try {
+    var result = await apiJson('/api/song/comments/like', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: String(song.id),
+        commentId: String(comment.id),
+        liked: next
+      })
+    });
+    if (!result || result.error || result.success === false) {
+      throw new Error(result && result.error || 'COMMENT_LIKE_FAILED');
+    }
+    if (token) platformActionStore.commit(token, next);
+  } catch (error) {
+    if (token) platformActionStore.rollback(token);
+    comment.liked = previous;
+    comment.likedCount = previousCount;
+    showToast('评论点赞失败');
+  }
+  renderDetailCommentSection();
+}
+async function submitDetailComment() {
+  var song = detailCommentSong;
+  if (!song || !ensurePlatformAction('netease', 'commentsCreate')) return;
+  var input = document.getElementById('detail-comment-input');
+  var content = '';
+  try {
+    content = window.MineradioPlatformActions.normalizeCommentContent(input && input.value);
+  } catch (error) {
+    showToast('评论需为 1 到 500 个字符');
+    return;
+  }
+  var key = 'comment-create:' + String(song.id);
+  var token = platformActionStore && platformActionStore.begin(key, true);
+  if (platformActionStore && !token) return;
+  renderDetailCommentSection();
+  var nextInput = document.getElementById('detail-comment-input');
+  if (nextInput) nextInput.value = content;
+  try {
+    var result = await apiJson('/api/song/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: String(song.id), content: content })
+    });
+    if (!result || result.error || result.success === false) {
+      throw new Error(result && result.error || 'COMMENT_CREATE_FAILED');
+    }
+    var created = result.comment || { id: Date.now(), content: content };
+    detailRenderedComments.unshift(created);
+    if (token) platformActionStore.commit(token, false);
+    renderDetailCommentSection();
+    var cleared = document.getElementById('detail-comment-input');
+    if (cleared) cleared.value = '';
+    showToast('评论已发布');
+  } catch (error) {
+    if (token) platformActionStore.rollback(token);
+    renderDetailCommentSection();
+    var restored = document.getElementById('detail-comment-input');
+    if (restored) restored.value = content;
+    showToast('评论发布失败');
+  }
 }
 function commentBarrageSongKeySafe(song) {
   var api = commentBarrageStateApi();
@@ -17880,13 +18033,101 @@ function queueArtistDetailSongNext(i) {
   if (!song) return;
   queueDetailSongNext(song);
 }
+function albumActionKey(albumId) {
+  return 'album:' + String(albumId || '');
+}
+function renderAlbumCollectionButton() {
+  var context = detailAlbumContext || {};
+  var access = platformActionAccess('netease', 'albumCollect');
+  if (!context.id || !context.loaded || !access.visible) return '';
+  var key = albumActionKey(context.id);
+  var collected = platformActionValue(key, context.collected === true);
+  return '<button id="album-collection-toggle" class="detail-action-toggle' + (collected ? ' on' : '') + (platformActionBusy(key) ? ' busy' : '') + '" type="button" onclick="toggleAlbumCollection()">' +
+    (access.loginRequired ? '登录后收藏' : (collected ? '已收藏专辑' : '收藏专辑')) +
+  '</button>';
+}
+function syncAlbumCollectionButton() {
+  var button = document.getElementById('album-collection-toggle');
+  if (!button || !detailAlbumContext) return;
+  var replacement = document.createElement('div');
+  replacement.innerHTML = renderAlbumCollectionButton();
+  if (replacement.firstElementChild) button.replaceWith(replacement.firstElementChild);
+}
+async function toggleAlbumCollection() {
+  var context = detailAlbumContext;
+  if (!context || !context.id || !ensurePlatformAction('netease', 'albumCollect')) return;
+  var key = albumActionKey(context.id);
+  var previous = platformActionValue(key, context.collected === true);
+  var next = !previous;
+  var token = platformActionStore && platformActionStore.begin(key, next);
+  if (platformActionStore && !token) return;
+  context.collected = next;
+  syncAlbumCollectionButton();
+  try {
+    var result = await apiJson('/api/album/collect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: String(context.id), collected: next })
+    });
+    if (!result || result.error || result.success === false) {
+      throw new Error(result && result.error || 'ALBUM_COLLECT_FAILED');
+    }
+    if (token) platformActionStore.commit(token, next);
+    showToast(next ? '专辑已收藏' : '已取消收藏专辑');
+  } catch (error) {
+    if (token) platformActionStore.rollback(token);
+    context.collected = previous;
+    showToast('专辑收藏操作失败');
+  }
+  syncAlbumCollectionButton();
+}
+function renderAlbumSongList(songs) {
+  detailAlbumSongs = (songs || []).map(cloneSong);
+  if (!detailAlbumSongs.length) return '<div class="detail-empty">暂无专辑曲目</div>';
+  return '<div class="detail-scroll">' + detailAlbumSongs.map(function(song, index){
+    var cover = songCoverSrc(song, 80);
+    var coverHtml = cover
+      ? '<img class="artist-song-cover" src="' + escHtml(cover) + '" alt="" onerror="this.style.opacity=0.18">'
+      : '<div class="artist-song-cover"></div>';
+    return '<div class="artist-song-item" onclick="playAlbumDetailSong(' + index + ')">' +
+      '<div class="artist-song-rank">' + String(index + 1).padStart(2, '0') + '</div>' +
+      coverHtml +
+      '<div class="artist-song-main"><div class="artist-song-name">' + escHtml(song.name || '') + '</div>' +
+      '<div class="artist-song-meta">' + escHtml((song.artist || '未知歌手') + (song.duration ? (' · ' + songDurationLabel(song)) : '')) + '</div></div>' +
+      '<div class="artist-song-actions">' +
+        '<button class="artist-song-action collect" type="button" title="收藏到歌单" aria-label="收藏到歌单" onclick="event.stopPropagation();collectAlbumDetailSong(' + index + ')">' + artistCollectTrayIconSvg() + '</button>' +
+        '<button class="artist-song-action next" type="button" title="下一首播放" aria-label="下一首播放" onclick="event.stopPropagation();queueAlbumDetailSongNext(' + index + ')">' + artistNextPlusIconSvg() + '</button>' +
+      '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+function playAlbumDetailSong(index) {
+  if (!detailAlbumSongs[index]) return;
+  playQueue = detailAlbumSongs.map(cloneSong);
+  currentIdx = index;
+  safeRenderQueuePanel('album-detail-play');
+  safeShelfRebuild('album-detail-play', true);
+  closeTrackDetailModal();
+  playQueueAt(index).catch(function(error){ console.warn('[AlbumDetailPlay]', error); });
+}
+function collectAlbumDetailSong(index) {
+  if (detailAlbumSongs[index]) collectDetailSong(detailAlbumSongs[index]);
+}
+function queueAlbumDetailSongNext(index) {
+  if (detailAlbumSongs[index]) queueDetailSongNext(detailAlbumSongs[index]);
+}
 function bindTrackDetailScrollers() {
   var body = document.getElementById('track-detail-body');
   bindSmoothWheelScroll(body);
   if (body) body.querySelectorAll('.detail-scroll').forEach(bindSmoothWheelScroll);
 }
 function closeTrackDetailModal() {
-  closeGsapModal(document.getElementById('track-detail-modal'));
+  closeGsapModal(document.getElementById('track-detail-modal'), function(){
+    detailCommentSong = null;
+    detailRenderedComments = [];
+    detailAlbumSongs = [];
+    detailAlbumContext = null;
+  });
 }
 function openTrackDetailModal(type, songOverride) {
   var song = songOverride || currentCoverSong();
@@ -17900,7 +18141,78 @@ function openTrackDetailModal(type, songOverride) {
   var title = song.name || '当前歌曲';
   var artists = currentArtistNames(song);
   var seq = ++trackDetailSeq;
-  if (type === 'artist') {
+  detailCommentSong = type === 'song' ? song : null;
+  detailRenderedComments = [];
+  if (type === 'album') {
+    var albumId = currentAlbumId(song);
+    var albumAccess = platformActionAccess('netease', 'albumDetail');
+    var albumUrl = albumAccess.visible && albumId
+      ? ('/api/album/detail?id=' + encodeURIComponent(albumId) + '&limit=120')
+      : '';
+    detailAlbumContext = {
+      id: albumId,
+      name: song.album || '未知专辑',
+      artist: song.artist || '未知歌手',
+      cover: cover,
+      collected: false,
+      loaded: false
+    };
+    heading.textContent = '专辑详情';
+    body.innerHTML =
+      '<div class="detail-hero">' + coverHtml +
+        '<div style="min-width:0;flex:1"><div id="album-detail-title" class="detail-title">' + escHtml(detailAlbumContext.name) + '</div>' +
+        '<div id="album-detail-sub" class="detail-sub">' + escHtml(detailAlbumContext.artist) + ' · 网易云音乐</div></div>' +
+      '</div>' +
+      '<div class="detail-grid">' +
+        detailRow('当前歌曲', title) +
+        detailRow('专辑', detailAlbumContext.name) +
+        detailRow('歌手', detailAlbumContext.artist) +
+        detailRow('来源', '网易云音乐') +
+      '</div>' +
+      '<div class="detail-section"><div class="detail-section-head"><div class="detail-section-title">专辑曲目</div><div class="detail-section-actions">' + renderAlbumCollectionButton() + '</div></div>' +
+        '<div id="album-song-list">' + (albumUrl
+          ? '<div class="detail-loading">正在载入专辑曲目...</div>'
+          : '<div class="detail-empty">当前歌曲缺少可用的网易云专辑详情</div>') +
+        '</div>' +
+      '</div>';
+    if (albumUrl) {
+      apiJson(albumUrl).then(function(result){
+        if (seq !== trackDetailSeq) return;
+        var target = document.getElementById('album-song-list');
+        if (!result || result.error || !result.album) {
+          if (target) target.innerHTML = '<div class="detail-empty">专辑详情加载失败</div>';
+          return;
+        }
+        detailAlbumContext = {
+          id: String(result.album.id || albumId),
+          name: result.album.name || detailAlbumContext.name,
+          artist: result.album.artist || detailAlbumContext.artist,
+          cover: result.album.cover || cover,
+          collected: result.album.collected === true,
+          loaded: true
+        };
+        var actionKey = albumActionKey(detailAlbumContext.id);
+        if (platformActionStore && !platformActionBusy(actionKey)) {
+          platformActionStore.set(actionKey, detailAlbumContext.collected);
+        }
+        var titleEl = document.getElementById('album-detail-title');
+        var subEl = document.getElementById('album-detail-sub');
+        if (titleEl) titleEl.textContent = detailAlbumContext.name;
+        if (subEl) subEl.textContent = detailAlbumContext.artist + ' · 网易云音乐';
+        var detailCover = body.querySelector('.detail-cover');
+        if (detailCover && detailAlbumContext.cover && detailCover.tagName === 'IMG') {
+          detailCover.src = coverUrlWithSize(detailAlbumContext.cover, 180);
+        }
+        if (target) target.innerHTML = renderAlbumSongList(result.songs || []);
+        var actions = body.querySelector('.detail-section-actions');
+        if (actions) actions.innerHTML = renderAlbumCollectionButton();
+        bindTrackDetailScrollers();
+      }).catch(function(){
+        var target = document.getElementById('album-song-list');
+        if (seq === trackDetailSeq && target) target.innerHTML = '<div class="detail-empty">专辑详情加载失败</div>';
+      });
+    }
+  } else if (type === 'artist') {
     var artistId = currentArtistId(song);
     var qqArtistMid = currentQQArtistMid(song);
     var artistDetailUrl = artistId
@@ -17965,6 +18277,11 @@ function openTrackDetailModal(type, songOverride) {
     var detailCanLoadComments = isCloudSong(song) || detailIsQQ;
     var detailCommentTitle = detailIsQQ ? 'QQ 音乐评论' : '网易云评论';
     var detailEmptyText = detailIsQQ ? '当前 QQ 歌曲暂无评论' : '本地文件暂无网易云评论';
+    var songAlbumId = currentAlbumId(song);
+    var songAlbumAccess = platformActionAccess('netease', 'albumDetail');
+    var albumDetailButton = songAlbumId && songAlbumAccess.visible
+      ? '<button class="detail-action-toggle" type="button" onclick="openTrackDetailModal(\'album\',detailCommentSong)">查看专辑</button>'
+      : '';
     body.innerHTML =
       '<div class="detail-hero">' + coverHtml +
         '<div style="min-width:0;flex:1"><div class="detail-title">' + escHtml(title) + '</div>' +
@@ -17983,6 +18300,7 @@ function openTrackDetailModal(type, songOverride) {
         (isSongLiked(song) ? '<span class="detail-chip">红心喜欢</span>' : '') +
         (getCustomCoverForSong(song) ? '<span class="detail-chip">自定义封面</span>' : '') +
         (hasCustomLyricForSong(song) ? '<span class="detail-chip">自定义歌词</span>' : '') +
+        albumDetailButton +
       '</div>' +
       '<div class="detail-section"><div class="detail-section-head"><div class="detail-section-title">' + detailCommentTitle + '</div></div><div id="song-comments">' + (detailCanLoadComments ? '<div class="detail-loading">正在载入评论...</div>' : '<div class="detail-empty">' + detailEmptyText + '</div>') + '</div></div>';
     if (detailCanLoadComments) {
@@ -17992,7 +18310,16 @@ function openTrackDetailModal(type, songOverride) {
       apiJson(commentUrl).then(function(r){
         if (seq !== trackDetailSeq) return;
         var target = document.getElementById('song-comments');
-        if (target) target.innerHTML = r && !r.error ? renderDetailComments(r.comments || []) : '<div class="detail-empty">评论加载失败</div>';
+        if (r && !r.error) {
+          detailRenderedComments = (r.comments || []).slice();
+          if (detailIsQQ) {
+            if (target) target.innerHTML = renderDetailComments(detailRenderedComments, song);
+          } else {
+            renderDetailCommentSection();
+          }
+        } else if (target) {
+          target.innerHTML = '<div class="detail-empty">评论加载失败</div>';
+        }
         bindTrackDetailScrollers();
       }).catch(function(){
         var target = document.getElementById('song-comments');
@@ -22456,6 +22783,51 @@ function playlistPanelKey(provider, id) {
 function playlistPanelProviderId(provider, id) {
   return provider === 'qq' ? ('qq:' + id) : id;
 }
+function playlistSubscriptionKey(id) {
+  return 'playlist:' + String(id || '');
+}
+function renderPlaylistSubscriptionButton(pl, provider) {
+  if (provider !== 'netease' || !pl || (!pl.subscribed && !pl.__subscriptionTouched)) return '';
+  var access = platformActionAccess('netease', 'playlistSubscribe');
+  if (!access.visible) return '';
+  var key = playlistSubscriptionKey(pl.id);
+  if (platformActionStore && !platformActionBusy(key)) {
+    platformActionStore.set(key, pl.subscribed === true);
+  }
+  var subscribed = platformActionValue(key, pl.subscribed === true);
+  return '<button class="fx-mini-btn ghost pl-detail-subscribe' + (subscribed ? ' on' : '') + (platformActionBusy(key) ? ' busy' : '') + '" type="button" data-pl-subscribe="1">' +
+    (access.loginRequired ? '登录后管理' : (subscribed ? '取消订阅' : '订阅歌单')) +
+  '</button>';
+}
+async function togglePlaylistPanelSubscription() {
+  var pl = playlistPanelDetailState && playlistPanelDetailState.playlist;
+  if (!pl || (pl.provider === 'qq') || !ensurePlatformAction('netease', 'playlistSubscribe')) return;
+  var key = playlistSubscriptionKey(pl.id);
+  var previous = platformActionValue(key, pl.subscribed === true);
+  var next = !previous;
+  var token = platformActionStore && platformActionStore.begin(key, next);
+  if (platformActionStore && !token) return;
+  pl.subscribed = next;
+  pl.__subscriptionTouched = true;
+  renderPlaylistPanelDetailState();
+  try {
+    var result = await apiJson('/api/playlist/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: String(pl.id), subscribed: next })
+    });
+    if (!result || result.error || result.success === false) {
+      throw new Error(result && result.error || 'PLAYLIST_SUBSCRIBE_FAILED');
+    }
+    if (token) platformActionStore.commit(token, next);
+    showToast(next ? '歌单已订阅' : '已取消歌单订阅');
+  } catch (error) {
+    if (token) platformActionStore.rollback(token);
+    pl.subscribed = previous;
+    showToast('歌单订阅操作失败');
+  }
+  renderPlaylistPanelDetailState();
+}
 function playlistPanelDetailHtml(pl, provider) {
   var key = playlistPanelKey(provider, pl && pl.id);
   if (playlistPanelDetailState.key !== key) return '';
@@ -22486,7 +22858,7 @@ function playlistPanelDetailHtml(pl, provider) {
   return '<div class="pl-inline-detail" data-pl-detail="' + escHtml(key) + '">' +
     '<div class="pl-detail-sticky">' +
       '<div class="pl-detail-head">' + img + '<div style="flex:1;min-width:0"><div class="pl-detail-title">' + escHtml(pl.name || '歌单详情') + '</div><div class="pl-detail-sub">' + escHtml((pl.trackCount || tracks.length || 0) + ' 首 · ' + (pl.creator || (provider === 'qq' ? 'QQ 音乐' : '网易云音乐'))) + '</div></div><div class="pl-detail-count">' + (loading ? '载入中' : (renderLimit + '/' + tracks.length)) + '</div></div>' +
-      '<div class="pl-detail-actions"><button class="pl-detail-play" type="button" data-pl-detail-play="' + escHtml(key) + '"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放歌单</button><button class="fx-mini-btn ghost pl-detail-top-btn" type="button" data-pl-detail-top="1">回到顶部</button></div>' +
+      '<div class="pl-detail-actions"><button class="pl-detail-play" type="button" data-pl-detail-play="' + escHtml(key) + '"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放歌单</button>' + renderPlaylistSubscriptionButton(pl, provider) + '<button class="fx-mini-btn ghost pl-detail-top-btn" type="button" data-pl-detail-top="1">回到顶部</button></div>' +
     '</div>' +
     '<div class="pl-detail-list">' + rows + '</div>' +
   '</div>';
@@ -22731,6 +23103,13 @@ document.getElementById('pl-list').addEventListener('click', function(e){
     e.preventDefault();
     e.stopPropagation();
     playPlaylistPanelDetail();
+    return;
+  }
+  var subscribeDetail = e.target && e.target.closest ? e.target.closest('[data-pl-subscribe]') : null;
+  if (subscribeDetail) {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePlaylistPanelSubscription();
     return;
   }
   var artist = e.target && e.target.closest ? e.target.closest('[data-pl-detail-artist]') : null;

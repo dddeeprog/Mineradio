@@ -642,6 +642,8 @@ test('netease route module dispatches core music endpoints', async () => {
   const writes = [];
   const saved = [];
   const calls = [];
+  const invalidations = [];
+  let loginAllowed = true;
   const routes = createNeteaseRoutes({
     sendJSON(_res, payload, status) {
       writes.push({ payload, status: status || 200 });
@@ -684,7 +686,16 @@ test('netease route module dispatches core music endpoints', async () => {
     login_qr_check() { return Promise.resolve({ body: { code: 801 } }); },
     logout() { return Promise.resolve({}); },
     user_playlist() { return Promise.resolve({ body: { playlist: [] } }); },
-    requireLogin() { return Promise.resolve({ loggedIn: true, userId: 7 }); },
+    requireLogin() {
+      if (!loginAllowed) {
+        writes.push({
+          payload: { error: 'LOGIN_REQUIRED', loggedIn: false },
+          status: 401,
+        });
+        return Promise.resolve(null);
+      }
+      return Promise.resolve({ loggedIn: true, userId: 7 });
+    },
     song_like_check() { return Promise.resolve({ body: { data: {} } }); },
     likelist() { return Promise.resolve({ body: { ids: [] } }); },
     like_song() { return Promise.resolve({ body: { code: 200 } }); },
@@ -705,6 +716,58 @@ test('netease route module dispatches core music endpoints', async () => {
     playlist_detail() { return Promise.resolve({ body: { playlist: { id: 1, tracks: [] } } }); },
     normalizeApiCode(payload) { return payload && payload.code || 200; },
     normalizeApiMessage(payload) { return payload && payload.message || ''; },
+    neteaseLibrary: {
+      getAlbumDetail(input) {
+        calls.push(['albumDetail', input]);
+        return Promise.resolve({
+          provider: 'netease',
+          album: { id: input.id, name: '专辑' },
+          songs: [],
+          dynamic: { commentCount: 0, shareCount: 0, collectCount: 0 },
+        });
+      },
+      setAlbumCollected(input) {
+        calls.push(['albumCollect', input]);
+        return Promise.resolve({
+          provider: 'netease',
+          id: input.id,
+          collected: input.collected,
+          success: true,
+        });
+      },
+      setPlaylistSubscribed(input) {
+        calls.push(['playlistSubscribe', input]);
+        return Promise.resolve({
+          provider: 'netease',
+          id: input.id,
+          subscribed: input.subscribed,
+          success: true,
+        });
+      },
+      setCommentLiked(input) {
+        calls.push(['commentLike', input]);
+        return Promise.resolve({
+          provider: 'netease',
+          id: input.id,
+          commentId: input.commentId,
+          liked: input.liked,
+          success: true,
+        });
+      },
+      createComment(input) {
+        calls.push(['commentCreate', input]);
+        return Promise.resolve({
+          provider: 'netease',
+          id: input.id,
+          created: true,
+          success: true,
+          comment: { id: '90', content: input.content },
+        });
+      },
+    },
+    invalidateAccountCache(info, change) {
+      invalidations.push([info.userId, change]);
+    },
   });
 
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search?keywords=晴天&limit=2')), true);
@@ -721,6 +784,33 @@ test('netease route module dispatches core music endpoints', async () => {
   assert.equal(writes[3].payload.ok, true);
   assert.equal(await routes.handleRoute('/api/lyric', {}, {}, new URL('http://localhost/api/lyric?id=1')), true);
   assert.equal(writes[4].payload.lyric, 'la');
+  assert.equal(await routes.handleRoute('/api/album/detail', { method: 'GET' }, {}, new URL('http://localhost/api/album/detail?id=42')), true);
+  assert.equal(writes[5].payload.album.name, '专辑');
+  assert.equal(calls[2][0], 'albumDetail');
+  assert.equal(await routes.handleRoute('/api/album/collect', { method: 'POST', body: { id: '42', collected: true } }, {}, new URL('http://localhost/api/album/collect')), true);
+  assert.equal(writes[6].payload.collected, true);
+  assert.equal(await routes.handleRoute('/api/playlist/subscribe', { method: 'POST', body: { id: '51', subscribed: false } }, {}, new URL('http://localhost/api/playlist/subscribe')), true);
+  assert.equal(writes[7].payload.subscribed, false);
+  assert.equal(await routes.handleRoute('/api/song/comments/like', { method: 'POST', body: { id: '61', commentId: '71', liked: true } }, {}, new URL('http://localhost/api/song/comments/like')), true);
+  assert.equal(writes[8].payload.liked, true);
+  assert.equal(await routes.handleRoute('/api/song/comments', { method: 'POST', body: { id: '61', content: '新评论' } }, {}, new URL('http://localhost/api/song/comments')), true);
+  assert.equal(writes[9].payload.created, true);
+  assert.equal(invalidations.length, 4);
+  assert.deepEqual(invalidations.map(item => item[1]), [
+    { namespace: 'collection', key: 'album:42' },
+    { namespace: 'collection', key: 'playlist:51' },
+    { namespace: 'collection', key: 'comment:61:71' },
+    { namespace: 'collection', key: 'comments:61' },
+  ]);
+  assert.equal(await routes.handleRoute('/api/album/collect', { method: 'GET' }, {}, new URL('http://localhost/api/album/collect?id=42')), true);
+  assert.equal(writes[10].status, 405);
+  assert.equal(writes[10].payload.error, 'METHOD_NOT_ALLOWED');
+  const callCountBeforeLoggedOutWrite = calls.length;
+  loginAllowed = false;
+  assert.equal(await routes.handleRoute('/api/album/collect', { method: 'POST', body: { id: '42', collected: false } }, {}, new URL('http://localhost/api/album/collect')), true);
+  assert.equal(writes[11].status, 401);
+  assert.equal(writes[11].payload.error, 'LOGIN_REQUIRED');
+  assert.equal(calls.length, callCountBeforeLoggedOutWrite);
   assert.equal(await routes.handleRoute('/api/qq/search', {}, {}, new URL('http://localhost/api/qq/search')), false);
 });
 
@@ -729,7 +819,7 @@ test('music mapping helpers preserve renderer-facing response shape', () => {
     id: 1,
     name: '晴天',
     ar: [{ id: 2, name: '周杰伦' }],
-    al: { name: '叶惠美', picUrl: 'https://img.example/cover.jpg' },
+    al: { id: 3, name: '叶惠美', picUrl: 'https://img.example/cover.jpg' },
     dt: 269000,
     fee: 1,
   }), {
@@ -742,6 +832,7 @@ test('music mapping helpers preserve renderer-facing response shape', () => {
     artists: [{ id: 2, name: '周杰伦' }],
     artistId: 2,
     album: '叶惠美',
+    albumId: 3,
     cover: 'https://img.example/cover.jpg',
     duration: 269000,
     fee: 1,
