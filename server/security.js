@@ -9,6 +9,7 @@ const GET_ONLY_ROUTES = new Set([
 ]);
 
 const POST_ONLY_ROUTES = new Set([
+  '/api/listen/report',
   '/api/album/collect',
   '/api/update/download',
   '/api/update/patch',

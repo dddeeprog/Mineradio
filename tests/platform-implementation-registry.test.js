@@ -108,6 +108,8 @@ test('baseline registry matches the currently wired provider implementations', (
       'commentsRead',
       'commentsLike',
       'commentsCreate',
+      'recentPlayReport',
+      'listenDurationReport',
     ],
     qq: ['search', 'playback', 'sourceMatch', 'commentsRead'],
     kugou: ['search'],

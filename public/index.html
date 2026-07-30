@@ -18,6 +18,7 @@
 <script src="content-shelf-state.js"></script>
 <script src="content-list-controller.js"></script>
 <script src="playback-transaction.js"></script>
+<script src="listen-session-state.js"></script>
 <script src="audio-output-state.js"></script>
 <script src="gapless-playback-state.js"></script>
 <script src="playback-session-state.js"></script>
@@ -1317,8 +1318,16 @@ var commentBarrageTimer = null;
 var commentBarrageLastEmptyKey = '';
 var commentBarrage3DUi = null;
 var activeRadioContext = null;
+var listenStatsStorageStatus = { ok: true, code: '', updatedAt: 0 };
+var listenReportStatus = { status: 'idle', code: '', updatedAt: 0 };
 var listenStatsState = loadListenStatsState();
 var listenSession = null;
+var listenSessionStateMachine = window.MineradioListenSessionState
+  ? window.MineradioListenSessionState.createListenSessionState()
+  : null;
+var listenReportTransport = window.MineradioListenSessionState
+  ? window.MineradioListenSessionState.createListenTransport()
+  : null;
 var listenStatsPlaybackCommitHolds = Object.create(null);
 var listenStatsPlaybackCommitHoldSerial = 0;
 var appPerfMarks = [];
@@ -2458,6 +2467,7 @@ function collectRuntimePerfSnapshot(now) {
       lastReason: visualBudgetState.lastReason,
       lastDropped: visualBudgetState.lastDropped
     },
+    listenReporting: listenReportStatus,
     deepSleep: isDeepBackgroundMode()
   };
 }
@@ -3053,6 +3063,8 @@ function flushPersistentVisualState() {
 window.addEventListener('beforeunload', flushPersistentVisualState);
 window.addEventListener('pagehide', function(){ savePlaybackSessionNow('pagehide'); });
 window.addEventListener('beforeunload', function(){ savePlaybackSessionNow('beforeunload'); });
+window.addEventListener('pagehide', function(){ finalizeListenSession(false, 'pagehide', true); });
+window.addEventListener('beforeunload', function(){ finalizeListenSession(false, 'beforeunload', true); });
 window.addEventListener('pagehide', flushPersistentVisualState);
 
 function resetBeatCameraSync(t) {
@@ -16343,10 +16355,25 @@ function saveListenStatsState() {
   try {
     listenStatsState.updatedAt = Date.now();
     localStorage.setItem(HOME_LISTEN_STATS_KEY, JSON.stringify(listenStatsState));
-  } catch (e) {}
+    listenStatsStorageStatus = {
+      ok: true,
+      code: '',
+      updatedAt: listenStatsState.updatedAt,
+    };
+  } catch (e) {
+    listenStatsStorageStatus = {
+      ok: false,
+      code: 'LISTEN_STATS_STORAGE_FAILED',
+      updatedAt: Date.now(),
+    };
+  }
 }
 function listenSongSnapshot(song) {
   song = song || {};
+  var catalogProvider = song.catalogProvider || song.provider || song.source || song.type || '';
+  var playbackProvider = song.playbackProvider || song.resolvedPlaybackProvider || catalogProvider;
+  if (catalogProvider === 'local-library' || song.type === 'local') catalogProvider = 'local';
+  if (playbackProvider === 'local-library' || song.type === 'local') playbackProvider = 'local';
   return {
     key: queueItemKey(song),
     id: song.id || '',
@@ -16360,13 +16387,50 @@ function listenSongSnapshot(song) {
     source: songSourceLabel(song),
     provider: song.provider || song.source || song.type || '',
     duration: Number(song.duration) || 0,
+    catalogProvider: catalogProvider,
+    playbackProvider: playbackProvider,
+    catalogSourceId: song.catalogSourceId || song.id || song.mid || song.songmid || song.hash || song.localLibraryFileSignature || song.localKey || '',
+    playbackSourceId: song.playbackSourceId || (
+      playbackProvider === 'qq'
+        ? (song.mid || song.songmid || song.id || '')
+        : (playbackProvider === 'kugou'
+          ? (song.hash || song.id || '')
+          : (song.id || song.localLibraryFileSignature || song.localKey || ''))
+    ),
+    resolutionMode: playbackProvider === 'local'
+      ? 'local'
+      : (catalogProvider === playbackProvider ? 'direct' : 'matched-provider'),
+    localId: song.localLibraryFileSignature || song.localKey || '',
+  };
+}
+function listenReportingBinding(provider) {
+  var snapshot = platformLoginCapabilitySnapshot;
+  if (!snapshot || !Array.isArray(snapshot.providers)) return null;
+  var item = snapshot.providers.find(function(candidate) {
+    return candidate && candidate.provider === provider;
+  });
+  var account = item && item.account;
+  var availability = item && item.availability;
+  if (
+    !account
+    || account.loggedIn !== true
+    || !availability
+    || (
+      availability.recentPlayReport !== true
+      && availability.listenDurationReport !== true
+    )
+    || !/^[a-f0-9]{32}\.[a-f0-9]{64}$/.test(String(account.reportingBinding || ''))
+  ) return null;
+  return {
+    reportingBinding: account.reportingBinding,
   };
 }
 function beginListenSession(song, context) {
   if (!song) return;
   var snap = listenSongSnapshot(song);
   if (!snap.key) return;
-  if (listenSession && listenSession.key !== snap.key) finalizeListenSession(false);
+  if (listenSession && listenSession.key !== snap.key) finalizeListenSession(false, 'switch');
+  if (listenSession && listenSession.key === snap.key) return listenSession;
   listenSession = {
     key: snap.key,
     song: snap,
@@ -16377,6 +16441,20 @@ function beginListenSession(song, context) {
     listenMs: 0,
     maxProgress: 0,
   };
+  if (listenSessionStateMachine) {
+    var reportingBinding = listenReportingBinding(snap.playbackProvider);
+    listenSessionStateMachine.startConfirmed({
+      confirmed: true,
+      transactionId: 'commit:' + String(trackSwitchToken) + ':' + snap.key,
+      song: snap,
+      context: context || activeRadioContext || null,
+      mediaTime: audio && isFinite(audio.currentTime) ? audio.currentTime : 0,
+      durationMs: audio && isFinite(audio.duration)
+        ? Math.max(0, Math.round(audio.duration * 1000))
+        : Math.max(0, Math.round((Number(snap.duration) || 0) * 1000)),
+      reportingBinding: reportingBinding ? reportingBinding.reportingBinding : '',
+    });
+  }
 }
 function holdListenStatsForPlaybackCommit() {
   var token = String(++listenStatsPlaybackCommitHoldSerial);
@@ -16393,17 +16471,32 @@ function listenStatsPlaybackCommitHeld() {
 function updateListenStatsTick(force, opts) {
   opts = opts || {};
   if (listenStatsPlaybackCommitHeld()) return;
-  if (!audio || !audio.duration || audio.paused) return;
+  if (!audio || !audio.duration) return;
   var song = currentCoverSong();
   if (!song) return;
   var key = queueItemKey(song);
-  if (!listenSession || listenSession.key !== key) {
-    if (opts.noAutoBegin) return;
-    beginListenSession(song, activeRadioContext);
-  }
+  if (!listenSession || listenSession.key !== key) return;
   if (!listenSession) return;
   var now = Date.now();
   var audioTime = isFinite(audio.currentTime) ? audio.currentTime : 0;
+  if (listenSessionStateMachine) {
+    var machineSnapshot = listenSessionStateMachine.snapshot();
+    if (audio.paused) {
+      listenSessionStateMachine.pause({
+        mediaTime: audioTime,
+        durationMs: Math.max(0, Math.round(audio.duration * 1000)),
+      });
+    } else {
+      if (machineSnapshot && machineSnapshot.paused) {
+        listenSessionStateMachine.resume({ mediaTime: audioTime });
+      }
+      listenSessionStateMachine.tick({
+        mediaTime: audioTime,
+        durationMs: Math.max(0, Math.round(audio.duration * 1000)),
+      });
+    }
+  }
+  if (audio.paused) return;
   var deltaByAudio = Math.max(0, audioTime - (listenSession.lastAudioTime || 0)) * 1000;
   var deltaByWall = Math.max(0, now - (listenSession.lastWallAt || now));
   var delta = deltaByAudio > 0 ? Math.min(deltaByAudio, deltaByWall || deltaByAudio, 4200) : 0;
@@ -16413,11 +16506,71 @@ function updateListenStatsTick(force, opts) {
   listenSession.lastAudioTime = audioTime;
   listenSession.maxProgress = Math.max(listenSession.maxProgress || 0, audio.duration ? audioTime / audio.duration : 0);
 }
-function finalizeListenSession(completed) {
+function finalizeListenSession(completed, reason, unload) {
   if (!listenSession) return;
   updateListenStatsTick(true, { noAutoBegin: true });
   var session = listenSession;
   listenSession = null;
+  var machineSession = listenSessionStateMachine
+    ? listenSessionStateMachine.snapshot()
+    : null;
+  var reportEvent = listenSessionStateMachine
+    ? listenSessionStateMachine.finalize({
+      reason: reason || (completed ? 'ended' : 'switch'),
+      completed: !!completed,
+      mediaTime: audio && isFinite(audio.currentTime) ? audio.currentTime : undefined,
+      durationMs: audio && isFinite(audio.duration)
+        ? Math.max(0, Math.round(audio.duration * 1000))
+        : undefined,
+    })
+    : null;
+  if (
+    reportEvent
+    && window.MineradioListenSessionState
+    && typeof window.MineradioListenSessionState.recordLocalListen === 'function'
+  ) {
+    listenStatsState = window.MineradioListenSessionState.recordLocalListen(
+      listenStatsState,
+      reportEvent
+    );
+    saveListenStatsState();
+    if (listenReportTransport) {
+      Promise.resolve(
+        listenReportTransport.submit(reportEvent, { unload: !!unload })
+      ).then(function(result) {
+        if (result && result.code === 'OUTBOX_CAPACITY_EXCEEDED') {
+          listenReportStatus = {
+            status: 'rejected',
+            code: 'OUTBOX_CAPACITY_EXCEEDED',
+            updatedAt: Date.now(),
+          };
+          return;
+        }
+        listenReportStatus = {
+          status: result && result.delivery === 'terminal'
+            ? '已拒绝'
+            : (result && result.delivery === 'uncertain'
+              ? '不确定'
+              : (result && result.delivery === 'local-only'
+                ? '仅本地'
+                : (result && result.delivery === 'unsupported'
+                  ? '仅本地'
+                  : (result && result.delivery === 'submitted' ? '已上报' : '待处理')))),
+          code: result && result.code || '',
+          updatedAt: Date.now(),
+        };
+      }, function() {
+        listenReportStatus = {
+          status: 'pending',
+          code: 'LISTEN_REPORT_DELIVERY_FAILED',
+          updatedAt: Date.now(),
+        };
+      });
+    }
+    if (emptyHomeActive) renderHomeDiscover();
+    return reportEvent;
+  }
+  if (machineSession && !reportEvent) return null;
   var effective = completed || session.listenMs >= 45000 || session.maxProgress >= 0.5 || (!audio || !audio.duration ? session.listenMs >= 30000 : false);
   if (!effective) return;
   var now = Date.now();
@@ -22366,7 +22519,7 @@ function bindPlaybackMediaLifecycle(media, song, index, token, localPlayback) {
   if (!media) return;
   media.onended = function() {
     if (token !== trackSwitchToken) return;
-    finalizeListenSession(true);
+    finalizeListenSession(true, 'ended');
     if (playMode === 'single') {
       setTimeout(function(){ playQueueAt(currentIdx, { autoRepeat: true }); }, 0);
     } else {
@@ -23014,7 +23167,7 @@ async function finalizePreparedPlaybackCommit(value, prepared) {
     var committedMedia = audio;
     if (outgoing) audio = outgoing;
     try {
-      finalizeListenSession(false);
+      finalizeListenSession(false, 'switch');
     } finally {
       audio = committedMedia;
     }

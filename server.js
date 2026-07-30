@@ -49,6 +49,7 @@ const {
   sati_resource_sub_list,
   lyric,
   lyric_new,
+  scrobble,
 } = require('NeteaseCloudMusicApi');
 const http = require('http');
 const https = require('https');
@@ -81,6 +82,17 @@ const {
   createCredentialSession,
   processCredentialSessionHost,
 } = require('./server/platform/credential-session');
+const {
+  createBaselineImplementationRegistry,
+} = require('./server/platform/implementation-registry');
+const { createFeatureFlags } = require('./server/platform/feature-flags');
+const { createListenJournal } = require('./server/platform/listen-journal');
+const {
+  createListenReporter,
+  createNeteaseScrobbleAdapter,
+  createReportingAccountResolver,
+  loadOrCreateReportingBindingSecret,
+} = require('./server/platform/listen-reporter');
 const { createSearchAggregator } = require('./server/platform/search-aggregator');
 const { createKugouSearchAdapter } = require('./server/platform/providers/kugou-search');
 const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
@@ -94,6 +106,7 @@ const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
 const { createDiscoverRoutes } = require('./server/routes/discover');
 const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
 const { createFoliaThemeRoutes } = require('./server/routes/folia-theme');
+const { createListenRoutes } = require('./server/routes/listen');
 const { createNeteaseRoutes } = require('./server/routes/netease');
 const { createPlatformRoutes } = require('./server/routes/platform');
 const { createPlatformSearchRoutes } = require('./server/routes/platform-search');
@@ -112,6 +125,10 @@ const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.jo
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
 const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR
   || path.join(__dirname, 'data', 'beatmap');
+const LISTEN_SYNC_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE
+  || path.join(__dirname, 'data', 'journal', 'listen-sync-journal.json');
+const LISTEN_BINDING_SECRET_FILE = process.env.MINERADIO_LISTEN_BINDING_SECRET_FILE
+  || `${LISTEN_SYNC_FILE}.binding-secret`;
 const APP_PACKAGE = readPackageInfo();
 const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
@@ -127,6 +144,12 @@ const WEATHER_DEFAULT_LOCATION = weatherTools.WEATHER_DEFAULT_LOCATION;
 const WEATHER_IP_LOCATION_URL = weatherTools.WEATHER_IP_LOCATION_URL;
 
 const updateDownloadJobs = new Map();
+const implementationRegistry = createBaselineImplementationRegistry();
+implementationRegistry.register('netease', 'recentPlayReport');
+implementationRegistry.register('netease', 'listenDurationReport');
+const platformFeatureFlags = createFeatureFlags({
+  listenReporting: true,
+});
 
 function applySystemCertificateAuthorities() {
   try {
@@ -2737,8 +2760,10 @@ function normalizeLoginInfo(profile, account, extra) {
     ...vip,
   };
 }
-async function getLoginInfo() {
-  const cookie = getUserCookie();
+async function getLoginInfo(cookieSnapshot) {
+  const cookie = typeof cookieSnapshot === 'string'
+    ? cookieSnapshot
+    : getUserCookie();
   if (!cookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
 
   // login_status 对二维码 cookie 的资料刷新通常更及时；失败时再降级到 user_account。
@@ -2910,10 +2935,26 @@ function mergePublishedAccount(provider, liveStatus) {
 
 async function getPlatformAccountStatuses() {
   const results = await Promise.allSettled([getLoginInfo(), getQQLoginInfo()]);
-  return {
-    netease: mergePublishedAccount('netease', results[0].status === 'fulfilled'
+  const netease = mergePublishedAccount(
+    'netease',
+    results[0].status === 'fulfilled'
       ? results[0].value
-      : { provider: 'netease', loggedIn: false }),
+      : { provider: 'netease', loggedIn: false },
+  );
+  try {
+    const reporting = await reportingAccountResolver('netease');
+    const accountId = String(netease.accountId ?? netease.userId ?? '');
+    if (
+      netease.loggedIn === true
+      && reporting.loggedIn === true
+      && reporting.accountId === accountId
+      && /^[a-f0-9]{32}\.[a-f0-9]{64}$/.test(reporting.reportingBinding || '')
+    ) {
+      netease.reportingBinding = reporting.reportingBinding;
+    }
+  } catch (_) {}
+  return {
+    netease,
     qq: mergePublishedAccount('qq', results[1].status === 'fulfilled'
       ? results[1].value
       : { provider: 'qq', loggedIn: false }),
@@ -2996,6 +3037,53 @@ const platformRoutes = createPlatformRoutes({
   readRequestBody,
   loginCredential: loginPlatformCredential,
   logoutCredential: logoutPlatformCredential,
+  implementationRegistry,
+  featureFlags: platformFeatureFlags,
+});
+const listenJournal = createListenJournal({
+  filePath: LISTEN_SYNC_FILE,
+});
+const listenBindingSecret = loadOrCreateReportingBindingSecret(
+  LISTEN_BINDING_SECRET_FILE,
+);
+const reportingAccountResolver = createReportingAccountResolver({
+  accountBindingSecret: listenBindingSecret,
+  getCredential: provider => providerCredential(provider),
+  getLiveAccount: async (provider, credential) => {
+    if (provider === 'netease') {
+      const cookie = credential && typeof credential.cookie === 'string'
+        ? credential.cookie
+        : '';
+      return getLoginInfo(cookie);
+    }
+    return { loggedIn: false };
+  },
+});
+let listenReporter = null;
+function createListenReportingRuntime() {
+  return createListenReporter({
+    accountBindingSecret: listenBindingSecret,
+    registry: implementationRegistry,
+    journal: listenJournal,
+    accountResolver: reportingAccountResolver,
+    providerAdapters: {
+      netease: createNeteaseScrobbleAdapter({
+        scrobble,
+      }),
+    },
+  });
+}
+function ensureListenReporter() {
+  if (!listenReporter) listenReporter = createListenReportingRuntime();
+  return listenReporter;
+}
+const listenRoutes = createListenRoutes({
+  sendJSON,
+  reporter: {
+    report(body) {
+      return ensureListenReporter().report(body);
+    },
+  },
 });
 const weatherRadioRoutes = createWeatherRadioRoutes({
   sendJSON,
@@ -3172,6 +3260,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (await listenRoutes.handleRoute(pn, req, res, url)) {
+    return;
+  }
+
   if (await neteaseRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
@@ -3227,11 +3319,20 @@ const server = http.createServer(async (req, res) => {
   serveStatic(res, filePath);
 });
 
+server.on('listening', () => {
+  ensureListenReporter();
+});
+
 server.listen(PORT, HOST, () => {
   console.log('======================================================');
   console.log(' 粒子音乐可视化 v2  →  http://localhost:' + PORT);
   console.log(' 登录态: ' + (getUserCookie() ? '已登录(安全会话已加载)' : '未登录'));
   console.log('======================================================');
+});
+
+server.on('close', () => {
+  if (listenReporter) listenReporter.destroy();
+  listenReporter = null;
 });
 
 module.exports = server;

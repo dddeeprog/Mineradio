@@ -37,6 +37,8 @@ const BASELINE_IMPLEMENTATIONS = Object.freeze({
     'commentsRead',
     'commentsLike',
     'commentsCreate',
+    'recentPlayReport',
+    'listenDurationReport',
   ]),
   qq: Object.freeze(['search', 'playback', 'sourceMatch', 'commentsRead']),
   kugou: Object.freeze(['search']),

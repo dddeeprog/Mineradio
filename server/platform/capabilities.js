@@ -153,13 +153,20 @@ function sanitizeAccount(status) {
     ? status.accountId
     : status.userId;
 
-  return {
+  const account = {
     loggedIn: status.loggedIn === true,
     accountId: safeString(accountId),
     nickname: safeString(status.nickname),
     avatar: safeString(status.avatar),
     membership: sanitizeMembership(status),
   };
+  if (hasOwn(status, 'reportingBinding')) {
+    account.reportingBinding = typeof status.reportingBinding === 'string'
+      && /^[a-f0-9]{32}\.[a-f0-9]{64}$/.test(status.reportingBinding)
+      ? status.reportingBinding
+      : '';
+  }
+  return account;
 }
 
 function readExplicitOption(options, key) {

@@ -344,6 +344,10 @@ test('feature flags disable registered operations but never invent platform supp
     false,
   );
   assert.equal(
+    providerCapability(disabled, 'netease').availability.listenDurationReport,
+    false,
+  );
+  assert.equal(
     providerCapability(enabled, 'netease').availability.playlistWrite,
     true,
   );
@@ -352,9 +356,55 @@ test('feature flags disable registered operations but never invent platform supp
     true,
   );
   assert.equal(
+    providerCapability(enabled, 'netease').availability.listenDurationReport,
+    true,
+  );
+  assert.equal(
     providerCapability(enabled, 'kugou').availability.playback,
     false,
   );
+});
+
+test('capability accounts expose only validated opaque listen reporting bindings', () => {
+  const reportingBinding = `${'a'.repeat(32)}.${'b'.repeat(64)}`;
+  const snapshot = createCapabilitySnapshot({
+    netease: {
+      loggedIn: true,
+      accountId: 'account-a',
+      reportingBinding,
+      cookie: 'SECRET_SENTINEL_CAPABILITY',
+    },
+  });
+  const account = providerCapability(snapshot, 'netease').account;
+  assert.equal(account.reportingBinding, reportingBinding);
+  assert.doesNotMatch(JSON.stringify(snapshot), /SECRET_SENTINEL/);
+
+  const invalid = providerCapability(createCapabilitySnapshot({
+    netease: {
+      loggedIn: true,
+      accountId: 'account-a',
+      reportingBinding: 'not-a-binding',
+    },
+  }), 'netease').account;
+  assert.equal(invalid.reportingBinding, '');
+});
+
+test('capability snapshot exposes one opaque account binding without credential fingerprints', () => {
+  const reportingBinding = `${'a'.repeat(32)}.${'b'.repeat(64)}`;
+  const account = providerCapability(createCapabilitySnapshot({
+    netease: {
+      loggedIn: true,
+      accountId: 'account-a',
+      reportingBinding,
+      credentialGeneration: 'c'.repeat(64),
+      reportingScope: 'd'.repeat(20),
+    },
+  }), 'netease').account;
+
+  assert.equal(account.reportingBinding, reportingBinding);
+  assert.equal(Object.hasOwn(account, 'credentialGeneration'), false);
+  assert.equal(Object.hasOwn(account, 'reportingScope'), false);
+  assert.doesNotMatch(JSON.stringify(account), /credential|fingerprint/i);
 });
 
 test('public reads and playback do not require login while writes and reports do', () => {

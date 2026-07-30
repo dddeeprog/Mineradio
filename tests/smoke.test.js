@@ -546,8 +546,9 @@ test('listen session finalization does not recursively start a new session', () 
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
   assert.match(html, /function updateListenStatsTick\(force,\s*opts\)/);
-  assert.match(html, /if \(!listenSession \|\| listenSession\.key !== key\) \{\s*if \(opts\.noAutoBegin\) return;/);
+  assert.match(html, /if \(!listenSession \|\| listenSession\.key !== key\) return;/);
   assert.match(html, /updateListenStatsTick\(true,\s*\{ noAutoBegin: true \}\)/);
+  assert.doesNotMatch(html, /updateListenStatsTick[\s\S]{0,500}beginListenSession\(song,\s*activeRadioContext\)/);
 });
 
 test('bottom playback controls default to auto hide and schedule startup collapse', () => {
