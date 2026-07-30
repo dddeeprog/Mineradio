@@ -4,6 +4,8 @@ const test = require('node:test');
 const {
   findPlaylistShelfFocus,
   normalizePlaylistId,
+  normalizePlaylistDetailResult,
+  resolvePlaylistSubscriptionMutation,
 } = require('../public/playlist-state');
 
 function playlist(id, opts = {}) {
@@ -83,4 +85,45 @@ test('returns merged index when collections are merged', () => {
 
 test('returns null when playlist cannot be found', () => {
   assert.equal(findPlaylistShelfFocus([playlist('1')], 'missing'), null);
+});
+
+test('distinguishes an empty playlist from a failed playlist response', () => {
+  assert.deepEqual(normalizePlaylistDetailResult({ tracks: [] }), {
+    ok: true,
+    tracks: [],
+    errorCode: '',
+  });
+  assert.deepEqual(normalizePlaylistDetailResult({ error: 'UPSTREAM_TIMEOUT' }), {
+    ok: false,
+    tracks: [],
+    errorCode: 'UPSTREAM_TIMEOUT',
+  });
+  assert.deepEqual(normalizePlaylistDetailResult({}), {
+    ok: false,
+    tracks: [],
+    errorCode: 'PLAYLIST_DETAIL_INVALID_RESPONSE',
+  });
+});
+
+test('rolls playlist subscription state back after rejected feedback', () => {
+  assert.deepEqual(resolvePlaylistSubscriptionMutation(false, true, { success: true }), {
+    ok: true,
+    value: true,
+    errorCode: '',
+  });
+  assert.deepEqual(resolvePlaylistSubscriptionMutation(true, false, { error: 'WRITE_FAILED' }), {
+    ok: false,
+    value: true,
+    errorCode: 'WRITE_FAILED',
+  });
+  assert.deepEqual(resolvePlaylistSubscriptionMutation(false, true, null), {
+    ok: false,
+    value: false,
+    errorCode: 'PLAYLIST_SUBSCRIBE_INVALID_RESPONSE',
+  });
+  assert.deepEqual(resolvePlaylistSubscriptionMutation(false, true, {}), {
+    ok: false,
+    value: false,
+    errorCode: 'PLAYLIST_SUBSCRIBE_INVALID_RESPONSE',
+  });
 });

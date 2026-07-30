@@ -218,3 +218,165 @@ test('findAdjacentLocalAssets retains bare-name cover selection for direct impor
   const cover = fakeFile('Track.jpg', Uint8Array.of(1), 'image/jpeg');
   assert.equal(localMedia.findAdjacentLocalAssets(audio, [cover]).coverFile, cover);
 });
+
+function createMediaHarness(initialRecord) {
+  let record = initialRecord || null;
+  let putError = null;
+  let nextUrl = 0;
+  const revoked = [];
+  const fallback = [];
+  const listeners = new Map();
+  const media = {
+    src: '',
+    paused: true,
+    loadCount: 0,
+    playCount: 0,
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type, listener) {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
+    removeAttribute(name) {
+      if (name === 'src') this.src = '';
+    },
+    load() {
+      this.loadCount += 1;
+    },
+    pause() {
+      this.paused = true;
+    },
+    play() {
+      this.paused = false;
+      this.playCount += 1;
+      return Promise.resolve();
+    },
+    emit(type) {
+      const listener = listeners.get(type);
+      if (listener) listener({ type });
+    },
+  };
+  const store = {
+    async get() {
+      return record;
+    },
+    async put(id, blob, meta) {
+      if (putError) throw putError;
+      record = { id, blob, meta };
+    },
+    async delete() {
+      record = null;
+    },
+  };
+  const runtime = localMedia.createStoredVideoRuntime({
+    id: 'home-visual',
+    maxBytes: 300,
+    store,
+    urlApi: {
+      createObjectURL() {
+        nextUrl += 1;
+        return 'blob:media-' + nextUrl;
+      },
+      revokeObjectURL(url) {
+        revoked.push(url);
+      },
+    },
+    onFallback(reason) {
+      fallback.push(reason);
+    },
+  });
+  return {
+    fallback,
+    getRecord: () => record,
+    media,
+    revoked,
+    runtime,
+    setPutError(error) {
+      putError = error;
+    },
+  };
+}
+
+function videoFile(name, type, size = 120) {
+  return { name, type, size };
+}
+
+test('stored video runtime validates MP4, WebM, and MOV before IndexedDB storage', async () => {
+  const harness = createMediaHarness();
+  for (const [name, type] of [
+    ['home.mp4', 'video/mp4'],
+    ['home.webm', 'video/webm'],
+    ['home.mov', 'video/quicktime'],
+  ]) {
+    const result = await harness.runtime.save(videoFile(name, type));
+    assert.equal(result.ok, true);
+    assert.equal(harness.getRecord().meta.name, name);
+  }
+  await assert.rejects(
+    harness.runtime.save(videoFile('home.avi', 'video/x-msvideo')),
+    error => error && error.code === 'VIDEO_TYPE_UNSUPPORTED',
+  );
+  await assert.rejects(
+    harness.runtime.save(videoFile('huge.mp4', 'video/mp4', 301)),
+    error => error && error.code === 'VIDEO_TOO_LARGE',
+  );
+});
+
+test('stored video runtime restores from storage and revokes replaced object URLs', async () => {
+  const harness = createMediaHarness({
+    id: 'home-visual',
+    blob: videoFile('restored.mp4', 'video/mp4'),
+    meta: { name: 'restored.mp4', type: 'video/mp4', size: 120 },
+  });
+
+  assert.equal((await harness.runtime.resume(harness.media)).ok, true);
+  assert.equal(harness.media.src, 'blob:media-1');
+  await harness.runtime.save(videoFile('replacement.webm', 'video/webm'));
+  assert.equal((await harness.runtime.attach(harness.media)).ok, true);
+  assert.equal(harness.media.src, 'blob:media-2');
+  assert.deepEqual(harness.revoked, ['blob:media-1']);
+});
+
+test('stored video runtime falls back on decode failure and can resume after release', async () => {
+  const harness = createMediaHarness({
+    id: 'home-visual',
+    blob: videoFile('visual.mov', 'video/quicktime'),
+    meta: { name: 'visual.mov', type: 'video/quicktime', size: 120 },
+  });
+
+  await harness.runtime.resume(harness.media);
+  harness.media.emit('error');
+  assert.equal(harness.media.src, '');
+  assert.equal(harness.runtime.snapshot().decodeFailed, true);
+  assert.deepEqual(harness.fallback, ['VIDEO_DECODE_FAILED']);
+  assert.deepEqual(harness.revoked, ['blob:media-1']);
+
+  harness.runtime.release();
+  assert.equal(harness.runtime.snapshot().released, true);
+  const blocked = await harness.runtime.attach(harness.media);
+  assert.equal(blocked.reason, 'BACKGROUND_RELEASED');
+
+  const resumed = await harness.runtime.resume(harness.media);
+  assert.equal(resumed.ok, true);
+  assert.equal(harness.media.src, 'blob:media-2');
+  assert.equal(harness.runtime.snapshot().released, false);
+});
+
+test('stored video runtime keeps the current attachment when replacement storage fails', async () => {
+  const harness = createMediaHarness({
+    id: 'home-visual',
+    blob: videoFile('current.mp4', 'video/mp4'),
+    meta: { name: 'current.mp4', type: 'video/mp4', size: 120 },
+  });
+  await harness.runtime.resume(harness.media);
+  harness.setPutError(new Error('quota exceeded'));
+
+  await assert.rejects(
+    harness.runtime.save(videoFile('replacement.webm', 'video/webm')),
+    /quota exceeded/,
+  );
+
+  assert.equal(harness.media.src, 'blob:media-1');
+  assert.equal(harness.runtime.snapshot().attached, true);
+  assert.deepEqual(harness.revoked, []);
+});

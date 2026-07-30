@@ -3,6 +3,8 @@ const test = require('node:test');
 
 const {
   clampContentIndex,
+  contentListStableKey,
+  contentListViewportProfile,
   contentIndexFromPlayableIndex,
   detailChromeKind,
   normalizeDetailView,
@@ -502,4 +504,26 @@ test('clamps detail indices safely', () => {
   assert.equal(clampContentIndex(5, -4), 0);
   assert.equal(clampContentIndex(5, 99), 4);
   assert.equal(clampContentIndex(5, 2), 2);
+});
+
+test('builds stable keys for every bounded content list kind', () => {
+  assert.equal(contentListStableKey('search', { provider: 'qq', id: 'abc' }, 4), 'search:qq:abc');
+  assert.equal(contentListStableKey('playlist', { provider: 'netease', id: 42 }, 3), 'playlist:netease:42');
+  assert.equal(contentListStableKey('comment', { id: 99 }, 1), 'comment:99');
+  assert.equal(contentListStableKey('album', { id: 7 }, 2), 'album:7');
+  assert.equal(contentListStableKey('recommendation', { key: 'daily' }, 0), 'recommendation:daily');
+  assert.equal(contentListStableKey('search', { name: 'missing-id' }, 8), 'search:index:8');
+});
+
+test('selects bounded viewport profiles without accepting unbounded overrides', () => {
+  assert.deepEqual(contentListViewportProfile('search'), {
+    itemSize: 61,
+    maxNodes: 18,
+    overscan: 3,
+  });
+  assert.deepEqual(contentListViewportProfile('comment', { maxNodes: 999, overscan: -1 }), {
+    itemSize: 86,
+    maxNodes: 16,
+    overscan: 0,
+  });
 });

@@ -282,8 +282,46 @@
     return Math.max(0, Math.min(count - 1, value));
   }
 
+  var CONTENT_LIST_PROFILES = {
+    search: { itemSize: 61, maxNodes: 18, overscan: 3 },
+    recommendation: { itemSize: 176, maxNodes: 12, overscan: 2 },
+    playlist: { itemSize: 66, maxNodes: 18, overscan: 3 },
+    album: { itemSize: 62, maxNodes: 18, overscan: 3 },
+    comment: { itemSize: 86, maxNodes: 16, overscan: 2 },
+  };
+
+  function contentListStableKey(kind, item, index) {
+    kind = CONTENT_LIST_PROFILES[kind] ? kind : 'search';
+    item = item || {};
+    var provider = String(item.provider || item.source || '').trim();
+    var id = item.id != null && String(item.id).trim()
+      ? String(item.id).trim()
+      : (item.sourceId != null && String(item.sourceId).trim()
+        ? String(item.sourceId).trim()
+        : (item.key != null && String(item.key).trim() ? String(item.key).trim() : ''));
+    if (id) return kind + ':' + (provider ? provider + ':' : '') + id;
+    return kind + ':index:' + Math.max(0, Math.floor(Number(index) || 0));
+  }
+
+  function contentListViewportProfile(kind, overrides) {
+    var base = CONTENT_LIST_PROFILES[kind] || CONTENT_LIST_PROFILES.search;
+    overrides = overrides || {};
+    function bounded(value, fallback, min, max) {
+      var number = Number(value);
+      if (!isFinite(number)) number = fallback;
+      return Math.max(min, Math.min(max, Math.floor(number)));
+    }
+    return {
+      itemSize: bounded(overrides.itemSize, base.itemSize, 32, 240),
+      maxNodes: bounded(overrides.maxNodes, base.maxNodes, 6, base.maxNodes),
+      overscan: bounded(overrides.overscan, base.overscan, 0, 6),
+    };
+  }
+
   return {
     clampContentIndex: clampContentIndex,
+    contentListStableKey: contentListStableKey,
+    contentListViewportProfile: contentListViewportProfile,
     contentIndexFromPlayableIndex: contentIndexFromPlayableIndex,
     detailChromeKind: detailChromeKind,
     isShelfViewportProjectionSafe: isShelfViewportProjectionSafe,

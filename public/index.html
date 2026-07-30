@@ -16,6 +16,7 @@
 <script src="performance.js"></script>
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
+<script src="content-list-controller.js"></script>
 <script src="playback-session-state.js"></script>
 <script src="platform-search-state.js"></script>
 <script src="platform-search-ui.js"></script>
@@ -172,6 +173,8 @@ try {
 <section id="empty-home" aria-label="Mineradio home">
   <div class="empty-home-shell">
     <div class="home-hero home-stage-hero">
+      <video id="home-visual-video" class="home-visual-video" muted loop playsinline preload="metadata" aria-hidden="true"></video>
+      <div class="home-visual-video-shade" aria-hidden="true"></div>
       <div class="home-hero-inner home-stage-hero-inner">
         <div class="home-stage-copy">
           <div class="home-kicker">Lyric Stage</div>
@@ -218,6 +221,8 @@ try {
             </div>
           </span>
           <button class="home-chip" type="button" onclick="openHomePlayerConsole()">播放器控制台</button>
+          <button id="home-visual-choose" class="home-chip" type="button" onclick="openHomeVisualPicker()" title="选择主页视频">主页视觉</button>
+          <button id="home-visual-clear" class="home-chip" type="button" onclick="clearHomeVisual()" title="移除主页视频" hidden>移除视觉</button>
           <span id="home-weather-ambient-wrap" class="home-weather-ambient-wrap">
             <button id="home-weather-ambient-btn" class="home-chip" type="button" onclick="toggleHomeWeatherAmbient(event)" aria-pressed="false">天气音关</button>
             <span id="home-weather-ambient-pop" class="home-weather-ambient-pop" onclick="event.stopPropagation()">
@@ -230,6 +235,7 @@ try {
           </span>
         </div>
       </div>
+      <input id="home-visual-input" type="file" accept=".mp4,.webm,.mov,video/mp4,video/webm,video/quicktime" hidden aria-hidden="true">
     </div>
 
     <div class="home-grid">
@@ -1335,12 +1341,13 @@ var PODCAST_PANEL_BATCH_SIZE = 24;
 var podcastPanelRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
 var podcastPanelChildRenderLimit = PODCAST_PANEL_RENDER_LIMIT;
 var podcastPanelChildState = { key: '', title: '', items: [] };
-var PLAYLIST_PANEL_BATCH_SIZE = 28;
-var playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
 var playlistPanelLazyBound = false;
-var PLAYLIST_DETAIL_INITIAL_RENDER = 64;
-var PLAYLIST_DETAIL_BATCH_SIZE = 48;
 var smoothWheelScrollBound = false;
+var boundedContentApi = window.MineradioContentListController || {};
+var boundedContentControllers = Object.create(null);
+var boundedContentScrollOffsets = Object.create(null);
+var boundedContentRenderCallbacks = Object.create(null);
+var boundedContentRenderRafs = Object.create(null);
 var coverProcessToken = 0, aiDepthPipeline = null, aiDepthReady = false, aiDepthBusy = false, aiDepthFailUntil = 0;
 var coverDepthCache = Object.create(null), coverDepthCacheKeys = [];
 var aiDepthLastRunAt = 0, aiDepthMinGapMs = 18000;
@@ -1380,6 +1387,149 @@ function pointInRectWithPadding(x, y, rect, padX, padY) {
   padX = Number(padX) || 0;
   padY = Number(padY) || padX;
   return x >= rect.left - padX && x <= rect.right + padX && y >= rect.top - padY && y <= rect.bottom + padY;
+}
+function boundedContentProfile(kind) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.contentListViewportProfile === 'function') {
+    return helper.contentListViewportProfile(kind);
+  }
+  var profiles = boundedContentApi.LIST_PROFILES || {};
+  return profiles[kind] || { itemSize: 56, maxNodes: 18, overscan: 2 };
+}
+function boundedContentStableKey(kind, item, index) {
+  var helper = contentShelfStateHelper();
+  if (helper && typeof helper.contentListStableKey === 'function') {
+    return helper.contentListStableKey(kind, item, index);
+  }
+  return kind + ':' + String(item && (item.id || item.key) || ('index:' + index));
+}
+function boundedContentController(kind, instanceKey) {
+  instanceKey = instanceKey || kind;
+  if (boundedContentControllers[instanceKey]) return boundedContentControllers[instanceKey];
+  if (!boundedContentApi || typeof boundedContentApi.createController !== 'function') return null;
+  var profile = boundedContentProfile(kind);
+  boundedContentControllers[instanceKey] = boundedContentApi.createController({
+    getKey: function(item, index) { return boundedContentStableKey(kind, item, index); },
+    itemSize: profile.itemSize,
+    maxNodes: profile.maxNodes,
+    overscan: profile.overscan,
+  });
+  return boundedContentControllers[instanceKey];
+}
+function boundedContentWindow(kind, items, options) {
+  options = options || {};
+  var instanceKey = options.instanceKey || kind;
+  var profile = boundedContentProfile(kind);
+  var controller = boundedContentController(kind, instanceKey);
+  items = Array.isArray(items) ? items : [];
+  if (!controller) {
+    return {
+      start: 0,
+      end: items.length,
+      count: items.length,
+      before: 0,
+      after: 0,
+      total: items.length,
+      itemSize: profile.itemSize,
+      items: items.map(function(item, index) {
+        return { item: item, index: index, key: boundedContentStableKey(kind, item, index) };
+      }),
+    };
+  }
+  controller.setItems(items);
+  if (options.selectedKey) controller.select(options.selectedKey);
+  var active = document.activeElement;
+  if (active && active.closest) {
+    var focusRow = active.closest('[data-content-key]');
+    if (focusRow) controller.focus(focusRow.getAttribute('data-content-key') || '');
+  }
+  var scroller = options.scroller || null;
+  var scrollOffset = options.scrollOffset;
+  if (scrollOffset == null) {
+    scrollOffset = boundedContentScrollOffsets[instanceKey];
+    if (scrollOffset == null && scroller) {
+      scrollOffset = options.horizontal ? scroller.scrollLeft : scroller.scrollTop;
+    }
+  }
+  var viewportSize = options.viewportSize;
+  if (viewportSize == null && scroller) {
+    viewportSize = options.horizontal ? scroller.clientWidth : scroller.clientHeight;
+  }
+  return controller.reconcile({
+    scrollOffset: Math.max(0, Number(scrollOffset) || 0),
+    viewportSize: Math.max(profile.itemSize, Number(viewportSize) || profile.itemSize * 7),
+  });
+}
+function contentListSpacerHtml(size, horizontal) {
+  size = Math.max(0, Math.round(Number(size) || 0));
+  if (!size) return '';
+  return '<div class="content-list-spacer' + (horizontal ? ' horizontal' : '') + '" aria-hidden="true" style="' +
+    (horizontal ? 'width:' : 'height:') + size + 'px"></div>';
+}
+function renderBoundedContentList(kind, items, options, renderRow) {
+  options = options || {};
+  var windowInfo = boundedContentWindow(kind, items, options);
+  var html = contentListSpacerHtml(windowInfo.before, options.horizontal);
+  html += windowInfo.items.map(function(row) {
+    return renderRow(row.item, row.index, row.key);
+  }).join('');
+  html += contentListSpacerHtml(windowInfo.after, options.horizontal);
+  return { html: html, window: windowInfo };
+}
+function scheduleBoundedContentRender(instanceKey, callback) {
+  if (callback) boundedContentRenderCallbacks[instanceKey] = callback;
+  if (boundedContentRenderRafs[instanceKey]) return;
+  boundedContentRenderRafs[instanceKey] = requestAnimationFrame(function() {
+    boundedContentRenderRafs[instanceKey] = 0;
+    var render = boundedContentRenderCallbacks[instanceKey];
+    if (typeof render === 'function') render();
+  });
+}
+function bindBoundedContentScroller(element, instanceKey, callback, horizontal) {
+  if (!element) return;
+  boundedContentRenderCallbacks[instanceKey] = callback;
+  var storedOffset = boundedContentScrollOffsets[instanceKey];
+  if (storedOffset != null) {
+    if (horizontal) element.scrollLeft = storedOffset;
+    else element.scrollTop = storedOffset;
+  }
+  if (element._mineradioBoundedListKey === instanceKey) return;
+  element._mineradioBoundedListKey = instanceKey;
+  element.addEventListener('scroll', function() {
+    boundedContentScrollOffsets[instanceKey] = horizontal ? element.scrollLeft : element.scrollTop;
+    scheduleBoundedContentRender(instanceKey);
+  }, { passive: true });
+}
+function restoreBoundedContentFocus(instanceKey, root) {
+  var controller = boundedContentControllers[instanceKey];
+  if (!controller || !root) return;
+  var key = controller.snapshot().focusedKey;
+  if (!key) return;
+  var rows = root.querySelectorAll('[data-content-key]');
+  for (var index = 0; index < rows.length; index += 1) {
+    if (rows[index].getAttribute('data-content-key') !== key) continue;
+    var target = rows[index].querySelector('[tabindex="0"],button,a,input') || rows[index];
+    if (typeof target.focus === 'function') target.focus({ preventScroll: true });
+    break;
+  }
+}
+function releaseBoundedContentController(instanceKey) {
+  var controller = boundedContentControllers[instanceKey];
+  if (controller && typeof controller.release === 'function') controller.release();
+  if (boundedContentRenderRafs[instanceKey]) cancelAnimationFrame(boundedContentRenderRafs[instanceKey]);
+  delete boundedContentControllers[instanceKey];
+  delete boundedContentScrollOffsets[instanceKey];
+  delete boundedContentRenderCallbacks[instanceKey];
+  delete boundedContentRenderRafs[instanceKey];
+}
+function releaseBoundedContentControllers() {
+  Object.keys(boundedContentControllers).forEach(function(key) {
+    releaseBoundedContentController(key);
+  });
+  boundedContentControllers = Object.create(null);
+  boundedContentScrollOffsets = Object.create(null);
+  boundedContentRenderCallbacks = Object.create(null);
+  boundedContentRenderRafs = Object.create(null);
 }
 function readSavedVolume() {
   try {
@@ -7211,15 +7361,160 @@ async function putCustomBackgroundBlob(id, blob, meta) {
   });
 }
 async function getCustomBackgroundBlob(id) {
+  var record = await getCustomBackgroundRecord(id);
+  return record && record.blob ? record.blob : null;
+}
+async function getCustomBackgroundRecord(id) {
   var db = await openCustomBackgroundDb();
   return new Promise(function(resolve, reject){
     var tx = db.transaction(CUSTOM_BG_STORE, 'readonly');
     var req = tx.objectStore(CUSTOM_BG_STORE).get(id);
-    req.onsuccess = function(){ resolve(req.result && req.result.blob ? req.result.blob : null); };
+    req.onsuccess = function(){ resolve(req.result || null); };
     req.onerror = function(){ reject(req.error || new Error('indexedDB get failed')); };
     tx.oncomplete = function(){ db.close(); };
   });
 }
+async function deleteCustomBackgroundRecord(id) {
+  var db = await openCustomBackgroundDb();
+  return new Promise(function(resolve, reject){
+    var tx = db.transaction(CUSTOM_BG_STORE, 'readwrite');
+    tx.objectStore(CUSTOM_BG_STORE).delete(id);
+    tx.oncomplete = function(){ db.close(); resolve(); };
+    tx.onerror = function(){ db.close(); reject(tx.error || new Error('indexedDB delete failed')); };
+    tx.onabort = function(){ db.close(); reject(tx.error || new Error('indexedDB delete aborted')); };
+  });
+}
+var HOME_VISUAL_MEDIA_ID = 'home-visual-v1';
+var HOME_VISUAL_MAX_BYTES = 300 * 1024 * 1024;
+var homeVisualRuntime = null;
+var homeVisualPowerBusy = false;
+var homeVisualChecked = false;
+var homeVisualHasStoredMedia = false;
+function ensureHomeVisualRuntime() {
+  if (homeVisualRuntime) return homeVisualRuntime;
+  var api = window.MineradioLocalMediaAssets || {};
+  if (typeof api.createStoredVideoRuntime !== 'function') return null;
+  homeVisualRuntime = api.createStoredVideoRuntime({
+    id: HOME_VISUAL_MEDIA_ID,
+    maxBytes: HOME_VISUAL_MAX_BYTES,
+    store: {
+      get: function(id) { return getCustomBackgroundRecord(id); },
+      put: function(id, blob, meta) { return putCustomBackgroundBlob(id, blob, { meta: meta }); },
+      delete: function(id) { return deleteCustomBackgroundRecord(id); },
+    },
+    urlApi: window.URL,
+    onFallback: function(reason) {
+      var hero = document.querySelector('#empty-home .home-stage-hero');
+      if (hero) hero.classList.remove('has-home-visual-video');
+      if (reason === 'VIDEO_DECODE_FAILED') showToast('主页视频无法解码，已恢复默认视觉');
+    },
+  });
+  return homeVisualRuntime;
+}
+function syncHomeVisualControls(hasStored) {
+  homeVisualHasStoredMedia = hasStored === true;
+  var choose = document.getElementById('home-visual-choose');
+  var clear = document.getElementById('home-visual-clear');
+  if (choose) choose.textContent = homeVisualHasStoredMedia ? '更换视觉' : '主页视觉';
+  if (clear) clear.hidden = !homeVisualHasStoredMedia;
+}
+function setHomeVisualAttached(attached) {
+  var hero = document.querySelector('#empty-home .home-stage-hero');
+  if (hero) hero.classList.toggle('has-home-visual-video', attached === true);
+}
+function updateHomeVisualPower() {
+  var runtime = ensureHomeVisualRuntime();
+  var video = document.getElementById('home-visual-video');
+  if (!runtime || !video) return Promise.resolve({ ok: false, reason: 'VIDEO_RUNTIME_UNAVAILABLE' });
+  if (!emptyHomeActive || document.hidden) {
+    runtime.release();
+    homeVisualChecked = false;
+    setHomeVisualAttached(false);
+    return Promise.resolve({ ok: false, reason: 'BACKGROUND_RELEASED' });
+  }
+  var snapshot = runtime.snapshot();
+  if (snapshot.attached) {
+    setHomeVisualAttached(true);
+    syncHomeVisualControls(true);
+    var playing = video.play();
+    if (playing && playing.catch) playing.catch(function(){});
+    return Promise.resolve({ ok: true });
+  }
+  if (homeVisualPowerBusy || (!snapshot.released && homeVisualChecked)) {
+    return Promise.resolve({ ok: false, reason: homeVisualPowerBusy ? 'ATTACH_BUSY' : 'VIDEO_NOT_FOUND' });
+  }
+  homeVisualPowerBusy = true;
+  return runtime.resume(video).then(function(result) {
+    homeVisualChecked = true;
+    var found = !!(result && result.ok);
+    if (result && result.reason === 'VIDEO_DECODE_FAILED') found = true;
+    syncHomeVisualControls(found);
+    setHomeVisualAttached(!!(result && result.ok));
+    return result;
+  }).catch(function(error) {
+    console.warn('[HomeVisualRestore]', error);
+    homeVisualChecked = true;
+    syncHomeVisualControls(false);
+    setHomeVisualAttached(false);
+    return { ok: false, reason: 'VIDEO_RESTORE_FAILED' };
+  }).finally(function() {
+    homeVisualPowerBusy = false;
+  });
+}
+function openHomeVisualPicker() {
+  var input = document.getElementById('home-visual-input');
+  if (input) input.click();
+}
+async function handleHomeVisualFile(file) {
+  var runtime = ensureHomeVisualRuntime();
+  if (!runtime || !file) return;
+  try {
+    await runtime.save(file);
+    homeVisualChecked = false;
+    syncHomeVisualControls(true);
+    await updateHomeVisualPower();
+    showToast('主页视觉已保存');
+  } catch (error) {
+    var code = error && error.code;
+    if (code === 'VIDEO_TOO_LARGE') showToast('主页视频不能超过 300 MB');
+    else if (code === 'VIDEO_TYPE_UNSUPPORTED') showToast('请选择 MP4、WebM 或 MOV 视频');
+    else {
+      console.warn('[HomeVisualSave]', error);
+      showToast('主页视觉保存失败');
+    }
+  }
+}
+async function clearHomeVisual() {
+  var runtime = ensureHomeVisualRuntime();
+  if (!runtime) return;
+  try {
+    await runtime.clear();
+    homeVisualChecked = true;
+    syncHomeVisualControls(false);
+    setHomeVisualAttached(false);
+    showToast('已恢复主页默认视觉');
+  } catch (error) {
+    console.warn('[HomeVisualClear]', error);
+    showToast('主页视觉清理失败');
+  }
+}
+function bindHomeVisualControls() {
+  var input = document.getElementById('home-visual-input');
+  if (input && !input._mineradioHomeVisualBound) {
+    input._mineradioHomeVisualBound = true;
+    input.addEventListener('change', function() {
+      var file = input.files && input.files[0];
+      input.value = '';
+      if (file) handleHomeVisualFile(file);
+    });
+  }
+  document.addEventListener('visibilitychange', updateHomeVisualPower);
+  window.addEventListener('pagehide', function() {
+    if (homeVisualRuntime) homeVisualRuntime.release();
+    releaseBoundedContentControllers();
+  });
+}
+bindHomeVisualControls();
 var colorLabState = { picker: null, id: '', h: 0, s: 1, v: 1, dragging: false };
 var COLOR_LAB_PRESETS = [
   { name: '极黑', color: '#000000' },
@@ -16562,12 +16857,18 @@ function renderHomeTiles() {
   }
   if (!tiles.length) tiles = fallbackHomeTiles();
   tiles = tiles.slice(0, 5);
+  var tileWindow = boundedContentWindow('recommendation', tiles, {
+    instanceKey: 'home-recommendations',
+    viewportSize: boundedContentProfile('recommendation').itemSize * 5,
+  });
   if (title) title.textContent = summary.recent ? '接着听' : (loggedOutHome ? '先从这里开始' : '你的歌单与推荐');
   if (note) {
     var liveNote = homeDiscoverState.updatedAt ? '刚刚更新 · 点击即可播放' : '点击即可播放';
     note.textContent = homeDiscoverState.loading ? '正在整理推荐' : (loggedOutHome && !weatherSongs.length ? '不会自动拉取外部推荐' : (homeDiscoverState.error ? '离线精选' : liveNote));
   }
-  row.innerHTML = tiles.map(function(item, i){
+  row.innerHTML = tileWindow.items.map(function(rowItem){
+    var item = rowItem.item;
+    var i = rowItem.index;
     var cover = homeTileCover(item);
     var tone = homeToneForItem(item, i);
     var coverClass = 'home-tile-cover' + (cover ? ' has-cover' : '');
@@ -17040,6 +17341,7 @@ function updateEmptyHomeVisibility(opts) {
       scheduleVisualApply(function(){ loadHomeDiscover(!!opts.forceLoad); }, 220, 1200);
     }
   }
+  updateHomeVisualPower();
   return show;
 }
 function runHomeSearch(query, mode) {
@@ -17582,7 +17884,14 @@ function renderDetailComments(comments, song) {
   var canLike = isCloudSong(song)
     ? platformActionAccess('netease', 'commentsLike')
     : { visible: false };
-  return '<div class="detail-scroll">' + comments.map(function(c, index){
+  var commentWindow = boundedContentWindow('comment', comments, {
+    instanceKey: 'detail-comments',
+    viewportSize: 320,
+  });
+  return '<div class="detail-scroll bounded-content-list" data-bounded-list="detail-comments">' +
+    contentListSpacerHtml(commentWindow.before) + commentWindow.items.map(function(row){
+    var c = row.item;
+    var index = row.index;
     var user = c.user || {};
     var avatar = user.avatar ? coverUrlWithSize(user.avatar, 64) : '';
     var actionKey = 'netease-comment:' + String(song && song.id || '') + ':' + String(c.id || index);
@@ -17596,13 +17905,13 @@ function renderDetailComments(comments, song) {
           '<span aria-hidden="true">' + (liked ? '♥' : '♡') + '</span><span>' + String(Math.max(0, Number(c.likedCount) || 0)) + '</span>' +
         '</button>'
       : '';
-    return '<div class="comment-item">' +
+    return '<div class="comment-item" data-content-key="' + escHtml(row.key) + '">' +
       (avatar ? '<img class="comment-avatar" src="' + avatar + '" alt="">' : '<div class="comment-avatar"></div>') +
       '<div class="comment-main"><div class="comment-meta">' + escHtml(user.nickname || '音乐用户') + (c.likedCount ? (' · ' + c.likedCount + ' 赞') : '') + (c.time ? (' · ' + escHtml(commentTimeLabel(c.time))) : '') + '</div>' +
       '<div class="comment-text">' + escHtml(c.content || '') + '</div></div>' +
       likeButton +
     '</div>';
-  }).join('') + '</div>';
+  }).join('') + contentListSpacerHtml(commentWindow.after) + '</div>';
 }
 function renderDetailCommentComposer(song) {
   var access = platformActionAccess('netease', 'commentsCreate');
@@ -17615,11 +17924,29 @@ function renderDetailCommentComposer(song) {
     '</button>' +
   '</div>';
 }
-function renderDetailCommentSection() {
+function renderDetailCommentSection(options) {
+  options = options || {};
   var target = document.getElementById('song-comments');
   if (!target || !detailCommentSong) return;
+  var currentInput = document.getElementById('detail-comment-input');
+  var draft = options.preserveInput && currentInput ? currentInput.value : '';
+  var focused = options.preserveInput && currentInput && document.activeElement === currentInput;
+  var selectionStart = focused ? currentInput.selectionStart : null;
   target.innerHTML = renderDetailCommentComposer(detailCommentSong)
     + renderDetailComments(detailRenderedComments, detailCommentSong);
+  var nextInput = document.getElementById('detail-comment-input');
+  if (nextInput && options.preserveInput) {
+    nextInput.value = draft;
+    if (focused) {
+      nextInput.focus({ preventScroll: true });
+      if (selectionStart != null) nextInput.setSelectionRange(selectionStart, selectionStart);
+    }
+  }
+  bindBoundedContentScroller(
+    target.querySelector('[data-bounded-list="detail-comments"]'),
+    'detail-comments',
+    function() { renderDetailCommentSection({ preserveInput: true }); }
+  );
   bindTrackDetailScrollers();
 }
 async function toggleDetailCommentLike(index) {
@@ -17634,7 +17961,7 @@ async function toggleDetailCommentLike(index) {
   var previousCount = Math.max(0, Number(comment.likedCount) || 0);
   comment.liked = next;
   comment.likedCount = Math.max(0, previousCount + (next ? 1 : -1));
-  renderDetailCommentSection();
+  renderDetailCommentSection({ preserveInput: true });
   try {
     var result = await apiJson('/api/song/comments/like', {
       method: 'POST',
@@ -17655,7 +17982,7 @@ async function toggleDetailCommentLike(index) {
     comment.likedCount = previousCount;
     showToast('评论点赞失败');
   }
-  renderDetailCommentSection();
+  renderDetailCommentSection({ preserveInput: true });
 }
 async function submitDetailComment() {
   var song = detailCommentSong;
@@ -18084,12 +18411,19 @@ async function toggleAlbumCollection() {
 function renderAlbumSongList(songs) {
   detailAlbumSongs = (songs || []).map(cloneSong);
   if (!detailAlbumSongs.length) return '<div class="detail-empty">暂无专辑曲目</div>';
-  return '<div class="detail-scroll">' + detailAlbumSongs.map(function(song, index){
+  var albumWindow = boundedContentWindow('album', detailAlbumSongs, {
+    instanceKey: 'album-songs',
+    viewportSize: 340,
+  });
+  return '<div class="detail-scroll bounded-content-list" data-bounded-list="album-songs">' +
+    contentListSpacerHtml(albumWindow.before) + albumWindow.items.map(function(row){
+    var song = row.item;
+    var index = row.index;
     var cover = songCoverSrc(song, 80);
     var coverHtml = cover
       ? '<img class="artist-song-cover" src="' + escHtml(cover) + '" alt="" onerror="this.style.opacity=0.18">'
       : '<div class="artist-song-cover"></div>';
-    return '<div class="artist-song-item" onclick="playAlbumDetailSong(' + index + ')">' +
+    return '<div class="artist-song-item" data-content-key="' + escHtml(row.key) + '" onclick="playAlbumDetailSong(' + index + ')">' +
       '<div class="artist-song-rank">' + String(index + 1).padStart(2, '0') + '</div>' +
       coverHtml +
       '<div class="artist-song-main"><div class="artist-song-name">' + escHtml(song.name || '') + '</div>' +
@@ -18099,7 +18433,7 @@ function renderAlbumSongList(songs) {
         '<button class="artist-song-action next" type="button" title="下一首播放" aria-label="下一首播放" onclick="event.stopPropagation();queueAlbumDetailSongNext(' + index + ')">' + artistNextPlusIconSvg() + '</button>' +
       '</div>' +
     '</div>';
-  }).join('') + '</div>';
+  }).join('') + contentListSpacerHtml(albumWindow.after) + '</div>';
 }
 function playAlbumDetailSong(index) {
   if (!detailAlbumSongs[index]) return;
@@ -18120,9 +18454,22 @@ function bindTrackDetailScrollers() {
   var body = document.getElementById('track-detail-body');
   bindSmoothWheelScroll(body);
   if (body) body.querySelectorAll('.detail-scroll').forEach(bindSmoothWheelScroll);
+  if (!body) return;
+  bindBoundedContentScroller(
+    body.querySelector('[data-bounded-list="album-songs"]'),
+    'album-songs',
+    function() {
+      var target = document.getElementById('album-song-list');
+      if (!target) return;
+      target.innerHTML = renderAlbumSongList(detailAlbumSongs);
+      bindTrackDetailScrollers();
+    }
+  );
 }
 function closeTrackDetailModal() {
   closeGsapModal(document.getElementById('track-detail-modal'), function(){
+    releaseBoundedContentController('album-songs');
+    releaseBoundedContentController('detail-comments');
     detailCommentSong = null;
     detailRenderedComments = [];
     detailAlbumSongs = [];
@@ -18141,6 +18488,8 @@ function openTrackDetailModal(type, songOverride) {
   var title = song.name || '当前歌曲';
   var artists = currentArtistNames(song);
   var seq = ++trackDetailSeq;
+  releaseBoundedContentController('album-songs');
+  releaseBoundedContentController('detail-comments');
   detailCommentSong = type === 'song' ? song : null;
   detailRenderedComments = [];
   if (type === 'album') {
@@ -20518,7 +20867,7 @@ $results.addEventListener('click', function(e){
   if (searchLoadMore) {
     e.preventDefault();
     e.stopPropagation();
-    if (playlist.length > searchResultRenderLimit) growSearchResultRenderLimit();
+    if (searchMode === 'podcast') growSearchResultRenderLimit();
     else loadNextPlatformSearchPage();
     return;
   }
@@ -20753,9 +21102,14 @@ function renderSongSearchResults(songs) {
   if (!opts.preserveLimit) resetSearchResultRenderLimit();
   playlist = songs || [];
   var previousScrollTop = opts.incremental ? $results.scrollTop : 0;
-  var rendered = listRenderItems(playlist, searchResultRenderLimit);
+  var searchWindow = boundedContentWindow('search', playlist, {
+    instanceKey: 'search-songs',
+    scroller: $results,
+    viewportSize: $results.clientHeight || 360,
+  });
   var statusHtml = renderPlatformSearchStatus(activePlatformSearchSession);
-  var rowsHtml = rendered.items.map(function(row){
+  var rowsHtml = '<div class="bounded-content-list search-bounded-list" data-bounded-list="search-songs">' +
+    contentListSpacerHtml(searchWindow.before) + searchWindow.items.map(function(row){
     var s = row.item;
     var i = row.index;
     var actions = window.MineradioPlatformSearch.actionState(s);
@@ -20779,7 +21133,7 @@ function renderSongSearchResults(songs) {
     var queueAction = actions.queue
       ? '<button class="add-btn" title="下一首播放" onclick="event.stopPropagation();queueSearchResult(' + i + ')">+</button>'
       : '';
-    return '<div class="search-result ' + sourceClass + rowClass + '">' +
+    return '<div class="search-result ' + sourceClass + rowClass + '" data-content-key="' + escHtml(row.key) + '">' +
       '<div class="search-result-main"' + primaryAction + '>' +
         imgTag +
         '<div class="search-result-info">' +
@@ -20789,7 +21143,7 @@ function renderSongSearchResults(songs) {
       '</div>' +
       likeAction + collectAction + queueAction +
     '</div>';
-  }).join('');
+  }).join('') + contentListSpacerHtml(searchWindow.after) + '</div>';
   var remoteHasMore = activePlatformSearchSession
     && window.MineradioPlatformSearch.hasMore(activePlatformSearchSession);
   var loadingMore = activePlatformSearchSession
@@ -20798,12 +21152,16 @@ function renderSongSearchResults(songs) {
     });
   var emptyHtml = playlist.length ? '' : platformSearchEmptyHtml(activePlatformSearchSession);
   $results.innerHTML = statusHtml + rowsHtml + emptyHtml + searchLoadMoreHtml(
-    rendered.window.count,
-    rendered.window.total,
+    playlist.length,
+    playlist.length,
     { remoteHasMore:remoteHasMore, loading:loadingMore }
   );
   $results.classList.add('show');
   if (opts.incremental) $results.scrollTop = previousScrollTop;
+  bindBoundedContentScroller($results, 'search-songs', function() {
+    renderSongSearchResults(playlist, { preserveLimit: true, incremental: true });
+  });
+  restoreBoundedContentFocus('search-songs', $results);
   syncLikeStatusForSongs(playlist.filter(function(song) {
     return searchResultActionState(song).like;
   }));
@@ -22776,9 +23134,12 @@ async function refreshUserPlaylists(force) {
     scheduleShelfRebuild('refresh-user-playlists', true);
   } catch (e) { console.warn(e); }
 }
-var playlistPanelDetailState = { key: '', loading: false, playlist: null, tracks: [], token: 0, renderLimit: PLAYLIST_DETAIL_INITIAL_RENDER };
+var playlistPanelDetailState = { key: '', loading: false, playlist: null, tracks: [], token: 0, errorCode: '' };
 function playlistPanelKey(provider, id) {
   return (provider === 'qq' ? 'qq' : 'netease') + ':' + String(id || '');
+}
+function releasePlaylistPanelDetailController(key) {
+  if (key) releaseBoundedContentController('playlist-tracks:' + key);
 }
 function playlistPanelProviderId(provider, id) {
   return provider === 'qq' ? ('qq:' + id) : id;
@@ -22816,10 +23177,13 @@ async function togglePlaylistPanelSubscription() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: String(pl.id), subscribed: next })
     });
-    if (!result || result.error || result.success === false) {
-      throw new Error(result && result.error || 'PLAYLIST_SUBSCRIBE_FAILED');
-    }
-    if (token) platformActionStore.commit(token, next);
+    var helper = window.MineradioPlaylistState || {};
+    var resolved = typeof helper.resolvePlaylistSubscriptionMutation === 'function'
+      ? helper.resolvePlaylistSubscriptionMutation(previous, next, result)
+      : { ok: !!(result && !result.error && result.success !== false), value: next, errorCode: 'PLAYLIST_SUBSCRIBE_FAILED' };
+    if (!resolved.ok) throw new Error(resolved.errorCode);
+    pl.subscribed = resolved.value;
+    if (token) platformActionStore.commit(token, resolved.value);
     showToast(next ? '歌单已订阅' : '已取消歌单订阅');
   } catch (error) {
     if (token) platformActionStore.rollback(token);
@@ -22833,38 +23197,57 @@ function playlistPanelDetailHtml(pl, provider) {
   if (playlistPanelDetailState.key !== key) return '';
   var tracks = playlistPanelDetailState.tracks || [];
   var loading = playlistPanelDetailState.loading;
+  var errorCode = playlistPanelDetailState.errorCode || '';
   var cover = pl && pl.cover ? (provider === 'qq' ? pl.cover : (pl.cover + '?param=96y96')) : '';
   var img = cover ? '<img class="pl-detail-cover" src="' + escHtml(cover) + '" alt="" decoding="async" onerror="this.style.opacity=0.2">' : '<div class="pl-detail-cover"></div>';
-  var renderLimit = loading ? 0 : Math.max(PLAYLIST_DETAIL_INITIAL_RENDER, playlistPanelDetailState.renderLimit || PLAYLIST_DETAIL_INITIAL_RENDER);
-  renderLimit = Math.min(tracks.length, renderLimit);
-  var visibleTracks = loading ? [] : tracks.slice(0, renderLimit);
+  var listKey = 'playlist-tracks:' + key;
+  var trackWindow = boundedContentWindow('playlist', loading || errorCode ? [] : tracks, {
+    instanceKey: listKey,
+    viewportSize: 336,
+  });
   var rows = loading
     ? '<div class="pl-detail-row"><div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06)"></div><div style="flex:1;min-width:0"><div class="pl-detail-row-title">正在载入歌单</div><div class="pl-detail-row-artist">请稍候</div></div></div>'
-    : visibleTracks.map(function(song, i){
+    : (errorCode
+      ? '<div class="pl-detail-error" role="status"><span>歌单详情加载失败</span><button class="fx-mini-btn ghost" type="button" data-pl-detail-retry="1">重试</button></div>'
+      : contentListSpacerHtml(trackWindow.before) + trackWindow.items.map(function(row){
+        var song = row.item;
+        var i = row.index;
         var thumb = songCoverSrc(song, 60);
         var imgTag = thumb ? '<img src="' + escHtml(thumb) + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:34px;height:34px;border-radius:7px;background:rgba(255,255,255,.06);flex:0 0 auto"></div>';
-        return '<div class="pl-detail-row" data-pl-detail-row="' + i + '">' +
+        return '<div class="pl-detail-row" data-content-key="' + escHtml(row.key) + '" data-pl-detail-row="' + i + '">' +
           imgTag +
           '<div style="flex:1;min-width:0"><div class="pl-detail-row-title">' + escHtml(song.name || '') + '</div>' +
           '<button type="button" class="pl-detail-row-artist" data-pl-detail-artist="' + i + '">' + escHtml(song.artist || '未知歌手') + '</button></div>' +
         '</div>';
-      }).join('');
-  if (!loading && !rows) rows = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.30);font-size:11.5px">歌单暂无可播放歌曲</div>';
-  if (!loading && tracks.length > renderLimit) {
-    rows += '<button type="button" class="fx-mini-btn ghost pl-detail-load-more" data-pl-detail-load-more="1">加载更多 ' + renderLimit + '/' + tracks.length + '</button>';
-  } else if (!loading && tracks.length > PLAYLIST_DETAIL_INITIAL_RENDER) {
-    rows += '<div class="pl-detail-progress">已显示全部 ' + tracks.length + ' 首</div>';
-  }
+      }).join('') + contentListSpacerHtml(trackWindow.after));
+  if (!loading && !errorCode && !tracks.length) rows = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.30);font-size:11.5px">歌单暂无可播放歌曲</div>';
+  var countLabel = loading ? '载入中' : (errorCode ? '加载失败' : (
+    tracks.length ? ((trackWindow.start + 1) + '-' + trackWindow.end + '/' + tracks.length) : '0/0'
+  ));
   return '<div class="pl-inline-detail" data-pl-detail="' + escHtml(key) + '">' +
     '<div class="pl-detail-sticky">' +
-      '<div class="pl-detail-head">' + img + '<div style="flex:1;min-width:0"><div class="pl-detail-title">' + escHtml(pl.name || '歌单详情') + '</div><div class="pl-detail-sub">' + escHtml((pl.trackCount || tracks.length || 0) + ' 首 · ' + (pl.creator || (provider === 'qq' ? 'QQ 音乐' : '网易云音乐'))) + '</div></div><div class="pl-detail-count">' + (loading ? '载入中' : (renderLimit + '/' + tracks.length)) + '</div></div>' +
+      '<div class="pl-detail-head">' + img + '<div style="flex:1;min-width:0"><div class="pl-detail-title">' + escHtml(pl.name || '歌单详情') + '</div><div class="pl-detail-sub">' + escHtml((pl.trackCount || tracks.length || 0) + ' 首 · ' + (pl.creator || (provider === 'qq' ? 'QQ 音乐' : '网易云音乐'))) + '</div></div><div class="pl-detail-count">' + countLabel + '</div></div>' +
       '<div class="pl-detail-actions"><button class="pl-detail-play" type="button" data-pl-detail-play="' + escHtml(key) + '"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放歌单</button>' + renderPlaylistSubscriptionButton(pl, provider) + '<button class="fx-mini-btn ghost pl-detail-top-btn" type="button" data-pl-detail-top="1">回到顶部</button></div>' +
     '</div>' +
-    '<div class="pl-detail-list">' + rows + '</div>' +
+    '<div class="pl-detail-list bounded-content-list" data-bounded-list="' + escHtml(listKey) + '">' + rows + '</div>' +
   '</div>';
 }
 function renderPlaylistPanelDetailState() {
   renderUserPlaylistsList();
+  bindPlaylistPanelDetailScroller();
+}
+function bindPlaylistPanelDetailScroller() {
+  var key = playlistPanelDetailState && playlistPanelDetailState.key;
+  if (!key) return;
+  var listKey = 'playlist-tracks:' + key;
+  var detailList = null;
+  Array.prototype.some.call(document.querySelectorAll('[data-bounded-list]'), function(node) {
+    if (node.getAttribute('data-bounded-list') !== listKey) return false;
+    detailList = node;
+    return true;
+  });
+  bindBoundedContentScroller(detailList, listKey, renderPlaylistPanelDetailState);
+  restoreBoundedContentFocus(listKey, detailList);
 }
 function scrollPlaylistPanelToTop() {
   var panel = document.getElementById('playlist-panel');
@@ -22895,17 +23278,20 @@ async function openPlaylistPanelDetail(provider, pid, title) {
   if (!pid) return;
   provider = provider === 'qq' ? 'qq' : 'netease';
   var key = playlistPanelKey(provider, pid);
+  var previousKey = playlistPanelDetailState.key;
   var pl = userPlaylists.find(function(item){ return playlistPanelKey(item.provider === 'qq' ? 'qq' : 'netease', item.id) === key; }) || { id: pid, provider: provider, name: title || '歌单详情' };
   if (playlistPanelDetailState.key === key && !playlistPanelDetailState.loading && playlistPanelDetailState.tracks.length) {
+    releasePlaylistPanelDetailController(key);
     playlistPanelDetailState.key = '';
     playlistPanelDetailState.tracks = [];
     playlistPanelDetailState.playlist = null;
-    playlistPanelDetailState.renderLimit = PLAYLIST_DETAIL_INITIAL_RENDER;
+    playlistPanelDetailState.errorCode = '';
     renderPlaylistPanelDetailState();
     return;
   }
+  if (previousKey && previousKey !== key) releasePlaylistPanelDetailController(previousKey);
   var token = ++playlistPanelDetailState.token;
-  playlistPanelDetailState = { key: key, loading: true, playlist: pl, tracks: [], token: token, renderLimit: PLAYLIST_DETAIL_INITIAL_RENDER };
+  playlistPanelDetailState = { key: key, loading: true, playlist: pl, tracks: [], token: token, errorCode: '' };
   renderPlaylistPanelDetailState();
   scrollPlaylistPanelDetailIntoView(key);
   try {
@@ -22913,19 +23299,33 @@ async function openPlaylistPanelDetail(provider, pid, title) {
       ? await apiJson('/api/qq/playlist/tracks?id=' + encodeURIComponent(pid))
       : await apiJson('/api/playlist/tracks?id=' + encodeURIComponent(pid));
     if (playlistPanelDetailState.token !== token) return;
+    var helper = window.MineradioPlaylistState || {};
+    var normalized = typeof helper.normalizePlaylistDetailResult === 'function'
+      ? helper.normalizePlaylistDetailResult(r)
+      : { ok: !!(r && Array.isArray(r.tracks)), tracks: r && r.tracks || [], errorCode: 'PLAYLIST_DETAIL_INVALID_RESPONSE' };
     playlistPanelDetailState.loading = false;
-    playlistPanelDetailState.tracks = (r && r.tracks || []).map(cloneSong);
-    playlistPanelDetailState.renderLimit = Math.min(playlistPanelDetailState.tracks.length, PLAYLIST_DETAIL_INITIAL_RENDER);
+    playlistPanelDetailState.errorCode = normalized.ok ? '' : normalized.errorCode;
+    playlistPanelDetailState.tracks = normalized.ok ? normalized.tracks.map(cloneSong) : [];
     renderPlaylistPanelDetailState();
   } catch (e) {
     console.warn('[PlaylistPanelDetail]', pid, e);
     if (playlistPanelDetailState.token !== token) return;
     playlistPanelDetailState.loading = false;
     playlistPanelDetailState.tracks = [];
-    playlistPanelDetailState.renderLimit = PLAYLIST_DETAIL_INITIAL_RENDER;
+    playlistPanelDetailState.errorCode = 'PLAYLIST_DETAIL_FAILED';
     renderPlaylistPanelDetailState();
     showToast('歌单详情加载失败');
   }
+}
+function retryPlaylistPanelDetail() {
+  var state = playlistPanelDetailState;
+  if (!state || !state.key || !state.playlist || state.loading) return;
+  var parts = state.key.split(':');
+  var provider = parts[0] === 'qq' ? 'qq' : 'netease';
+  var id = parts.slice(1).join(':');
+  releasePlaylistPanelDetailController(state.key);
+  state.key = '';
+  openPlaylistPanelDetail(provider, id, state.playlist.name || '歌单详情');
 }
 function playPlaylistPanelDetail() {
   var st = playlistPanelDetailState;
@@ -22959,46 +23359,17 @@ function openPlaylistPanelDetailArtist(index) {
   var song = playlistPanelDetailState.tracks && playlistPanelDetailState.tracks[index];
   if (song) openArtistDetailForSong(song);
 }
-function growPlaylistPanelDetailRenderLimit(amount) {
-  var st = playlistPanelDetailState;
-  var total = st && st.tracks ? st.tracks.length : 0;
-  if (!st || st.loading || !st.key || !total) return false;
-  var current = Math.max(PLAYLIST_DETAIL_INITIAL_RENDER, st.renderLimit || PLAYLIST_DETAIL_INITIAL_RENDER);
-  var next = Math.min(total, current + (amount || PLAYLIST_DETAIL_BATCH_SIZE));
-  if (next <= current) return false;
-  var panel = document.getElementById('playlist-panel');
-  var keepTop = panel ? panel.scrollTop : 0;
-  st.renderLimit = next;
-  renderPlaylistPanelDetailState();
-  if (panel) panel.scrollTop = keepTop;
-  return true;
-}
-function maybeGrowPlaylistPanelDetailRenderLimit() {
-  var panel = document.getElementById('playlist-panel');
-  var st = playlistPanelDetailState;
-  if (!panel || !st || st.loading || !st.key || !st.tracks || st.renderLimit >= st.tracks.length) return;
-  if (panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 240) {
-    growPlaylistPanelDetailRenderLimit();
-  }
-}
 function resetPlaylistPanelRenderLimit() {
-  playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
-}
-function growPlaylistPanelRenderLimit() {
-  if (!userPlaylists.length) return;
-  var next = Math.min(userPlaylists.length, (playlistPanelRenderLimit || PLAYLIST_PANEL_BATCH_SIZE) + PLAYLIST_PANEL_BATCH_SIZE);
-  if (next <= playlistPanelRenderLimit) return;
-  playlistPanelRenderLimit = next;
-  renderUserPlaylistsList({ animate: true });
+  boundedContentScrollOffsets['playlist-catalog'] = 0;
 }
 function bindPlaylistPanelLazyRender() {
   var panel = document.getElementById('playlist-panel');
   if (!panel || playlistPanelLazyBound) return;
   playlistPanelLazyBound = true;
   panel.addEventListener('scroll', function(){
-    maybeGrowPlaylistPanelDetailRenderLimit();
-    if (queueViewTab !== 'playlists' || playlistPanelRenderLimit >= userPlaylists.length) return;
-    if (panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 180) growPlaylistPanelRenderLimit();
+    if (queueViewTab !== 'playlists') return;
+    boundedContentScrollOffsets['playlist-catalog'] = panel.scrollTop;
+    scheduleBoundedContentRender('playlist-catalog', function(){ renderUserPlaylistsList(); });
   }, { passive: true });
 }
 function renderUserPlaylistsList(opts) {
@@ -23009,40 +23380,39 @@ function renderUserPlaylistsList(opts) {
     $pl.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">未找到歌单</div>';
     return;
   }
-  function playlistCardHtml(pl) {
+  function playlistCardHtml(pl, row) {
     var provider = pl.provider === 'qq' ? 'qq' : 'netease';
     var providerLabel = provider === 'qq' ? 'QQ' : 'NE';
     var thumb = pl.cover ? (provider === 'qq' ? pl.cover : (pl.cover + '?param=88y88')) : '';
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:44px;height:44px;border-radius:8px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
     var key = playlistPanelKey(provider, pl.id);
     var expanded = playlistPanelDetailState.key === key ? ' expanded' : '';
-    return '<div class="pl-card' + expanded + '" data-playlist-provider="' + provider + '" data-playlist-id="' + escHtml(String(pl.id || '')) + '" data-playlist-title="' + escHtml(pl.name || '') + '">' +
+    return '<div class="pl-card' + expanded + '" data-content-key="' + escHtml(row.key) + '" data-playlist-provider="' + provider + '" data-playlist-id="' + escHtml(String(pl.id || '')) + '" data-playlist-title="' + escHtml(pl.name || '') + '">' +
       imgTag +
       '<div style="flex:1;min-width:0"><div class="pl-name">' + escHtml(pl.name) + '<span class="tag-source ' + provider + '" style="margin-left:6px;vertical-align:1px">' + providerLabel + '</span></div><div class="pl-sub">' + pl.trackCount + ' 首 · ' + escHtml(pl.creator || '') + '</div></div>' +
     '</div>' + playlistPanelDetailHtml(pl, provider);
   }
-  var groups = [
-    { key:'netease', label:'网易云歌单', items:userPlaylists.filter(function(pl){ return pl.provider !== 'qq'; }) },
-    { key:'qq', label:'QQ 音乐歌单', items:userPlaylists.filter(function(pl){ return pl.provider === 'qq'; }) }
-  ];
-  if (opts.reset) resetPlaylistPanelRenderLimit();
-  playlistPanelRenderLimit = Math.max(PLAYLIST_PANEL_BATCH_SIZE, Math.min(userPlaylists.length, playlistPanelRenderLimit || PLAYLIST_PANEL_BATCH_SIZE));
-  var renderedCount = 0;
-  function visibleGroupItems(items) {
-    var room = playlistPanelRenderLimit - renderedCount;
-    if (room <= 0) return [];
-    var visible = items.slice(0, room);
-    renderedCount += visible.length;
-    return visible;
-  }
-  $pl.innerHTML = groups.map(function(group){
-    var items = visibleGroupItems(group.items);
-    if (!items.length) return '';
-    return '<div class="pl-section-label">' + group.label + '</div>' + items.map(playlistCardHtml).join('');
-  }).join('') || '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">未找到歌单</div>';
-  if (userPlaylists.length > renderedCount) {
-    $pl.insertAdjacentHTML('beforeend', '<button type="button" class="fx-mini-btn ghost pl-load-more" data-pl-load-more="1">加载更多 ' + renderedCount + '/' + userPlaylists.length + '</button>');
-  }
+  var panel = document.getElementById('playlist-panel');
+  var selectedKey = playlistPanelDetailState && playlistPanelDetailState.playlist
+    ? boundedContentStableKey('playlist', playlistPanelDetailState.playlist, 0)
+    : '';
+  var catalogWindow = boundedContentWindow('playlist', userPlaylists, {
+    instanceKey: 'playlist-catalog',
+    scroller: panel,
+    selectedKey: selectedKey,
+  });
+  $pl.innerHTML = contentListSpacerHtml(catalogWindow.before) + catalogWindow.items.map(function(row, localIndex) {
+    var provider = row.item.provider === 'qq' ? 'qq' : 'netease';
+    var previous = row.index > 0 ? userPlaylists[row.index - 1] : null;
+    var previousProvider = previous && previous.provider === 'qq' ? 'qq' : 'netease';
+    var label = localIndex === 0 || provider !== previousProvider
+      ? '<div class="pl-section-label">' + (provider === 'qq' ? 'QQ 音乐歌单' : '网易云歌单') + '</div>'
+      : '';
+    return label + playlistCardHtml(row.item, row);
+  }).join('') + contentListSpacerHtml(catalogWindow.after);
+  boundedContentRenderCallbacks['playlist-catalog'] = function(){ renderUserPlaylistsList(); };
+  restoreBoundedContentFocus('playlist-catalog', $pl);
+  bindPlaylistPanelDetailScroller();
   if (opts.animate && seq === playlistRenderSeq) animateVisiblePanelList($pl, '.pl-card', document.getElementById('playlist-panel'));
 }
 function renderMyPodcastCollections(opts) {
@@ -23077,18 +23447,11 @@ function renderMyPodcastCollections(opts) {
   if (opts.animate) animateVisiblePanelList($pod, '.pl-card', document.getElementById('playlist-panel'));
 }
 document.getElementById('pl-list').addEventListener('click', function(e){
-  var loadMore = e.target && e.target.closest ? e.target.closest('[data-pl-load-more]') : null;
-  if (loadMore) {
+  var detailRetry = e.target && e.target.closest ? e.target.closest('[data-pl-detail-retry]') : null;
+  if (detailRetry) {
     e.preventDefault();
     e.stopPropagation();
-    growPlaylistPanelRenderLimit();
-    return;
-  }
-  var detailLoadMore = e.target && e.target.closest ? e.target.closest('[data-pl-detail-load-more]') : null;
-  if (detailLoadMore) {
-    e.preventDefault();
-    e.stopPropagation();
-    growPlaylistPanelDetailRenderLimit();
+    retryPlaylistPanelDetail();
     return;
   }
   var detailTop = e.target && e.target.closest ? e.target.closest('[data-pl-detail-top]') : null;

@@ -342,6 +342,11 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-weather-advice-title{font-size:10px;font-weight:820;letter-spacing:.10em;text-transform:uppercase;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.44));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .home-weather-advice-text{margin-top:5px;font-size:11px;line-height:1.35;color:rgba(255,255,255,.64);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .home-stage-hero{background:linear-gradient(145deg,rgba(var(--home-accent-rgb),.12),rgba(16,17,22,.76) 42%,rgba(4,5,8,.74));border-color:rgba(255,255,255,.085)}
+.home-visual-video{position:absolute;z-index:0;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;pointer-events:none;transition:opacity .32s ease;background:#050608}
+.home-visual-video-shade{position:absolute;z-index:1;inset:0;pointer-events:none;opacity:0;background:linear-gradient(90deg,rgba(3,4,7,.78),rgba(3,4,7,.34) 58%,rgba(3,4,7,.58)),linear-gradient(180deg,rgba(3,4,7,.16),rgba(3,4,7,.58));transition:opacity .32s ease}
+.home-stage-hero.has-home-visual-video .home-visual-video{opacity:.72}
+.home-stage-hero.has-home-visual-video .home-visual-video-shade{opacity:1}
+@media (prefers-reduced-motion:reduce){.home-visual-video,.home-visual-video-shade{transition:none}}
 .home-stage-hero-inner{grid-template-columns:minmax(0,1fr) minmax(160px,.46fr);grid-template-rows:auto auto auto 1fr auto;align-content:start;gap:16px 18px}
 .home-stage-copy{grid-column:1;min-width:0}
 .home-stage-title{max-width:100%;font-size:clamp(34px,4.2vw,56px);line-height:1.02;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -1114,6 +1119,7 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .detail-action-toggle.busy{opacity:.52;pointer-events:none}
 .detail-loading,.detail-empty{padding:14px 4px;text-align:center;color:rgba(255,255,255,.34);font-size:11.5px}
 .detail-scroll{max-height:none;overflow:visible;padding-right:0;scrollbar-width:none;-ms-overflow-style:none}
+.detail-scroll.bounded-content-list{max-height:min(340px,48vh);overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;contain:layout paint style}
 .detail-scroll::-webkit-scrollbar{width:0;height:0}
 .comment-item,.artist-song-item{display:flex;gap:11px;padding:10px;border-radius:13px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);margin-bottom:7px}
 .comment-avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.07);flex-shrink:0}
@@ -1587,6 +1593,8 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .pl-detail-play svg{width:13px;height:13px;fill:currentColor}
 .pl-detail-top-btn{height:30px;min-width:82px;flex:0 0 auto;padding:0 12px}
 .pl-detail-list{display:flex;flex-direction:column;gap:6px;scroll-behavior:smooth}
+.pl-detail-list.bounded-content-list{max-height:min(336px,48vh);overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;contain:layout paint style}
+.pl-detail-error{min-height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:rgba(255,255,255,.42);font-size:11.5px}
 .pl-detail-row{display:flex;align-items:center;gap:9px;padding:7px;border-radius:10px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);cursor:pointer}
 .pl-detail-row:hover{background:rgba(255,255,255,.055)}
 .pl-detail-count{margin-left:auto;color:rgba(255,255,255,.38);font-size:10.5px;white-space:nowrap}
@@ -1597,6 +1605,9 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .pl-detail-row-artist{display:inline-flex;max-width:100%;border:0;background:transparent;color:rgba(var(--fc-accent-rgb),.68);font:500 10.5px var(--font-sans);padding:0;margin-top:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pl-detail-row-artist:hover{color:#fff;text-decoration:underline;text-underline-offset:3px}
 .pl-card.expanded{border-color:rgba(var(--fc-accent-rgb),.32);background:rgba(var(--fc-accent-rgb),.060)}
+.bounded-content-list{min-width:0}
+.content-list-spacer{display:block;flex:0 0 auto;width:100%;min-height:0;pointer-events:none}
+.content-list-spacer.horizontal{height:1px;width:auto}
 .pl-card.podcast-card{border-color:rgba(0,245,212,.075);background:rgba(0,245,212,.030)}
 .pl-card.podcast-card:hover{border-color:rgba(0,245,212,.20);background:rgba(0,245,212,.070)}
 .pl-card.podcast-child{margin-left:10px;background:rgba(255,255,255,.03)}

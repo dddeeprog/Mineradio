@@ -515,6 +515,190 @@
     return result;
   }
 
+  /*
+   * Video lifecycle adapted from XxHuberrr/Mineradio at
+   * 4abaa190de42c632365ae4244e041bad16443224.
+   * Upstream project license: GPL-3.0-only.
+   */
+  var VIDEO_TYPE_BY_EXT = {
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+  };
+
+  function storedVideoError(code) {
+    var error = new Error(code);
+    error.code = code;
+    return error;
+  }
+
+  function validateStoredVideoFile(file, maxBytes) {
+    var name = String(file && file.name || '').trim();
+    var ext = getExtFromName(name);
+    var expectedType = VIDEO_TYPE_BY_EXT[ext];
+    var type = String(file && file.type || '').toLowerCase();
+    if (!file || !expectedType || (type && type !== expectedType)) {
+      throw storedVideoError('VIDEO_TYPE_UNSUPPORTED');
+    }
+    var size = Math.max(0, Number(file.size) || 0);
+    if (maxBytes > 0 && size > maxBytes) throw storedVideoError('VIDEO_TOO_LARGE');
+    return {
+      name: name.slice(0, 160),
+      type: expectedType,
+      size: size,
+      savedAt: Date.now(),
+      version: 1,
+    };
+  }
+
+  function createStoredVideoRuntime(options) {
+    options = options || {};
+    var id = String(options.id || 'stored-video');
+    var store = options.store || {};
+    var urlApi = options.urlApi || (typeof URL !== 'undefined' ? URL : null);
+    var maxBytes = Math.max(0, Number(options.maxBytes) || 0);
+    var onFallback = typeof options.onFallback === 'function' ? options.onFallback : function() {};
+    var currentMedia = null;
+    var currentUrl = '';
+    var currentErrorHandler = null;
+    var generation = 0;
+    var released = true;
+    var decodeFailed = false;
+    var attaching = false;
+    var meta = null;
+
+    function removeErrorHandler() {
+      if (currentMedia && currentErrorHandler && typeof currentMedia.removeEventListener === 'function') {
+        currentMedia.removeEventListener('error', currentErrorHandler);
+      }
+      currentErrorHandler = null;
+    }
+
+    function revokeCurrentUrl() {
+      if (currentUrl && urlApi && typeof urlApi.revokeObjectURL === 'function') {
+        try { urlApi.revokeObjectURL(currentUrl); } catch (_error) {}
+      }
+      currentUrl = '';
+    }
+
+    function detach() {
+      removeErrorHandler();
+      if (currentMedia) {
+        try { if (typeof currentMedia.pause === 'function') currentMedia.pause(); } catch (_error) {}
+        try {
+          if (typeof currentMedia.removeAttribute === 'function') currentMedia.removeAttribute('src');
+          else currentMedia.src = '';
+          if (typeof currentMedia.load === 'function') currentMedia.load();
+        } catch (_error) {}
+      }
+      currentMedia = null;
+      revokeCurrentUrl();
+    }
+
+    async function save(file) {
+      var nextMeta = validateStoredVideoFile(file, maxBytes);
+      if (typeof store.put !== 'function') throw storedVideoError('VIDEO_STORE_UNAVAILABLE');
+      await store.put(id, file, nextMeta);
+      generation += 1;
+      detach();
+      meta = nextMeta;
+      decodeFailed = false;
+      return { ok: true, meta: Object.assign({}, nextMeta) };
+    }
+
+    async function attach(media) {
+      if (released) return { ok: false, reason: 'BACKGROUND_RELEASED' };
+      if (decodeFailed) return { ok: false, reason: 'VIDEO_DECODE_FAILED' };
+      if (!media || typeof store.get !== 'function' || !urlApi || typeof urlApi.createObjectURL !== 'function') {
+        return { ok: false, reason: 'VIDEO_RUNTIME_UNAVAILABLE' };
+      }
+      var token = ++generation;
+      attaching = true;
+      detach();
+      try {
+        var record = await store.get(id);
+        if (token !== generation || released) return { ok: false, reason: 'ATTACH_CANCELED' };
+        var blob = record && (record.blob || record.file);
+        if (!blob) {
+          meta = null;
+          return { ok: false, reason: 'VIDEO_NOT_FOUND' };
+        }
+        meta = record.meta || null;
+        var objectUrl = urlApi.createObjectURL(blob);
+        if (token !== generation || released) {
+          urlApi.revokeObjectURL(objectUrl);
+          return { ok: false, reason: 'ATTACH_CANCELED' };
+        }
+        currentMedia = media;
+        currentUrl = objectUrl;
+        currentErrorHandler = function() {
+          if (media !== currentMedia || objectUrl !== currentUrl) return;
+          decodeFailed = true;
+          generation += 1;
+          detach();
+          onFallback('VIDEO_DECODE_FAILED');
+        };
+        if (typeof media.addEventListener === 'function') {
+          media.addEventListener('error', currentErrorHandler);
+        }
+        media.muted = true;
+        media.defaultMuted = true;
+        media.loop = true;
+        media.playsInline = true;
+        media.preload = 'metadata';
+        media.src = objectUrl;
+        if (typeof media.load === 'function') media.load();
+        var playing = typeof media.play === 'function' ? media.play() : null;
+        if (playing && typeof playing.catch === 'function') playing.catch(function() {});
+        return { ok: true, meta: meta && Object.assign({}, meta) };
+      } finally {
+        if (token === generation) attaching = false;
+      }
+    }
+
+    function release() {
+      released = true;
+      generation += 1;
+      attaching = false;
+      detach();
+    }
+
+    function resume(media) {
+      released = false;
+      decodeFailed = false;
+      return attach(media);
+    }
+
+    async function clear() {
+      generation += 1;
+      detach();
+      meta = null;
+      decodeFailed = false;
+      if (typeof store.delete === 'function') await store.delete(id);
+      return { ok: true };
+    }
+
+    function snapshot() {
+      return {
+        attached: !!currentUrl,
+        attaching: attaching,
+        decodeFailed: decodeFailed,
+        hasMeta: !!meta,
+        released: released,
+      };
+    }
+
+    return {
+      attach: attach,
+      clear: clear,
+      release: release,
+      resume: resume,
+      save: save,
+      snapshot: snapshot,
+      validate: function(file) { return validateStoredVideoFile(file, maxBytes); },
+    };
+  }
+
   return {
     readLocalFileBytes: readLocalFileBytes,
     readTextFile: readTextFile,
@@ -527,5 +711,7 @@
     extractFlacEmbeddedCoverDataUrl: extractFlacEmbeddedCoverDataUrl,
     extractFlacEmbeddedLyricsText: extractFlacEmbeddedLyricsText,
     findAdjacentLocalAssets: findAdjacentLocalAssets,
+    createStoredVideoRuntime: createStoredVideoRuntime,
+    validateStoredVideoFile: validateStoredVideoFile,
   };
 });

@@ -65,8 +65,48 @@
     return null;
   }
 
+  function safeErrorCode(value, fallback) {
+    var code = String(value || fallback || '').trim();
+    return /^[A-Z0-9_:-]{1,80}$/.test(code) ? code : fallback;
+  }
+
+  function normalizePlaylistDetailResult(result) {
+    if (!result || typeof result !== 'object') {
+      return { ok: false, tracks: [], errorCode: 'PLAYLIST_DETAIL_INVALID_RESPONSE' };
+    }
+    if (result.error || result.success === false) {
+      return {
+        ok: false,
+        tracks: [],
+        errorCode: safeErrorCode(result.error || result.errorCode, 'PLAYLIST_DETAIL_FAILED'),
+      };
+    }
+    if (!Array.isArray(result.tracks)) {
+      return { ok: false, tracks: [], errorCode: 'PLAYLIST_DETAIL_INVALID_RESPONSE' };
+    }
+    return { ok: true, tracks: result.tracks, errorCode: '' };
+  }
+
+  function resolvePlaylistSubscriptionMutation(previous, optimistic, result) {
+    if (result && typeof result === 'object' && !result.error && result.success === true) {
+      return { ok: true, value: !!optimistic, errorCode: '' };
+    }
+    var hasFailureSignal = result && typeof result === 'object'
+      && (result.error || result.errorCode || result.success === false);
+    var fallback = hasFailureSignal
+      ? 'PLAYLIST_SUBSCRIBE_FAILED'
+      : 'PLAYLIST_SUBSCRIBE_INVALID_RESPONSE';
+    return {
+      ok: false,
+      value: !!previous,
+      errorCode: safeErrorCode(result && (result.error || result.errorCode), fallback),
+    };
+  }
+
   return {
     findPlaylistShelfFocus: findPlaylistShelfFocus,
     normalizePlaylistId: normalizePlaylistId,
+    normalizePlaylistDetailResult: normalizePlaylistDetailResult,
+    resolvePlaylistSubscriptionMutation: resolvePlaylistSubscriptionMutation,
   };
 });

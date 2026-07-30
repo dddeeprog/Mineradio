@@ -225,16 +225,54 @@ test('page loads unified search modules and exposes all platform tabs', () => {
     '<script src="platform-search-ui.js"></script>',
   );
   const firstInline = html.search(/<script>\s*try\s*\{/);
+  const boundedListScript = html.indexOf(
+    '<script src="content-list-controller.js"></script>',
+  );
 
+  assert.notEqual(boundedListScript, -1);
   assert.notEqual(stateScript, -1);
   assert.notEqual(uiScript, -1);
   assert.ok(stateScript < uiScript);
+  assert.ok(boundedListScript < firstInline);
   assert.ok(uiScript < firstInline);
   for (const provider of stateApi.PROVIDER_ORDER) {
     assert.match(html, new RegExp('id="search-mode-' + provider + '"'));
     assert.match(html, new RegExp("setSearchMode\\('" + provider + "'\\)"));
   }
   assert.match(html, /id="search-mode-podcast"/);
+});
+
+test('page applies the shared bounded-list controller to every long content surface', () => {
+  const html = fs.readFileSync(
+    path.join(repoRoot, 'public', 'index.html'),
+    'utf8',
+  );
+
+  assert.match(html, /MineradioContentListController/);
+  for (const kind of ['search', 'recommendation', 'playlist', 'album', 'comment']) {
+    assert.match(html, new RegExp("boundedContentWindow\\('" + kind + "'"));
+  }
+  assert.match(html, /content-list-spacer/);
+  assert.match(html, /scheduleBoundedContentRender/);
+  assert.match(html, /function releaseBoundedContentController/);
+  assert.match(html, /releaseBoundedContentController\('album-songs'\)/);
+  assert.match(html, /releaseBoundedContentController\('detail-comments'\)/);
+  assert.match(html, /releasePlaylistPanelDetailController/);
+  assert.match(html, /playlistPanelDetailState\.errorCode/);
+  assert.doesNotMatch(html, /pl-detail-load-more/);
+});
+
+test('home visual accepts persistent MP4, WebM, and MOV without replacing global background input', () => {
+  const html = fs.readFileSync(
+    path.join(repoRoot, 'public', 'index.html'),
+    'utf8',
+  );
+
+  assert.match(html, /id="home-visual-video"/);
+  assert.match(html, /id="home-visual-input"[^>]*accept="[^"]*\.mp4[^"]*\.webm[^"]*\.mov/);
+  assert.match(html, /createStoredVideoRuntime/);
+  assert.match(html, /updateHomeVisualPower/);
+  assert.match(html, /id="background-image-input"[^>]*\.mp4[^>]*\.webm[^>]*\.mov/);
 });
 
 test('page renders incremental state and gates row commands through capabilities', () => {
@@ -295,6 +333,7 @@ test('syntax check includes every unified search module', () => {
     'server/routes/platform-search.js',
     'public/platform-search-state.js',
     'public/platform-search-ui.js',
+    'public/content-list-controller.js',
   ]) {
     assert.match(check, new RegExp(
       'node --check ' + file.replace(/[/.]/g, '\\$&'),
