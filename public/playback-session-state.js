@@ -62,6 +62,17 @@
       var value = sanitizeValue(song[key]);
       if (value !== undefined) out[key] = value;
     });
+    if (out.playbackProvider) {
+      var catalogProvider = out.catalogProvider || out.provider || out.source || '';
+      var catalogSourceId = out.catalogSourceId || out.sourceId || out.id || out.mid || out.songmid || '';
+      if (catalogProvider) out.catalogProvider = String(catalogProvider);
+      if (catalogSourceId !== '') out.catalogSourceId = String(catalogSourceId);
+      if (!out.resolutionMode && catalogProvider) {
+        out.resolutionMode = String(out.playbackProvider) === String(catalogProvider)
+          ? 'catalog'
+          : 'matched-provider';
+      }
+    }
     return Object.keys(out).length ? out : null;
   }
 

@@ -101,21 +101,29 @@ test('local library state and import flow use desktop APIs and helper model', ()
 });
 
 test('playQueueAt sends local library songs through the shared queue playback path', () => {
-  const body = extractFunction(indexHtml, 'async function playQueueAt');
-  const localBranch = body.indexOf('if (isLocalPlayback)');
-  const onlineLookup = body.indexOf("apiJson('/api/song/url");
+  const transaction = extractFunction(indexHtml, 'async function playQueueAt');
+  const resolve = extractFunction(indexHtml, 'async function resolvePlaybackPreparation');
+  const prepare = extractFunction(indexHtml, 'async function prepareResolvedPlayback');
+  const commit = extractFunction(indexHtml, 'async function commitPreparedPlayback');
+  const localBranch = resolve.indexOf('if (isLocal)');
+  const onlineLookup = resolve.indexOf('if (!platformLoginCapabilitySnapshot)');
   assert.notEqual(localBranch, -1, 'missing local playback branch');
-  assert.notEqual(onlineLookup, -1, 'missing online playback lookup');
+  assert.notEqual(onlineLookup, -1, 'missing online capability lookup');
   assert.ok(localBranch < onlineLookup, 'local playback must bypass online URL lookup');
-  assert.match(body, /song\.type === 'local'/);
-  assert.match(body, /song\.source === 'local-library'/);
-  assert.match(body, /currentLocalSong = song/);
-  assert.match(body, /collectLocalImportAssets\(localMedia, localRecord, localSongAssetFiles\(song, localRecord\)\)/);
-  assert.match(body, /audio\.src = localUrl/);
-  assert.match(body, /localImport\.lyricState/);
-  assert.doesNotMatch(body, /parseCustomLyricText\(localImport\.lyricText\)/);
-  assert.match(body, /setOriginalLyricsState\(localLyricLines, localLyricState\.hasNativeKaraoke, localLyricSource\)/);
-  assert.match(body, /applyLocalResolvedCover\(localMedia, localImport, false, localCover, localCoverOpts, localUrl\)/);
+  assert.match(transaction, /resolvePlaybackPreparation\(idx, transactionOpts, attempt, requestQueue\)/);
+  assert.match(transaction, /prepareResolvedPlayback\(resolved, transactionOpts, attempt\)/);
+  assert.match(transaction, /commitPreparedPlayback\(idx, transactionOpts, prepared, attempt\)/);
+  assert.match(transaction, /finalizePreparedPlaybackCommit\(value, prepared, attempt\)/);
+  assert.match(resolve, /catalogSong\.type === 'local'/);
+  assert.match(resolve, /catalogSong\.source === 'local-library'/);
+  assert.match(resolve, /collectLocalImportAssets\([\s\S]*localSongAssetFiles\(catalogSong, localRecord\)/);
+  assert.match(resolve, /mediaUrl: localUrl/);
+  assert.match(prepare, /media\.src = resolved\.mediaUrl/);
+  assert.match(commit, /currentLocalSong = song/);
+  assert.match(commit, /localImport\.lyricState/);
+  assert.doesNotMatch(commit, /parseCustomLyricText\(localImport\.lyricText\)/);
+  assert.match(commit, /setOriginalLyricsState\(localLyricLines, localLyricState\.hasNativeKaraoke, localLyricSource\)/);
+  assert.match(commit, /applyLocalResolvedCover\(localMedia, localImport, prepared\.localCoverFile \|\| false, localCover, localCoverOpts, localUrl\)/);
 });
 
 test('direct dropped local files use async metadata and asset parsing', () => {
@@ -125,9 +133,12 @@ test('direct dropped local files use async metadata and asset parsing', () => {
   const body = extractFunction(indexHtml, 'async function handleFiles');
   assert.match(body, /collectLocalImportAssets\(localMedia, audioFile, files\)/);
   assert.match(body, /localImportFileIdentity\(audioFile\)/);
-  assert.match(body, /localImport\.lyricState/);
+  assert.match(body, /requestQueuePlayback\(\[droppedSong\], 0,/);
+  assert.match(body, /localImport: localImport/);
+  assert.match(body, /ownedObjectUrl: url/);
+  assert.doesNotMatch(body, /audio\.pause\(\)/);
+  assert.doesNotMatch(body, /audio\.src = url/);
   assert.doesNotMatch(body, /parseCustomLyricText\(localImport\.lyricText\)/);
-  assert.match(body, /applyLocalResolvedCover\(localMedia, localImport, imgFile, localCover, localCoverOpts, url\)/);
 });
 
 test('local library assets retain ordered lyric candidates and the importer falls back from invalid TTML to LRC', async () => {

@@ -63,6 +63,54 @@ test('sanitizes playback songs without persisting temporary media fields', () =>
   });
 });
 
+test('persists catalog identity separately from matched playback resolution', () => {
+  const session = createPlaybackSessionSnapshot({
+    playQueue: [{
+      provider: 'spotify',
+      source: 'spotify',
+      id: 'catalog-track',
+      sourceId: 'catalog-track',
+      name: 'Catalog Song',
+      artist: 'Catalog Artist',
+      catalogProvider: 'spotify',
+      catalogSourceId: 'catalog-track',
+      playbackProvider: 'netease',
+      playbackSourceId: 'matched-track',
+      resolutionMode: 'matched-provider',
+    }],
+    currentIdx: 0,
+    currentTime: 12,
+    duration: 180,
+    playing: true,
+  });
+
+  assert.equal(session.queue[0].provider, 'spotify');
+  assert.equal(session.queue[0].id, 'catalog-track');
+  assert.equal(session.queue[0].catalogProvider, 'spotify');
+  assert.equal(session.queue[0].catalogSourceId, 'catalog-track');
+  assert.equal(session.queue[0].playbackProvider, 'netease');
+  assert.equal(session.queue[0].playbackSourceId, 'matched-track');
+  assert.equal(session.queue[0].resolutionMode, 'matched-provider');
+});
+
+test('migrates legacy matched playback fields into explicit catalog identity', () => {
+  const song = sanitizePlaybackSong({
+    provider: 'spotify',
+    source: 'spotify',
+    id: 'catalog-track',
+    sourceId: 'catalog-track',
+    name: 'Catalog Song',
+    playbackProvider: 'netease',
+    playbackSourceId: 'matched-track',
+  });
+
+  assert.equal(song.catalogProvider, 'spotify');
+  assert.equal(song.catalogSourceId, 'catalog-track');
+  assert.equal(song.playbackProvider, 'netease');
+  assert.equal(song.playbackSourceId, 'matched-track');
+  assert.equal(song.resolutionMode, 'matched-provider');
+});
+
 test('normalizes playback session snapshots and clamps resume time safely', () => {
   const restored = normalizePlaybackSessionSnapshot({
     schema: PLAYBACK_SESSION_SCHEMA,

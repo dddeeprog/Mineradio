@@ -52,16 +52,17 @@ test('local beat analysis uses cache first and then the online MR scheduler with
 });
 
 test('local queue playback schedules beat analysis only after playback starts', () => {
-  const body = extractFunction(indexHtml, 'async function playQueueAt');
-  const localStart = body.indexOf('var localStarted = await playAudio()');
+  const body = extractFunction(indexHtml, 'async function commitPreparedPlayback');
+  const localStart = body.indexOf('var localStarted = await attemptAudioPlay');
   const localBeat = body.indexOf('prepareLocalBeatAnalysis(song, localUrl)');
   assert.notEqual(localStart, -1, 'missing local playback start');
   assert.notEqual(localBeat, -1, 'missing local beat scheduling');
-  assert.ok(localStart < localBeat, 'local beat scheduling must happen after playAudio resolves');
+  assert.ok(localStart < localBeat, 'local beat scheduling must happen after playback confirmation');
 });
 
-test('dropped local files schedule beat analysis only after playback starts', () => {
+test('dropped local files delegate playback and post-start beat analysis to the transaction', () => {
   const body = extractFunction(indexHtml, 'async function handleFiles');
-  assert.match(body, /playAudio\(\)\.then\(function\(ok\)\{[\s\S]*if \(ok && currentLocalSong && currentLocalSong\.localUrl === url\)[\s\S]*prepareLocalBeatAnalysis\(currentLocalSong, url\)/);
-  assert.doesNotMatch(body, /setTimeout\(function\(\)\{[\s\S]*prepareLocalBeatAnalysis\(currentLocalSong, url\)/);
+  assert.match(body, /await requestQueuePlayback\(\[droppedSong\], 0, \{/);
+  assert.match(body, /localImport: localImport/);
+  assert.doesNotMatch(body, /playAudio\(\)|prepareLocalBeatAnalysis\(|audio\.pause\(\)|audio\.src\s*=/);
 });
