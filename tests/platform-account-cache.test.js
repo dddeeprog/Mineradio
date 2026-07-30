@@ -235,7 +235,6 @@ test('account switch clears the old scope before publishing a sanitized account'
       credential: 'credential-a',
     })}`,
     'inflight:netease',
-    'session:netease',
     'publish:netease:1002',
   ]);
   assert.deepEqual(published.at(-1), {
@@ -273,9 +272,7 @@ test('account switch awaits every cleanup hook before publishing', async () => {
       events.push('inflight:end');
     },
     async clearSession() {
-      events.push('session:start');
-      await gates.session.promise;
-      events.push('session:end');
+      events.push('session:unexpected');
     },
     publish(provider, account) {
       events.push(`publish:${provider}:${account.accountId}`);
@@ -289,7 +286,6 @@ test('account switch awaits every cleanup hook before publishing', async () => {
   gates = {
     cache: deferred(),
     inflight: deferred(),
-    session: deferred(),
   };
 
   const transition = context.switchAccount('netease', {
@@ -305,23 +301,12 @@ test('account switch awaits every cleanup hook before publishing', async () => {
 
   gates.inflight.resolve();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(events, [
-    'cache:start',
-    'cache:end',
-    'inflight:start',
-    'inflight:end',
-    'session:start',
-  ]);
-
-  gates.session.resolve();
   await transition;
   assert.deepEqual(events, [
     'cache:start',
     'cache:end',
     'inflight:start',
     'inflight:end',
-    'session:start',
-    'session:end',
     'publish:netease:new',
   ]);
 });
@@ -411,7 +396,7 @@ test('same-provider switches are serialized in call order', async () => {
   assert.equal(context.getState('netease').account.accountId, 'second');
 });
 
-test('cleanup failure stays switching, rejects generically and never publishes', async () => {
+test('switch cleanup failure restores the previous active state and never publishes', async () => {
   const published = [];
   const context = createAccountContext({
     clearScope() {
@@ -441,7 +426,7 @@ test('cleanup failure stays switching, rejects generically and never publishes',
   );
   assert.equal(published.length, 0);
   assert.deepEqual(context.getState('netease'), {
-    status: 'switching',
+    status: 'active',
     account: {
       loggedIn: true,
       accountId: 'old',
@@ -455,4 +440,52 @@ test('cleanup failure stays switching, rejects generically and never publishes',
       },
     },
   });
+});
+
+test('first login and logout failures roll back to their prior stable states', async () => {
+  let failPublish = true;
+  let failLogout = false;
+  const context = createAccountContext({
+    clearSession() {
+      if (failLogout) throw new Error('logout-secret');
+    },
+    publish(_provider, account) {
+      if (failPublish && account.loggedIn) throw new Error('publish-secret');
+    },
+  });
+
+  await assert.rejects(
+    context.switchAccount('spotify', {
+      accountId: 'new-user',
+      credential: 'new-secret',
+    }),
+    { code: 'ACCOUNT_TRANSITION_FAILED' },
+  );
+  assert.deepEqual(context.getState('spotify'), {
+    status: 'loggedOut',
+    account: {
+      loggedIn: false,
+      accountId: '',
+      nickname: '',
+      avatar: '',
+      membership: {
+        vipLevel: 'none',
+        isVip: false,
+        isSvip: false,
+        known: false,
+      },
+    },
+  });
+
+  failPublish = false;
+  await context.switchAccount('spotify', {
+    accountId: 'active-user',
+    credential: 'active-secret',
+  });
+  failLogout = true;
+  await assert.rejects(context.logout('spotify'), {
+    code: 'ACCOUNT_TRANSITION_FAILED',
+  });
+  assert.equal(context.getState('spotify').status, 'active');
+  assert.equal(context.getState('spotify').account.accountId, 'active-user');
 });

@@ -26442,16 +26442,10 @@ async function openNeteaseWebLogin() {
   if (statusEl) { statusEl.textContent = '已打开网易云窗口，请在官方页面扫码登录…'; statusEl.className = 'preview'; }
   try {
     var result = await api.openNeteaseMusicLogin();
-    if (!result || !result.ok || !result.cookie) {
+    if (!result || !result.ok || !result.loggedIn) {
       throw new Error((result && (result.message || result.error)) || '网易云登录未完成');
     }
-    if (statusEl) { statusEl.textContent = '正在同步网易云会话…'; statusEl.className = 'preview'; }
-    var info = await apiJson('/api/login/cookie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: result.cookie })
-    });
-    if (!info || !info.loggedIn) throw new Error((info && (info.message || info.error)) || '网易云会话不可用');
+    var info = result;
     loginStatus = info;
     activeAccountProvider = 'netease';
     renderUserBtn();
@@ -26489,16 +26483,10 @@ async function openQQWebLogin() {
   if (statusEl) { statusEl.textContent = '已打开 QQ 音乐窗口，请扫码并确认登录…'; statusEl.className = 'preview'; }
   try {
     var result = await api.openQQMusicLogin();
-    if (!result || !result.ok || !result.cookie) {
+    if (!result || !result.ok || !result.loggedIn) {
       throw new Error((result && (result.message || result.error)) || 'QQ 登录未完成');
     }
-    if (statusEl) { statusEl.textContent = '正在同步 QQ 音乐会话…'; statusEl.className = 'preview'; }
-    var info = await apiJson('/api/qq/login/cookie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: result.cookie })
-    });
-    if (!info || !info.loggedIn) throw new Error((info && (info.message || info.error)) || 'QQ 会话不可用');
+    var info = result;
     qqLoginStatus = info;
     activeAccountProvider = 'qq';
     qqManualCookieOpen = false;

@@ -14,7 +14,8 @@ function createQQRoutes(deps) {
   const parseCookieString = requireFunction(deps, 'parseCookieString');
   const qqCookieUin = requireFunction(deps, 'qqCookieUin');
   const qqCookieMusicKey = requireFunction(deps, 'qqCookieMusicKey');
-  const saveQQCookie = requireFunction(deps, 'saveQQCookie');
+  const loginCredential = requireFunction(deps, 'loginCredential');
+  const logoutCredential = requireFunction(deps, 'logoutCredential');
   const getQQLoginInfo = requireFunction(deps, 'getQQLoginInfo');
   const handleQQSearch = requireFunction(deps, 'handleQQSearch');
   const handleQQSongUrl = requireFunction(deps, 'handleQQSongUrl');
@@ -84,7 +85,7 @@ function createQQRoutes(deps) {
         sendJSON(res, { provider: 'qq', loggedIn: false, error: 'INVALID_QQ_COOKIE', message: 'QQ cookie 缺少 uin 或有效登录票据' }, 400);
         return;
       }
-      saveQQCookie(normalized);
+      await loginCredential(normalized);
       const info = await getQQLoginInfo();
       sendJSON(res, { ...info, saved: true });
     } catch (err) {
@@ -140,6 +141,20 @@ function createQQRoutes(deps) {
     }
   }
 
+  async function handleLogout(_req, res) {
+    try {
+      await logoutCredential();
+      sendJSON(res, { provider: 'qq', ok: true, loggedIn: false });
+    } catch (err) {
+      sendJSON(res, {
+        provider: 'qq',
+        ok: false,
+        loggedIn: true,
+        error: err.code || 'LOGOUT_FAILED',
+      }, 500);
+    }
+  }
+
   async function handleRoute(pn, req, res, url) {
     if (pn === '/api/qq/login/status') {
       await handleLoginStatus(req, res, url);
@@ -162,8 +177,7 @@ function createQQRoutes(deps) {
       return true;
     }
     if (pn === '/api/qq/logout') {
-      saveQQCookie('');
-      sendJSON(res, { provider: 'qq', ok: true, loggedIn: false });
+      await handleLogout(req, res);
       return true;
     }
     if (pn === '/api/qq/user/playlists') {

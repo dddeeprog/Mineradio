@@ -13,6 +13,7 @@ const SUPPORTED_CREDENTIAL_PROVIDERS = Object.freeze([
   'spotify',
 ]);
 const SUPPORTED_PROVIDER_SET = new Set(SUPPORTED_CREDENTIAL_PROVIDERS);
+const MIGRATION_ID_PATTERN = /^[a-f0-9]{64}$/;
 
 function createCredentialStoreError(code, message) {
   const error = new Error(message);
@@ -217,6 +218,38 @@ function isValidUpdatedAt(updatedAt) {
   return typeof updatedAt === 'string' || typeof updatedAt === 'number';
 }
 
+function readMigrationId(options) {
+  if (options === undefined) return null;
+  if (!isPlainObject(options)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+  const keys = Reflect.ownKeys(options);
+  const descriptor = Object.getOwnPropertyDescriptor(options, 'migrationId');
+  if (keys.length !== 1
+    || keys[0] !== 'migrationId'
+    || !descriptor
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+    || !MIGRATION_ID_PATTERN.test(descriptor.value)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+  return descriptor.value;
+}
+
+function assertMigrationId(migrationId) {
+  if (!MIGRATION_ID_PATTERN.test(migrationId)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+}
+
 function validateEnvelope(envelope) {
   if (!isPlainObject(envelope)
     || envelope.schema !== CREDENTIAL_SCHEMA
@@ -242,10 +275,13 @@ function validateEnvelope(envelope) {
     }
 
     const recordKeys = Object.keys(record);
-    if (recordKeys.length !== 3
+    const hasMigrationId = recordKeys.includes('migrationId');
+    if ((recordKeys.length !== 3 && recordKeys.length !== 4)
+      || (recordKeys.length === 4 && !hasMigrationId)
       || !recordKeys.includes('credential')
       || !recordKeys.includes('accountId')
-      || !recordKeys.includes('updatedAt')) {
+      || !recordKeys.includes('updatedAt')
+      || (hasMigrationId && !MIGRATION_ID_PATTERN.test(record.migrationId))) {
       throw createCorruptError();
     }
 
@@ -254,6 +290,7 @@ function validateEnvelope(envelope) {
       accountId: record.accountId,
       updatedAt: record.updatedAt,
     };
+    if (hasMigrationId) providers[provider].migrationId = record.migrationId;
   }
   return providers;
 }
@@ -349,8 +386,9 @@ function createCredentialStore(options = {}) {
       return record ? cloneCredential(record.credential) : null;
     },
 
-    set(provider, credential) {
+    set(provider, credential, options) {
       assertSupportedProvider(provider);
+      const migrationId = readMigrationId(options);
       const credentialCopy = cloneCredential(credential);
       let updatedAt;
       try {
@@ -377,6 +415,7 @@ function createCredentialStore(options = {}) {
         accountId: accountIdFromCredential(credentialCopy),
         updatedAt,
       };
+      if (migrationId) nextProviders[provider].migrationId = migrationId;
       if (persistenceAvailable) persist(nextProviders);
       providers = nextProviders;
 
@@ -384,6 +423,14 @@ function createCredentialStore(options = {}) {
         persisted: persistenceAvailable,
         mode,
       };
+    },
+
+    hasMigration(provider, migrationId) {
+      assertSupportedProvider(provider);
+      assertMigrationId(migrationId);
+      if (!persistenceAvailable) return false;
+      providers = readEncryptedProviders(filePath, safeStorage, read);
+      return providers[provider]?.migrationId === migrationId;
     },
 
     delete(provider) {

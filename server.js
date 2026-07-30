@@ -1,7 +1,7 @@
 // ====================================================================
 //  粒子音乐可视化播放器 — Server v2
 //  - 网易云搜索 / 歌曲URL / 封面/音频代理
-//  - 扫码登录 (login_qr_*) + cookie 持久化 (./.cookie)
+//  - 扫码登录 (login_qr_*) + 安全凭据会话
 //  - 试听检测 (freeTrialInfo) + 全 quality 探测
 //  - 所有受保护 API 都会带上已登录用户的 cookie
 // ====================================================================
@@ -65,6 +65,13 @@ const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
+const { createAccountScopedCache } = require('./server/platform/account-cache');
+const { createAccountContext } = require('./server/platform/account-context');
+const { createAccountLifecycle } = require('./server/platform/account-lifecycle');
+const {
+  createCredentialSession,
+  processCredentialSessionHost,
+} = require('./server/platform/credential-session');
 const { createSearchAggregator } = require('./server/platform/search-aggregator');
 const { createKugouSearchAdapter } = require('./server/platform/providers/kugou-search');
 const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
@@ -88,12 +95,11 @@ const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
 const PORT = process.env.PORT || 3000;
 const HOST = resolveBindHost(process.env);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const COOKIE_FILE = process.env.COOKIE_FILE || path.join(__dirname, '.cookie');
-const QQ_COOKIE_FILE = process.env.QQ_COOKIE_FILE || path.join(__dirname, '.qq-cookie');
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
-const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
+const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR
+  || path.join(__dirname, 'data', 'beatmap');
 const APP_PACKAGE = readPackageInfo();
 const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
@@ -142,26 +148,59 @@ const MIME = {
   '.svg':  'image/svg+xml',
 };
 
-// ---------- Cookie 持久化 ----------
+// ---------- 安全凭据与账户上下文 ----------
 const normalizeCookieHeader = cookieTools.normalizeCookieHeader;
 const rawCookieFallback = cookieTools.rawCookieFallback;
 const parseCookieString = cookieTools.parseCookieString;
 const readCookieFromResponse = cookieTools.readCookieFromResponse;
 const normalizeQQCookieInput = cookieTools.normalizeQQCookieInput;
-let userCookie = '';
-try { if (fs.existsSync(COOKIE_FILE)) userCookie = fs.readFileSync(COOKIE_FILE, 'utf8').trim(); }
-catch (e) { userCookie = ''; }
-function saveCookie(c) {
-  userCookie = normalizeCookieHeader(c) || rawCookieFallback(c);
-  try { fs.writeFileSync(COOKIE_FILE, userCookie); } catch (e) {}
+
+function resolveCredentialSession() {
+  const attached = processCredentialSessionHost.get();
+  if (attached) return attached;
+  const session = createCredentialSession({ mode: 'memory-only' });
+  session.hydrate({});
+  processCredentialSessionHost.attach(session);
+  return session;
 }
 
-let qqCookie = '';
-try { if (fs.existsSync(QQ_COOKIE_FILE)) qqCookie = fs.readFileSync(QQ_COOKIE_FILE, 'utf8').trim(); }
-catch (e) { qqCookie = ''; }
-function saveQQCookie(c) {
-  qqCookie = normalizeCookieHeader(c) || rawCookieFallback(c);
-  try { fs.writeFileSync(QQ_COOKIE_FILE, qqCookie); } catch (e) {}
+const credentialSession = resolveCredentialSession();
+const accountScopedCache = createAccountScopedCache();
+const platformInflight = new Map();
+const platformAccountStates = new Map();
+const accountContext = createAccountContext({
+  clearScope: scope => accountScopedCache.clearScope(scope),
+  clearInflight(provider) {
+    platformInflight.delete(provider);
+  },
+  clearSession(provider) {
+    return credentialSession.clear(provider);
+  },
+  publish(provider, account) {
+    platformAccountStates.set(provider, account);
+  },
+});
+const accountLifecycle = createAccountLifecycle({
+  credentialSession,
+  accountContext,
+});
+
+function providerCredential(provider) {
+  try {
+    return credentialSession.read(provider) || {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function getUserCookie() {
+  const value = providerCredential('netease').cookie;
+  return typeof value === 'string' ? value : '';
+}
+
+function getQQCookie() {
+  const value = providerCredential('qq').cookie;
+  return typeof value === 'string' ? value : '';
 }
 
 // ---------- 工具 ----------
@@ -1277,7 +1316,7 @@ function normalizeApiMessage(payload) {
   return (body && (body.message || body.msg || body.error)) || (body && body.body && (body.body.message || body.body.msg || body.body.error)) || '';
 }
 function qqCookieObject() {
-  return parseCookieString(qqCookie);
+  return parseCookieString(getQQCookie());
 }
 function qqCookieUin(obj) {
   return cookieTools.qqCookieUin(obj || qqCookieObject());
@@ -1422,7 +1461,7 @@ async function handleSearch(keywords, limit, offset) {
     keywords,
     limit,
     offset: Math.max(0, Number(offset) || 0),
-    cookie: userCookie,
+    cookie: getUserCookie(),
   });
   const songs = result.body && result.body.result && result.body.result.songs ? result.body.result.songs : [];
 
@@ -1435,7 +1474,7 @@ async function handleSearch(keywords, limit, offset) {
   if (missing.length) {
     try {
       console.log('[Search] backfilling covers for', missing.length, 'songs');
-      const dd = await song_detail({ ids: missing.join(','), cookie: userCookie });
+      const dd = await song_detail({ ids: missing.join(','), cookie: getUserCookie() });
       const songsArr = (dd.body && dd.body.songs) || [];
       const idToPic = {};
       songsArr.forEach(s => {
@@ -1464,10 +1503,10 @@ async function handleDiscoverHome() {
     };
   }
   const tasks = [
-    personalized({ limit: 8, cookie: userCookie, timestamp: Date.now() }),
-    dj_hot({ limit: 6, offset: 0, cookie: userCookie, timestamp: Date.now() }),
-    recommend_resource({ cookie: userCookie, timestamp: Date.now() }),
-    recommend_songs({ cookie: userCookie, timestamp: Date.now() }),
+    personalized({ limit: 8, cookie: getUserCookie(), timestamp: Date.now() }),
+    dj_hot({ limit: 6, offset: 0, cookie: getUserCookie(), timestamp: Date.now() }),
+    recommend_resource({ cookie: getUserCookie(), timestamp: Date.now() }),
+    recommend_songs({ cookie: getUserCookie(), timestamp: Date.now() }),
   ];
   const result = await Promise.allSettled(tasks);
 
@@ -1633,7 +1672,7 @@ async function fetchWeatherPlaylistSongs(playlist, limit) {
   let rawTracks = [];
   try {
     if (typeof playlist_track_all === 'function') {
-      const all = await playlist_track_all({ id, limit: limit || 36, offset: 0, cookie: userCookie, timestamp: Date.now() });
+      const all = await playlist_track_all({ id, limit: limit || 36, offset: 0, cookie: getUserCookie(), timestamp: Date.now() });
       rawTracks = (all.body && (all.body.songs || all.body.tracks)) || [];
     }
   } catch (e) {
@@ -1641,7 +1680,7 @@ async function fetchWeatherPlaylistSongs(playlist, limit) {
   }
   if (!rawTracks.length && typeof playlist_detail === 'function') {
     try {
-      const detail = await playlist_detail({ id, s: 0, cookie: userCookie, timestamp: Date.now() });
+      const detail = await playlist_detail({ id, s: 0, cookie: getUserCookie(), timestamp: Date.now() });
       const pl = (detail.body && detail.body.playlist) || {};
       rawTracks = pl.tracks || [];
     } catch (e) {
@@ -1660,7 +1699,7 @@ async function filterLikelyPlayableWeatherSongs(songs) {
   for (let i = 0; i < source.length; i += 4) {
     const chunk = source.slice(i, i + 4);
     const settled = await Promise.allSettled(chunk.map(async song => {
-      const info = await handleSongUrl(song.id, { loggedIn: !!userCookie }, 'standard');
+      const info = await handleSongUrl(song.id, { loggedIn: !!getUserCookie() }, 'standard');
       return info && info.url ? song : null;
     }));
     settled.forEach((result, idx) => {
@@ -1801,7 +1840,7 @@ async function qqMusicRequest(payload, opts) {
     'Content-Type': 'application/json;charset=UTF-8',
     'Content-Length': Buffer.byteLength(body),
   };
-  if (opts.cookie && qqCookie) headers.Cookie = qqCookie;
+  if (opts.cookie && getQQCookie()) headers.Cookie = getQQCookie();
   const text = await requestText(QQ_MUSICU_URL, {
     method: 'POST',
     headers,
@@ -1838,7 +1877,7 @@ function normalizeQQProfile(body, cookieObj) {
     nickname: nick || (uin ? ('QQ ' + uin) : 'QQ 音乐'),
     avatar,
     vipType,
-    hasCookie: !!qqCookie,
+    hasCookie: !!getQQCookie(),
     playbackKeyReady: !!qqCookiePlaybackKey(cookieObj),
     profileSource: profileNick || profileAvatar ? 'qq-profile' : (cookieNick || avatar ? 'cookie' : 'fallback'),
   };
@@ -1848,7 +1887,7 @@ async function getQQLoginInfo() {
   const cookieObj = qqCookieObject();
   const uin = qqCookieUin(cookieObj);
   const musicKey = qqCookieMusicKey(cookieObj);
-  if (!uin || !musicKey) return { provider: 'qq', loggedIn: false, hasCookie: !!qqCookie };
+  if (!uin || !musicKey) return { provider: 'qq', loggedIn: false, hasCookie: !!getQQCookie() };
   const fallback = normalizeQQProfile(null, cookieObj);
   try {
     const u = new URL('https://c.y.qq.com/rsc/fcgi-bin/fcg_get_profile_homepage.fcg');
@@ -1865,7 +1904,7 @@ async function getQQLoginInfo() {
     u.searchParams.set('platform', 'yqq.json');
     u.searchParams.set('needNewCode', '0');
     const text = await requestText(u.toString(), {
-      headers: { ...QQ_HEADERS, Cookie: qqCookie },
+      headers: { ...QQ_HEADERS, Cookie: getQQCookie() },
     });
     const body = parseJSONText(text);
     const info = normalizeQQProfile(body, cookieObj);
@@ -1886,7 +1925,7 @@ async function qqGetJSON(targetUrl, params, opts) {
     if (params[k] != null) u.searchParams.set(k, String(params[k]));
   });
   const headers = { ...QQ_HEADERS, ...(opts.headers || {}) };
-  if (opts.cookie !== false && qqCookie) headers.Cookie = qqCookie;
+  if (opts.cookie !== false && getQQCookie()) headers.Cookie = getQQCookie();
   const text = await requestText(u.toString(), { headers });
   return parseJSONText(text);
 }
@@ -2484,31 +2523,31 @@ async function fetchMyPodcastItems(key, info, limit, offset) {
   limit = Math.max(8, Math.min(60, Number(limit) || 30));
   offset = Math.max(0, Number(offset) || 0);
   if (key === 'collect') {
-    const r = await dj_sublist({ limit, offset, cookie: userCookie, timestamp: Date.now() });
+    const r = await dj_sublist({ limit, offset, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['djRadios', 'djradios', 'radios', 'data']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'created') {
-    const r = await user_audio({ uid: info.userId, cookie: userCookie, timestamp: Date.now() });
+    const r = await user_audio({ uid: info.userId, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['data', 'djRadios', 'djradios', 'radios']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'paid') {
-    const r = await dj_paygift({ limit, offset, cookie: userCookie, timestamp: Date.now() });
+    const r = await dj_paygift({ limit, offset, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['data', 'djRadios', 'djradios', 'radios']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'liked') {
     let raw = [];
     try {
-      const sati = await sati_resource_sub_list({ cookie: userCookie, timestamp: Date.now() });
+      const sati = await sati_resource_sub_list({ cookie: getUserCookie(), timestamp: Date.now() });
       raw = firstArrayFrom(sati.body, ['data', 'resources', 'list']);
     } catch (e) {
       console.warn('[MyPodcastLiked] sati sub list failed:', e.message);
     }
     if (!raw.length) {
       try {
-        const recent = await record_recent_voice({ limit, cookie: userCookie, timestamp: Date.now() });
+        const recent = await record_recent_voice({ limit, cookie: getUserCookie(), timestamp: Date.now() });
         raw = firstArrayFrom(recent.body, ['data', 'list', 'resources']);
       } catch (e) {
         console.warn('[MyPodcastLiked] recent voice fallback failed:', e.message);
@@ -2523,7 +2562,7 @@ async function fetchMyPodcastItems(key, info, limit, offset) {
 //   返回 { url, trial, level, br }
 //   trial=true 表示这是试听片段 (freeTrialInfo 非空)
 async function handleSongUrl(id, loginInfo, qualityPreference) {
-  console.log('[SongUrl] id:', id, 'logged-in:', !!userCookie);
+  console.log('[SongUrl] id:', id, 'logged-in:', !!getUserCookie());
   const requestedQuality = normalizeQualityPreference(qualityPreference);
   const svipReady = hasNeteaseSvip(loginInfo);
   const qualities = qualityCandidatesFrom(requestedQuality, NETEASE_QUALITY_CANDIDATES)
@@ -2538,9 +2577,9 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       // 优先用 v1 接口 (支持更高音质 level 字段)
       let result;
       try {
-        result = await song_url_v1({ id, level: q.level, cookie: userCookie });
+        result = await song_url_v1({ id, level: q.level, cookie: getUserCookie() });
       } catch (e) {
-        result = await song_url({ id, br: q.br, cookie: userCookie });
+        result = await song_url({ id, br: q.br, cookie: getUserCookie() });
       }
       const d = result.body && result.body.data && result.body.data[0];
       if (d) lastData = d;
@@ -2673,18 +2712,13 @@ function normalizeLoginInfo(profile, account, extra) {
     ...vip,
   };
 }
-function isNeteaseAuthInvalidPayload(payload) {
-  const code = normalizeApiCode(payload);
-  if (code === 301 || code === 401) return true;
-  const msg = normalizeApiMessage(payload);
-  return /未登录|需要登录|请先登录|login/i.test(msg) && code >= 300;
-}
 async function getLoginInfo() {
-  if (!userCookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+  const cookie = getUserCookie();
+  if (!cookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
 
   // login_status 对二维码 cookie 的资料刷新通常更及时；失败时再降级到 user_account。
   try {
-    const st = await login_status({ cookie: userCookie, timestamp: Date.now() });
+    const st = await login_status({ cookie, timestamp: Date.now() });
     const body = st.body || {};
     const data = body.data || body;
     const info = normalizeLoginInfo(data.profile || body.profile, data.account || body.account, data);
@@ -2694,30 +2728,75 @@ async function getLoginInfo() {
   }
 
   try {
-    const acc = await user_account({ cookie: userCookie, timestamp: Date.now() });
+    const acc = await user_account({ cookie, timestamp: Date.now() });
     const body = acc.body || {};
     const info = normalizeLoginInfo(body.profile, body.account, body);
     if (info.loggedIn) return info;
-    if (isNeteaseAuthInvalidPayload(acc)) saveCookie('');
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+    return { loggedIn: false, hasCookie: !!cookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   } catch (e) {
     console.warn('[Login] account check failed:', e.message);
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+    return { loggedIn: false, hasCookie: !!cookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   }
+}
+
+async function loginNeteaseCredential(cookie) {
+  const normalized = normalizeCookieHeader(cookie) || rawCookieFallback(cookie);
+  return accountLifecycle.login(
+    'netease',
+    { cookie: normalized },
+    async () => {
+      const info = await getLoginInfo();
+      if (info.loggedIn) return info;
+      return {
+        loggedIn: true,
+        pendingProfile: true,
+        nickname: '网易云用户',
+        avatar: '',
+        vipLevel: 'none',
+        isVip: false,
+        isSvip: false,
+      };
+    },
+  );
+}
+
+function logoutNeteaseCredential() {
+  return accountLifecycle.logout('netease');
+}
+
+function loginQQCredential(cookie) {
+  return accountLifecycle.login(
+    'qq',
+    { cookie: normalizeQQCookieInput(cookie) },
+    getQQLoginInfo,
+  );
+}
+
+function logoutQQCredential() {
+  return accountLifecycle.logout('qq');
+}
+
+function mergePublishedAccount(provider, liveStatus) {
+  const published = platformAccountStates.get(provider);
+  if (!published || liveStatus.loggedIn === true) return liveStatus;
+  return {
+    provider,
+    ...published,
+  };
 }
 
 async function getPlatformAccountStatuses() {
   const results = await Promise.allSettled([getLoginInfo(), getQQLoginInfo()]);
   return {
-    netease: results[0].status === 'fulfilled'
+    netease: mergePublishedAccount('netease', results[0].status === 'fulfilled'
       ? results[0].value
-      : { provider: 'netease', loggedIn: false },
-    qq: results[1].status === 'fulfilled'
+      : { provider: 'netease', loggedIn: false }),
+    qq: mergePublishedAccount('qq', results[1].status === 'fulfilled'
       ? results[1].value
-      : { provider: 'qq', loggedIn: false },
-    kugou: { provider: 'kugou', loggedIn: false },
-    qishui: { provider: 'qishui', loggedIn: false },
-    spotify: { provider: 'spotify', loggedIn: false },
+      : { provider: 'qq', loggedIn: false }),
+    kugou: mergePublishedAccount('kugou', { provider: 'kugou', loggedIn: false }),
+    qishui: mergePublishedAccount('qishui', { provider: 'qishui', loggedIn: false }),
+    spotify: mergePublishedAccount('spotify', { provider: 'spotify', loggedIn: false }),
   };
 }
 
@@ -2824,7 +2903,8 @@ const qqRoutes = createQQRoutes({
   parseCookieString,
   qqCookieUin,
   qqCookieMusicKey,
-  saveQQCookie,
+  loginCredential: loginQQCredential,
+  logoutCredential: logoutQQCredential,
   getQQLoginInfo,
   handleQQSearch,
   handleQQSongUrl,
@@ -2848,7 +2928,7 @@ const foliaThemeRoutes = createFoliaThemeRoutes({
 });
 const podcastRoutes = createPodcastRoutes({
   sendJSON,
-  getUserCookie: () => userCookie,
+  getUserCookie,
   cloudsearch,
   dj_hot,
   dj_detail,
@@ -2868,8 +2948,9 @@ const neteaseRoutes = createNeteaseRoutes({
   readRequestBody,
   normalizeCookieHeader,
   parseCookieString,
-  saveCookie,
-  getUserCookie: () => userCookie,
+  loginCredential: loginNeteaseCredential,
+  logoutCredential: logoutNeteaseCredential,
+  getUserCookie,
   getLoginInfo,
   handleSearch,
   handleSongUrl,
@@ -3007,7 +3088,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log('======================================================');
   console.log(' 粒子音乐可视化 v2  →  http://localhost:' + PORT);
-  console.log(' 登录态: ' + (userCookie ? '已登录(cookie已加载)' : '未登录'));
+  console.log(' 登录态: ' + (getUserCookie() ? '已登录(安全会话已加载)' : '未登录'));
   console.log('======================================================');
 });
 

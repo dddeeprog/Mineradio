@@ -517,8 +517,13 @@ test('qq route module dispatches QQ music endpoints', async () => {
     qqCookieMusicKey(obj) {
       return obj.qm_keyst || '';
     },
-    saveQQCookie(cookie) {
+    loginCredential(cookie) {
       saved.push(cookie);
+      return Promise.resolve();
+    },
+    logoutCredential() {
+      saved.push('logged-out');
+      return Promise.resolve();
     },
     getQQLoginInfo() {
       return Promise.resolve({ provider: 'qq', loggedIn: true, nickname: 'QQ' });
@@ -563,6 +568,9 @@ test('qq route module dispatches QQ music endpoints', async () => {
   assert.equal(await routes.handleRoute('/api/qq/login/cookie', { body: { cookie: 'uin=123; qm_keyst=key' } }, {}, new URL('http://localhost/api/qq/login/cookie')), true);
   assert.deepEqual(saved, ['uin=123; qm_keyst=key']);
   assert.equal(writes[2].payload.saved, true);
+  assert.equal(await routes.handleRoute('/api/qq/logout', {}, {}, new URL('http://localhost/api/qq/logout')), true);
+  assert.deepEqual(saved, ['uin=123; qm_keyst=key', 'logged-out']);
+  assert.equal(writes[3].payload.loggedIn, false);
   assert.equal(await routes.handleRoute('/api/qq/song/comments', {}, {}, new URL('http://localhost/api/qq/song/comments?id=7&mid=m&limit=all&offset=4')), true);
   assert.deepEqual(calls[calls.length - 1], ['comments', '7', 'm', 0, 4]);
   assert.equal(await routes.handleRoute('/api/search', {}, {}, new URL('http://localhost/api/search')), false);
@@ -647,8 +655,13 @@ test('netease route module dispatches core music endpoints', async () => {
     parseCookieString(raw) {
       return Object.fromEntries(String(raw || '').split(';').map(part => part.trim().split('=')));
     },
-    saveCookie(cookie) {
+    loginCredential(cookie) {
       saved.push(cookie);
+      return Promise.resolve();
+    },
+    logoutCredential() {
+      saved.push('logged-out');
+      return Promise.resolve();
     },
     getUserCookie() {
       return saved[saved.length - 1] || 'MUSIC_U=old';
@@ -703,8 +716,11 @@ test('netease route module dispatches core music endpoints', async () => {
   assert.equal(await routes.handleRoute('/api/login/cookie', { method: 'POST', body: { cookie: 'MUSIC_U=new' } }, {}, new URL('http://localhost/api/login/cookie')), true);
   assert.deepEqual(saved, ['MUSIC_U=new']);
   assert.equal(writes[2].payload.saved, true);
+  assert.equal(await routes.handleRoute('/api/logout', {}, {}, new URL('http://localhost/api/logout')), true);
+  assert.deepEqual(saved, ['MUSIC_U=new', 'logged-out']);
+  assert.equal(writes[3].payload.ok, true);
   assert.equal(await routes.handleRoute('/api/lyric', {}, {}, new URL('http://localhost/api/lyric?id=1')), true);
-  assert.equal(writes[3].payload.lyric, 'la');
+  assert.equal(writes[4].payload.lyric, 'la');
   assert.equal(await routes.handleRoute('/api/qq/search', {}, {}, new URL('http://localhost/api/qq/search')), false);
 });
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu, safeStorage } = require('electron');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
@@ -6,8 +6,10 @@ const { execFile, spawn } = require('child_process');
 const { Readable } = require('stream');
 const {
   configureStableAppPaths,
-  migrateOwnedDataFiles,
 } = require('./app-paths');
+const {
+  createPlatformCredentialRuntime,
+} = require('./platform-credential-runtime');
 const {
   isAllowedAppUrl,
   isAllowedLoginUrl,
@@ -36,6 +38,8 @@ const {
 let mainWindow = null;
 let localServer = null;
 let mainServerPort = 0;
+let platformCredentialRuntime = null;
+let platformCredentialRuntimePromise = null;
 let desktopLyricsWindow = null;
 let desktopLyricsState = {};
 let desktopLyricsUserBounds = null;
@@ -77,15 +81,6 @@ const LEGACY_APP_DATA_ROOTS = Object.freeze([
   path.resolve(__dirname, '..'),
   path.join(path.dirname(APP_PATHS.userData), 'mineradio'),
 ]);
-
-try {
-  migrateOwnedDataFiles({
-    sourceRoots: LEGACY_APP_DATA_ROOTS,
-    targetRoot: APP_PATHS.userData,
-  });
-} catch (error) {
-  console.warn('Owned data migration skipped:', error.message);
-}
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
@@ -183,6 +178,27 @@ function waitForServer(server) {
     server.once('listening', resolve);
     server.once('error', reject);
   });
+}
+
+function initializePlatformCredentialRuntime() {
+  if (!platformCredentialRuntimePromise) {
+    platformCredentialRuntimePromise = createPlatformCredentialRuntime({
+      paths: APP_PATHS,
+      sourceRoots: LEGACY_APP_DATA_ROOTS,
+      safeStorage,
+    }).then((runtime) => {
+      platformCredentialRuntime = runtime;
+      return runtime;
+    });
+  }
+  return platformCredentialRuntimePromise;
+}
+
+function credentialRuntimeUnavailable() {
+  return {
+    ok: false,
+    error: 'PLATFORM_CREDENTIAL_RUNTIME_UNAVAILABLE',
+  };
 }
 
 function sendWindowState(win) {
@@ -536,7 +552,7 @@ function createTray() {
 }
 
 function getUpdateDownloadDir() {
-  return path.join(APP_PATHS.userData, 'updates');
+  return APP_PATHS.updateDirectory;
 }
 
 function shouldEnsureDesktopShortcut() {
@@ -877,20 +893,98 @@ async function openQQMusicLoginWindow(owner) {
   });
 }
 
+async function readLoopbackJson(response) {
+  try {
+    const value = await response.json();
+    return value && typeof value === 'object' ? value : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+async function commitLoginWindowCredential(provider, capture) {
+  if (!capture || capture.ok !== true || typeof capture.cookie !== 'string') {
+    return {
+      ok: false,
+      cancelled: capture && capture.cancelled === true,
+      error: capture && capture.error || 'PLATFORM_LOGIN_CANCELLED',
+      message: capture && capture.message || '',
+    };
+  }
+  if (!mainServerPort) return credentialRuntimeUnavailable();
+
+  const endpoint = provider === 'qq' ? '/api/qq/login/cookie' : '/api/login/cookie';
+  try {
+    const response = await fetch(`http://127.0.0.1:${mainServerPort}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie: capture.cookie }),
+    });
+    const info = await readLoopbackJson(response);
+    if (!response.ok || info.loggedIn !== true) {
+      return {
+        ok: false,
+        provider,
+        error: info.error || 'PLATFORM_LOGIN_COMMIT_FAILED',
+        message: info.message || '',
+      };
+    }
+    return {
+      ok: true,
+      provider,
+      loggedIn: true,
+      accountId: info.accountId ?? info.userId ?? '',
+      userId: info.userId ?? info.accountId ?? '',
+      nickname: typeof info.nickname === 'string' ? info.nickname : '',
+      avatar: typeof info.avatar === 'string' ? info.avatar : '',
+      vipType: Number(info.vipType) || 0,
+      vipLevel: typeof info.vipLevel === 'string' ? info.vipLevel : 'none',
+      isVip: info.isVip === true,
+      isSvip: info.isSvip === true,
+      playbackKeyReady: info.playbackKeyReady === true,
+      partial: capture.partial === true,
+    };
+  } catch (_error) {
+    return {
+      ok: false,
+      provider,
+      error: 'PLATFORM_LOGIN_COMMIT_FAILED',
+    };
+  }
+}
+
+async function clearServerCredential(provider) {
+  if (!mainServerPort) return credentialRuntimeUnavailable();
+  const endpoint = provider === 'qq' ? '/api/qq/logout' : '/api/logout';
+  try {
+    const response = await fetch(`http://127.0.0.1:${mainServerPort}${endpoint}`, {
+      method: 'POST',
+    });
+    const result = await readLoopbackJson(response);
+    return response.ok && result.ok !== false
+      ? { ok: true }
+      : { ok: false, error: result.error || 'PLATFORM_LOGOUT_FAILED' };
+  } catch (_error) {
+    return { ok: false, error: 'PLATFORM_LOGOUT_FAILED' };
+  }
+}
+
 async function clearQQMusicLoginSession() {
+  const serverResult = await clearServerCredential('qq');
   const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
   await cookieSession.clearStorageData({
     storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
   });
-  return { ok: true };
+  return serverResult;
 }
 
 async function clearNeteaseMusicLoginSession() {
+  const serverResult = await clearServerCredential('netease');
   const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
   await cookieSession.clearStorageData({
     storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
   });
-  return { ok: true };
+  return serverResult;
 }
 
 function getWindowedBounds(win) {
@@ -1432,6 +1526,45 @@ handleIpc('mineradio-startup-set-enabled', (_event, enabled) => {
   return result;
 });
 
+handleIpc('mineradio-credential-status', () => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  return {
+    ok: true,
+    ...platformCredentialRuntime.status(),
+  };
+});
+
+handleIpc('mineradio-credential-set', async (_event, provider, credential) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (provider !== 'netease' && provider !== 'qq') {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_METHOD_UNAVAILABLE',
+    };
+  }
+  const descriptor = credential && typeof credential === 'object'
+    ? Object.getOwnPropertyDescriptor(credential, 'cookie')
+    : null;
+  if (!descriptor || typeof descriptor.value !== 'string') {
+    return { ok: false, error: 'PLATFORM_CREDENTIAL_INVALID' };
+  }
+  return commitLoginWindowCredential(provider, {
+    ok: true,
+    cookie: descriptor.value,
+  });
+});
+
+handleIpc('mineradio-credential-clear', async (_event, provider) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (provider !== 'netease' && provider !== 'qq') {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_METHOD_UNAVAILABLE',
+    };
+  }
+  return clearServerCredential(provider);
+});
+
 ipcMain.on('mineradio-ui-state-read-sync', (event) => {
   try {
     assertAllowedIpcSender(event, 'mineradio-ui-state-read-sync', mainServerPort);
@@ -1529,7 +1662,8 @@ handleIpc('mineradio-local-file-read-data-url', async (_event, filePath) => {
 });
 
 handleIpc('netease-music-open-login', async (event) => {
-  return openNeteaseMusicLoginWindow(getSenderWindow(event));
+  const capture = await openNeteaseMusicLoginWindow(getSenderWindow(event));
+  return commitLoginWindowCredential('netease', capture);
 });
 
 handleIpc('netease-music-clear-login', async () => {
@@ -1537,7 +1671,8 @@ handleIpc('netease-music-clear-login', async () => {
 });
 
 handleIpc('qq-music-open-login', async (event) => {
-  return openQQMusicLoginWindow(getSenderWindow(event));
+  const capture = await openQQMusicLoginWindow(getSenderWindow(event));
+  return commitLoginWindowCredential('qq', capture);
 });
 
 handleIpc('qq-music-clear-login', async () => {
@@ -1688,14 +1823,16 @@ handleIpc('mineradio-wallpaper-update', async (_event, payload) => {
 function configureLocalServerEnvironment(port) {
   process.env.HOST = '127.0.0.1';
   process.env.PORT = String(port);
-  process.env.COOKIE_FILE = path.join(APP_PATHS.userData, '.cookie');
-  process.env.QQ_COOKIE_FILE = path.join(APP_PATHS.userData, '.qq-cookie');
   process.env.MINERADIO_PLATFORM_CACHE_FILE = APP_PATHS.platformCache;
   process.env.MINERADIO_LISTEN_SYNC_FILE = APP_PATHS.listenJournal;
-  process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
+  process.env.MINERADIO_UPDATE_DIR = APP_PATHS.updateDirectory;
+  process.env.MINERADIO_BEAT_CACHE_DIR = APP_PATHS.beatmapDirectory;
+  process.env.MINERADIO_LYRICS_DIR = APP_PATHS.lyricsDirectory;
+  process.env.MINERADIO_LOCAL_METADATA_DIR = APP_PATHS.localMetadataDirectory;
 }
 
 async function createWindow() {
+  await initializePlatformCredentialRuntime();
   htmlFullscreenActive = false;
   windowFullscreenActive = false;
   const port = await findOpenPort(3000);
@@ -1811,6 +1948,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    await initializePlatformCredentialRuntime();
     registerLocalFileProtocol();
     applySavedDesktopShellSettings();
     createTray();

@@ -12,7 +12,8 @@ function createNeteaseRoutes(deps) {
   const readRequestBody = requireFunction(deps, 'readRequestBody');
   const normalizeCookieHeader = requireFunction(deps, 'normalizeCookieHeader');
   const parseCookieString = requireFunction(deps, 'parseCookieString');
-  const saveCookie = requireFunction(deps, 'saveCookie');
+  const loginCredential = requireFunction(deps, 'loginCredential');
+  const logoutCredential = requireFunction(deps, 'logoutCredential');
   const getUserCookie = requireFunction(deps, 'getUserCookie');
   const getLoginInfo = requireFunction(deps, 'getLoginInfo');
   const handleSearchImpl = requireFunction(deps, 'handleSearch');
@@ -93,7 +94,7 @@ function createNeteaseRoutes(deps) {
         sendJSON(res, { loggedIn: false, error: 'INVALID_NETEASE_COOKIE', message: '网易云 cookie 缺少 MUSIC_U' }, 400);
         return;
       }
-      saveCookie(normalized);
+      await loginCredential(normalized);
       let info = await getLoginInfo();
       if (!info.loggedIn && cookie()) {
         info = {
@@ -160,7 +161,7 @@ function createNeteaseRoutes(deps) {
         }
       }
       if (code === 803) {
-        if (loginCookie) saveCookie(loginCookie);
+        if (loginCookie) await loginCredential(loginCookie);
         let info = await getLoginInfo();
         if (!info.loggedIn) {
           const profile = body.profile || (body.data && body.data.profile) || {};
@@ -190,8 +191,12 @@ function createNeteaseRoutes(deps) {
 
   async function handleLogout(_req, res) {
     try { await logout({ cookie: cookie() }); } catch (e) {}
-    saveCookie('');
-    sendJSON(res, { ok: true });
+    try {
+      await logoutCredential();
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      sendJSON(res, { ok: false, error: err.code || 'LOGOUT_FAILED' }, 500);
+    }
   }
 
   async function handleUserPlaylists(_req, res, url) {

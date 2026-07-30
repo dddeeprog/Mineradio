@@ -117,7 +117,6 @@ function createAccountContext(options) {
     if (!previous.scope) return;
     await clearScope(previous.scope);
     await clearInflight(provider);
-    await clearSession(provider);
   }
 
   function switchAccount(provider, account) {
@@ -133,6 +132,7 @@ function createAccountContext(options) {
     const nextAccount = publicAccount(account, true);
 
     return enqueue(provider, async () => {
+      const hadPrevious = states.has(provider);
       const previous = currentState(provider);
       states.set(provider, {
         ...previous,
@@ -142,6 +142,8 @@ function createAccountContext(options) {
         await cleanPrevious(provider, previous);
         await publish(provider, clone(nextAccount));
       } catch (_) {
+        if (hadPrevious) states.set(provider, previous);
+        else states.delete(provider);
         throw transitionError(provider);
       }
       states.set(provider, {
@@ -158,6 +160,7 @@ function createAccountContext(options) {
     const nextAccount = publicAccount({}, false);
 
     return enqueue(provider, async () => {
+      const hadPrevious = states.has(provider);
       const previous = currentState(provider);
       states.set(provider, {
         ...previous,
@@ -169,6 +172,8 @@ function createAccountContext(options) {
         await clearSession(provider);
         await publish(provider, clone(nextAccount));
       } catch (_) {
+        if (hadPrevious) states.set(provider, previous);
+        else states.delete(provider);
         throw transitionError(provider);
       }
       states.set(provider, {

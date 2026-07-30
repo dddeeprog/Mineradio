@@ -146,6 +146,56 @@ test('persists only encrypted envelope bytes and reads one provider', () => {
   assert.equal(reloaded.get('netease'), null);
 });
 
+test('persists and verifies a credential migration marker across restarts without exposing it', () => {
+  const migrationId = 'a'.repeat(64);
+  const safeStorage = createSafeStorage();
+  const disk = createMemoryDisk();
+  const store = createEncryptedStore(disk, { safeStorage });
+
+  store.set(
+    'netease',
+    { accountId: 'migration-user', cookie: 'MUSIC_U=migration-secret' },
+    { migrationId },
+  );
+
+  assert.equal(store.hasMigration('netease', migrationId), true);
+  assert.equal(store.hasMigration('netease', 'b'.repeat(64)), false);
+  const decrypted = JSON.parse(safeStorage.decryptString(disk.value()));
+  assert.equal(decrypted.providers.netease.migrationId, migrationId);
+
+  const reloaded = createEncryptedStore(disk, { safeStorage });
+  assert.equal(reloaded.hasMigration('netease', migrationId), true);
+  assert.equal(JSON.stringify(reloaded.snapshot()).includes(migrationId), false);
+  assert.equal(JSON.stringify(reloaded.snapshot()).includes('migration-secret'), false);
+});
+
+test('loads legacy encrypted records without migration markers and replaces stale markers on login', () => {
+  const safeStorage = createSafeStorage();
+  const migrationId = 'c'.repeat(64);
+  const disk = createMemoryDisk(encryptEnvelope(safeStorage, {
+    schema: CREDENTIAL_SCHEMA,
+    providers: {
+      qq: {
+        credential: { accountId: 'legacy-user', cookie: 'uin=legacy-secret' },
+        accountId: 'legacy-user',
+        updatedAt: TEST_NOW,
+      },
+    },
+  }));
+  const store = createEncryptedStore(disk, { safeStorage });
+
+  assert.equal(store.hasMigration('qq', migrationId), false);
+  store.set(
+    'qq',
+    { accountId: 'imported-user', cookie: 'uin=imported-secret' },
+    { migrationId },
+  );
+  assert.equal(store.hasMigration('qq', migrationId), true);
+
+  store.set('qq', { accountId: 'interactive-user', cookie: 'uin=interactive-secret' });
+  assert.equal(store.hasMigration('qq', migrationId), false);
+});
+
 test('encrypted stores refresh disk before merging sequential provider writes', () => {
   const disk = createMemoryDisk();
   const first = createEncryptedStore(disk);
@@ -273,9 +323,14 @@ test('memory-only mode never touches disk and is lost on restart', () => {
   const store = createCredentialStore(options);
 
   assert.deepEqual(
-    store.set('netease', { accountId: 'local', cookie: 'MUSIC_U=secret' }),
+    store.set(
+      'netease',
+      { accountId: 'local', cookie: 'MUSIC_U=secret' },
+      { migrationId: 'd'.repeat(64) },
+    ),
     { persisted: false, mode: 'memory-only' },
   );
+  assert.equal(store.hasMigration('netease', 'd'.repeat(64)), false);
   assert.deepEqual(store.get('netease'), {
     accountId: 'local',
     cookie: 'MUSIC_U=secret',
@@ -300,6 +355,24 @@ test('memory-only mode never touches disk and is lost on restart', () => {
   assert.equal(restarted.get('netease'), null);
   assert.equal(restarted.get('qq'), null);
   assert.deepEqual(diskAccess, []);
+});
+
+test('rejects invalid migration markers before writing and keeps errors secret-free', () => {
+  const disk = createMemoryDisk();
+  const store = createEncryptedStore(disk);
+
+  assert.throws(
+    () => store.set(
+      'spotify',
+      { refreshToken: 'migration-marker-secret' },
+      { migrationId: 'not-a-valid-marker' },
+    ),
+    error => error.code === 'CREDENTIAL_STORE_INVALID_MIGRATION_ID'
+      && !serializeError(error).includes('migration-marker-secret')
+      && !serializeError(error).includes('not-a-valid-marker'),
+  );
+  assert.equal(disk.calls.writes, 0);
+  assert.equal(store.get('spotify'), null);
 });
 
 test('memory-only logout can explicitly discard legacy ciphertext without reading or writing', () => {
