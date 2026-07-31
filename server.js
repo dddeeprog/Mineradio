@@ -63,6 +63,7 @@ const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer
 const {
   corsHeadersForOrigin,
   isAllowedCorsOrigin,
+  isAllowedRequestOrigin,
   isMethodAllowedForRoute,
   resolveBindHost,
 } = require('./server/security');
@@ -3315,7 +3316,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pn.startsWith('/api/') && !isAllowedCorsOrigin(req.headers.origin || '', PORT)) {
+  if (pn.startsWith('/api/') && !isAllowedRequestOrigin(
+    req.headers.origin || '',
+    PORT,
+    req.method,
+  )) {
     sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
     return;
   }

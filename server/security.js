@@ -138,6 +138,13 @@ function isAllowedCorsOrigin(origin, port) {
   return host === '127.0.0.1' || host === 'localhost';
 }
 
+function isAllowedRequestOrigin(origin, port, method) {
+  if (!isAllowedCorsOrigin(origin, port)) return false;
+  const raw = String(origin || '').trim();
+  const normalizedMethod = String(method || '').toUpperCase();
+  return raw !== '' || normalizedMethod === 'GET' || normalizedMethod === 'HEAD';
+}
+
 function corsHeadersForOrigin(origin, port) {
   if (!isAllowedCorsOrigin(origin, port) || !origin) return {};
   return {
@@ -165,6 +172,7 @@ module.exports = {
   assertHttpUrl,
   corsHeadersForOrigin,
   isAllowedCorsOrigin,
+  isAllowedRequestOrigin,
   isMethodAllowedForRoute,
   isStateChangingRoute,
   resolveBindHost,

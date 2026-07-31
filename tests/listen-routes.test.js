@@ -534,7 +534,8 @@ test('server registers one shared registry and a restartable reporting runtime b
   assert.match(server, /const implementationRegistry = createBaselineImplementationRegistry\(\)/);
   assert.match(server, /implementationRegistry\.register\('netease', 'recentPlayReport'\)/);
   assert.match(server, /implementationRegistry\.register\('netease', 'listenDurationReport'\)/);
-  assert.match(server, /listenReporting: true/);
+  assert.match(server, /const platformFeatureFlags = createReleaseFeatureFlags\(\)/);
+  assert.match(server, /featureFlags: platformFeatureFlags/);
   assert.match(server, /function createListenReportingRuntime\(\)/);
   assert.match(server, /let listenReporter = null/);
   assert.match(server, /if \(!listenReporter\) listenReporter = createListenReportingRuntime\(\)/);
@@ -582,6 +583,16 @@ test('real loopback server enforces origin and records local playback without ne
 
   const method = await fetch(`${base}/api/listen/report`);
   assert.equal(method.status, 405);
+  const missingOrigin = await fetch(`${base}/api/listen/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(missingOrigin.status, 403);
+  assert.deepEqual(await missingOrigin.json(), {
+    ok: false,
+    error: 'ORIGIN_NOT_ALLOWED',
+  });
   const origin = await fetch(`${base}/api/listen/report`, {
     method: 'POST',
     headers: {
@@ -615,7 +626,10 @@ test('real loopback server enforces origin and records local playback without ne
   ]) {
     const rejected = await fetch(`${base}/api/listen/report`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: base,
+      },
       body: JSON.stringify(invalid),
     });
     assert.equal(rejected.status, 422);
@@ -628,7 +642,10 @@ test('real loopback server enforces origin and records local playback without ne
 
   const response = await fetch(`${base}/api/listen/report`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: base,
+    },
     body: JSON.stringify(validEvent),
   });
   assert.equal(response.status, 200);
@@ -708,7 +725,10 @@ test('real server stays alive and retryable when a valid main exceeds restart co
 
   const response = await fetch(`${base}/api/listen/report`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: base,
+    },
     body: JSON.stringify({
       sessionId: 'degraded-new',
       confirmedPlayback: true,
@@ -780,7 +800,10 @@ test('real server recreates its reporting runtime after close and relisten', asy
       const port = server.address().port;
       const response = await fetch('http://127.0.0.1:' + port + '/api/listen/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://127.0.0.1:' + process.env.PORT,
+        },
         body: JSON.stringify(event(sessionId)),
       });
       return { status: response.status, body: await response.json() };

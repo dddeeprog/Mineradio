@@ -877,6 +877,10 @@ async function readLoopbackJson(response) {
   }
 }
 
+function loopbackOrigin(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
 async function desktopRequestJson(url, options, body) {
   const response = await fetch(url, {
     ...options,
@@ -909,7 +913,10 @@ async function commitPlatformCredential(provider, method, credential) {
       `http://127.0.0.1:${mainServerPort}/api/platform/login/import`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: loopbackOrigin(mainServerPort),
+        },
         body: JSON.stringify(body),
       },
     );
@@ -1063,7 +1070,10 @@ async function clearServerCredential(provider) {
       `http://127.0.0.1:${mainServerPort}/api/platform/logout`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: loopbackOrigin(mainServerPort),
+        },
         body: JSON.stringify({ provider }),
       },
     );

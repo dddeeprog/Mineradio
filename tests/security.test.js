@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   assertAllowedRemoteMediaUrl,
   isAllowedCorsOrigin,
+  isAllowedRequestOrigin,
   isStateChangingRoute,
   isMethodAllowedForRoute,
   resolveBindHost,
@@ -56,6 +57,31 @@ test('write-route CSRF boundary rejects non-loopback and mismatched origins', ()
   assert.equal(isAllowedCorsOrigin('http://localhost:34567', 34567), true);
   assert.equal(isAllowedCorsOrigin('https://music.example', 34567), false);
   assert.equal(isAllowedCorsOrigin('http://127.0.0.1:45678', 34567), false);
+});
+
+test('state-changing API requests reject a missing Origin', () => {
+  const trustedOrigin = 'http://127.0.0.1:34567';
+  for (const pathname of [
+    '/api/platform/login/import',
+    '/api/platform/logout',
+    '/api/album/collect',
+    '/api/song/comments',
+  ]) {
+    assert.equal(isStateChangingRoute(pathname), true);
+    assert.equal(
+      isAllowedRequestOrigin(trustedOrigin, 34567, 'POST'),
+      true,
+    );
+    assert.equal(isAllowedRequestOrigin('', 34567, 'POST'), false);
+    assert.equal(
+      isAllowedRequestOrigin('https://evil.example', 34567, 'POST'),
+      false,
+    );
+  }
+  assert.equal(
+    isAllowedRequestOrigin('', 34567, 'GET'),
+    true,
+  );
 });
 
 test('platform capability route is GET-only', () => {

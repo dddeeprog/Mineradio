@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -120,6 +121,38 @@ test('desktop exposes credential set clear and redacted status but no read-back 
   );
   assert.match(main, /commitLoginWindowCredential/);
   assert.doesNotMatch(renderer, /result\.cookie/);
+});
+
+test('desktop credential writes send the active loopback Origin', async (t) => {
+  let receivedOrigin = '';
+  const server = http.createServer((req, res) => {
+    receivedOrigin = String(req.headers.origin || '');
+    res.writeHead(204);
+    res.end();
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const port = server.address().port;
+  const origin = `http://127.0.0.1:${port}`;
+  const response = await fetch(`${origin}/write`, {
+    method: 'POST',
+    headers: { Origin: origin },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(receivedOrigin, origin);
+
+  const main = fs.readFileSync(
+    path.join(__dirname, '..', 'desktop', 'main.js'),
+    'utf8',
+  );
+  assert.match(main, /function loopbackOrigin\(port\)/);
+  assert.equal(
+    (main.match(/Origin:\s*loopbackOrigin\(mainServerPort\)/g) || []).length,
+    2,
+  );
 });
 
 test('desktop login runtime uses the generic guarded window and PKCE without secrets', () => {
