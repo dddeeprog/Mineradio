@@ -178,6 +178,53 @@ test('stable and beta release commands run complete non-publishing gates', () =>
   assert.doesNotMatch(scripts['build:win:beta'], /publish (?!never)/);
 });
 
+test('stable and beta release gates run one critical Playwright acceptance pass', () => {
+  const scripts = readJson('package.json').scripts;
+  const criticalUiGate = scripts['test:visual:release'];
+
+  assert.equal(typeof criticalUiGate, 'string');
+  assert.match(criticalUiGate, /^npm run test:visual -- --grep /);
+  for (const requiredFlow of [
+    'search, playlist, album, comment',
+    'home video persists',
+    'platform login fixture is usable',
+    'album and comment actions are usable',
+    'disabled browser runtime flags',
+    'all-source failure retains',
+    'commit-stage failure restores listen',
+    'Sonic Topography coexists',
+    'resource governor round-trips',
+    'Cuefield balanced mode',
+    'Cuefield setting migrates',
+    'wallpaper and complete desktop',
+    'settings expose complete desktop controls',
+  ]) {
+    assert.match(criticalUiGate, new RegExp(requiredFlow));
+  }
+
+  assert.doesNotMatch(scripts['test:visual'], /--grep/);
+  for (const releaseScript of ['verify:release', 'verify:release:beta']) {
+    const steps = scripts[releaseScript].split('&&').map(step => step.trim());
+    assert.equal(
+      steps.filter(step => step === 'npm run test:visual:release').length,
+      1,
+      `${releaseScript} must run the critical UI gate exactly once`,
+    );
+    assert.equal(steps.includes('npm run test:visual'), false);
+    assert.ok(
+      steps.indexOf('npm run test') < steps.indexOf('npm run test:visual:release'),
+      `${releaseScript} must run the UI gate after Node tests`,
+    );
+    assert.ok(
+      steps.indexOf('npm run test:visual:release') < steps.indexOf('npm run audit:prod'),
+      `${releaseScript} must run the UI gate before building`,
+    );
+  }
+
+  assert.doesNotMatch(scripts['build:win'], /test:visual/);
+  assert.doesNotMatch(scripts['build:win:beta'], /test:visual/);
+});
+
 test('every required license and source acquisition record is packaged in both profiles', () => {
   const pkg = readJson('package.json');
   const beta = readJson('build/electron-builder.beta.json');

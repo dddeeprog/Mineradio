@@ -44,7 +44,7 @@ test('maintenance baseline scripts are wired', () => {
   );
   assert.equal(
     scripts['verify:release'],
-    'npm run diagnostics:desktop && npm run check && npm run test && npm run audit:prod && npm run build:win && npm run verify:artifacts -- --fresh'
+    'npm run diagnostics:desktop && npm run check && npm run test && npm run test:visual:release && npm run audit:prod && npm run build:win && npm run verify:artifacts -- --fresh'
   );
   assert.equal(pkg.build.afterAllArtifactBuild, 'build/verify-release-artifacts.js');
   const githubPublisher = pkg.build.publish.find(
