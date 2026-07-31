@@ -11,6 +11,10 @@ function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
 }
 
+function readText(relativePath) {
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+}
+
 function fakeApp(appData, calls) {
   return {
     setName(name) {
@@ -65,6 +69,21 @@ test('stable and beta desktop build profiles are isolated but retain one release
   assert.equal(report.profiles.beta.publish.owner, 'English-worse');
   assert.equal(report.profiles.beta.publish.repo, 'Mineradio');
   assert.equal(report.profiles.beta.publish.channel, 'beta');
+});
+
+test('stable and beta installers use separate defaults without changing upgrade identity', () => {
+  const pkg = readJson('package.json');
+  const beta = readJson('build/electron-builder.beta.json');
+  const installer = readText('build/installer.nsh');
+
+  assert.equal(`D:\\${pkg.build.productName}`, 'D:\\Mineradio');
+  assert.equal(`D:\\${beta.productName}`, 'D:\\Mineradio Beta');
+  assert.notEqual(pkg.build.appId, beta.appId);
+  assert.notEqual(pkg.mineradioBuild.uninstallKey, beta.extraMetadata.mineradioBuild.uninstallKey);
+  assert.notEqual(pkg.mineradioBuild.updateChannel, beta.extraMetadata.mineradioBuild.updateChannel);
+  assert.match(installer, /StrCpy \$INSTDIR "D:\\\$\{PRODUCT_NAME\}"/);
+  assert.match(installer, /StrCpy \$0 "\$0\\\$\{PRODUCT_NAME\}"/);
+  assert.match(installer, /StrCpy \$0 "\$0\$\{PRODUCT_NAME\}"/);
 });
 
 test('beta metadata drives a separate runtime data root and application identity', () => {
