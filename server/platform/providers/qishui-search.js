@@ -1,7 +1,8 @@
 'use strict';
 
 /*
- * Public-catalog search adaptation from XxHuberrr/Mineradio v2.0.2
+ * Public-catalog search and read-only session-verification adaptation from
+ * XxHuberrr/Mineradio v2.0.2
  * commit 4abaa190de42c632365ae4244e041bad16443224 (GPL-3.0-only).
  * See THIRD_PARTY_NOTICES.md. Decryption and local-session discovery are absent.
  */
@@ -9,6 +10,8 @@
 const { normalizeSearchPage } = require('../search-model');
 
 const DEFAULT_ENDPOINT = 'https://api-vehicle.volcengine.com/v2/search/type';
+const ACCOUNT_ENDPOINT = 'https://api.qishui.com/luna/pc/me';
+const QISHUI_PC_USER_AGENT = 'LunaPC/3.3.0(359450208)';
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} is required`);
@@ -42,6 +45,184 @@ function firstUrl(value) {
     if (found) return found;
   }
   return '';
+}
+
+function qishuiUnverified(reason) {
+  return {
+    provider: 'qishui',
+    loggedIn: false,
+    verified: false,
+    verification: 'unverified',
+    reason,
+  };
+}
+
+function qishuiCookieReady(value) {
+  return /(?:^|;\s*)(?:sessionid|sessionid_ss|sid_guard|sid_tt|uid_tt|uid_tt_ss)=/i
+    .test(String(value || ''));
+}
+
+function qishuiResponseHasError(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return true;
+  }
+  for (const node of [payload, payload.data]) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+    for (const key of ['status_code', 'error_code', 'err_code']) {
+      if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+      const code = Number(node[key]);
+      if (!Number.isFinite(code) || code !== 0) return true;
+    }
+  }
+  return false;
+}
+
+function qishuiProfileObjects(payload) {
+  const data = payload && payload.data && typeof payload.data === 'object'
+    ? payload.data
+    : payload;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return [];
+  const profiles = [
+    data.my_info,
+    data.myInfo,
+    data.user,
+    data.user_info,
+    data.userInfo,
+    data.account,
+    data.me,
+    data,
+  ];
+  return profiles.filter(item => (
+    item && typeof item === 'object' && !Array.isArray(item)
+  ));
+}
+
+function qishuiAccountIdentity(payload) {
+  const profiles = qishuiProfileObjects(payload);
+  const primaryKeys = [
+    'id', 'user_id', 'userId', 'uid', 'account_id', 'accountId',
+  ];
+  const fallbackKeys = ['sec_uid', 'secUid', 'open_id', 'openId'];
+  for (const keys of [primaryKeys, fallbackKeys]) {
+    const matches = [];
+    for (const profile of profiles) {
+      for (const key of keys) {
+        const value = profile[key];
+        if (value === null || value === undefined || typeof value === 'object') {
+          continue;
+        }
+        const normalized = normalizeText(value);
+        if (normalized && normalized.length <= 256 && !/[\u0000-\u001f]/.test(normalized)) {
+          matches.push({ id: normalized, profile });
+        }
+      }
+    }
+    if (matches.length === 0) continue;
+    const ids = new Set(matches.map(item => item.id));
+    if (ids.size !== 1) return { inconsistent: true };
+    return {
+      id: matches[0].id,
+      profile: matches[0].profile,
+      profiles,
+    };
+  }
+  return { id: '', profiles };
+}
+
+function qishuiProfileText(profiles, keys) {
+  for (const profile of profiles) {
+    for (const key of keys) {
+      const value = profile && profile[key];
+      if (value === null || value === undefined || typeof value === 'object') {
+        continue;
+      }
+      const normalized = normalizeText(value);
+      if (normalized) return normalized;
+    }
+  }
+  return '';
+}
+
+function createQishuiAccountVerifier(options) {
+  options = options && typeof options === 'object' ? options : {};
+  const requestJson = requireFunction(options.requestJson, 'requestJson');
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+
+  return async function verifyQishuiAccount(credential) {
+    credential = credential && typeof credential === 'object' ? credential : {};
+    const cookie = typeof credential.cookie === 'string' ? credential.cookie : '';
+    if (!qishuiCookieReady(cookie)) {
+      return qishuiUnverified(
+        credential.token ? 'identity-endpoint-unavailable' : 'credential-incomplete',
+      );
+    }
+
+    const timestamp = Math.floor(Number(now()));
+    const deviceId = Number.isFinite(timestamp) && timestamp > 0
+      ? String(timestamp)
+      : String(Date.now());
+    const url = new URL(ACCOUNT_ENDPOINT);
+    const params = {
+      aid: '386088',
+      app_name: 'luna_pc',
+      region: 'cn',
+      geo_region: 'cn',
+      os_region: 'cn',
+      device_id: deviceId,
+      iid: String(Number(deviceId) + 1),
+      version_name: '3.3.0',
+      version_code: '30030000',
+      channel: 'official',
+      build_mode: 'master',
+      ac: 'wifi',
+      tz_name: 'Asia/Shanghai',
+      device_platform: 'windows',
+      device_type: 'Windows',
+      os_version: 'Windows 11',
+      fp: deviceId,
+    };
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.set(key, value);
+    });
+
+    let payload;
+    try {
+      payload = await requestJson(url.toString(), {
+        headers: {
+          Accept: 'application/json,text/plain,*/*',
+          'Content-Type': 'application/json; charset=utf-8',
+          'User-Agent': QISHUI_PC_USER_AGENT,
+          Cookie: cookie,
+          'x-luna-background-type': 'foreground',
+          'x-luna-is-background-req': '0',
+          'x-luna-is-local-user': '1',
+        },
+      });
+    } catch (_) {
+      return qishuiUnverified('remote-rejected');
+    }
+    if (qishuiResponseHasError(payload)) {
+      return qishuiUnverified('remote-rejected');
+    }
+
+    const identity = qishuiAccountIdentity(payload);
+    if (identity.inconsistent) return qishuiUnverified('identity-inconsistent');
+    if (!identity.id) return qishuiUnverified('identity-missing');
+    const profiles = [identity.profile, ...identity.profiles];
+    return {
+      provider: 'qishui',
+      loggedIn: true,
+      verified: true,
+      verification: 'verified',
+      accountId: identity.id,
+      nickname: qishuiProfileText(profiles, [
+        'nickname', 'nick_name', 'nickName', 'display_name', 'displayName',
+        'name', 'public_name', 'publicName', 'douyin_id',
+      ]) || '汽水音乐用户',
+      avatar: '',
+      membership: { known: false },
+    };
+  };
 }
 
 function mapQishuiItem(raw, index) {
@@ -176,5 +357,6 @@ function createQishuiSearchAdapter(options) {
 }
 
 module.exports = {
+  createQishuiAccountVerifier,
   createQishuiSearchAdapter,
 };

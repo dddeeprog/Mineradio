@@ -104,7 +104,10 @@ const {
   createKugouSearchAdapter,
 } = require('./server/platform/providers/kugou-search');
 const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
-const { createQishuiSearchAdapter } = require('./server/platform/providers/qishui-search');
+const {
+  createQishuiAccountVerifier,
+  createQishuiSearchAdapter,
+} = require('./server/platform/providers/qishui-search');
 const { createSpotifySearchAdapter } = require('./server/platform/providers/spotify-search');
 const {
   createNeteaseLibraryAdapter,
@@ -2829,16 +2832,6 @@ function logoutQQCredential() {
   return accountLifecycle.logout('qq');
 }
 
-function qishuiMetadataAccount() {
-  return {
-    loggedIn: true,
-    accountId: '',
-    nickname: '汽水音乐用户',
-    avatar: '',
-    membership: { known: false },
-  };
-}
-
 async function spotifyAccountFor(credential) {
   const accessToken = credential
     && typeof credential.accessToken === 'string'
@@ -2874,6 +2867,7 @@ const verifyKugouAccount = createKugouAccountVerifier({
   requestJson,
   userAgent: UA,
 });
+const verifyQishuiAccount = createQishuiAccountVerifier({ requestJson });
 
 async function loginPlatformCredential(provider, credential, method) {
   if (provider === 'netease') {
@@ -2896,10 +2890,16 @@ async function loginPlatformCredential(provider, credential, method) {
     );
   }
   if (provider === 'qishui') {
+    const account = await verifyQishuiAccount(credential);
+    if (!account.loggedIn || account.verified !== true) {
+      const error = new Error('Qishui account could not be verified');
+      error.code = 'PLATFORM_LOGIN_UNVERIFIABLE';
+      throw error;
+    }
     return accountLifecycle.login(
       provider,
       credential,
-      async () => qishuiMetadataAccount(),
+      async () => account,
     );
   }
   if (provider === 'spotify' && (method === 'pkce' || method === 'external-window')) {

@@ -215,4 +215,16 @@ test('in-process server uses the credential session and one account-scoped runti
       < kugouLogin.indexOf('accountLifecycle.login'),
   );
   assert.doesNotMatch(kugouLogin, /metadataAccountFor/);
+
+  const spotifyLoginStart = platformLogin.indexOf(
+    "if (provider === 'spotify'",
+    qishuiLoginStart,
+  );
+  const qishuiLogin = platformLogin.slice(qishuiLoginStart, spotifyLoginStart);
+  assert.match(qishuiLogin, /verifyQishuiAccount\(credential\)/);
+  assert.ok(
+    qishuiLogin.indexOf('verifyQishuiAccount(credential)')
+      < qishuiLogin.indexOf('accountLifecycle.login'),
+  );
+  assert.doesNotMatch(qishuiLogin, /qishuiMetadataAccount|loggedIn:\s*true/);
 });

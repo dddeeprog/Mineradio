@@ -12,9 +12,10 @@ const kugouProvider = require('../server/platform/providers/kugou-search');
 const {
   createKugouSearchAdapter,
 } = kugouProvider;
+const qishuiProvider = require('../server/platform/providers/qishui-search');
 const {
   createQishuiSearchAdapter,
-} = require('../server/platform/providers/qishui-search');
+} = qishuiProvider;
 const {
   createSpotifySearchAdapter,
 } = require('../server/platform/providers/spotify-search');
@@ -278,6 +279,101 @@ test('Qishui adapter ranks relevant public metadata and paginates locally', asyn
   assert.equal(page.records[0].durationMs, 210000);
   assert.equal(page.records[0].playable, false);
   assert.equal(page.pagination.nextOffset, 2);
+});
+
+test('Qishui account verification requires one remote account identity', async () => {
+  assert.equal(typeof qishuiProvider.createQishuiAccountVerifier, 'function');
+  const calls = [];
+  const verify = qishuiProvider.createQishuiAccountVerifier({
+    now: () => 1_700_000_000_000,
+    async requestJson(url, options) {
+      calls.push({ url, options });
+      return {
+        status_code: 0,
+        data: {
+          my_info: {
+            user_id: 'qishui-user',
+            nickname: 'Verified Listener',
+          },
+        },
+      };
+    },
+  });
+
+  const account = await verify({
+    cookie: 'sessionid=qishui-secret; sid_tt=qishui-sid',
+  });
+  const requestUrl = new URL(calls[0].url);
+
+  assert.equal(requestUrl.origin, 'https://api.qishui.com');
+  assert.equal(requestUrl.pathname, '/luna/pc/me');
+  assert.equal(requestUrl.searchParams.get('aid'), '386088');
+  assert.equal(requestUrl.searchParams.get('app_name'), 'luna_pc');
+  assert.equal(calls[0].options.headers.Cookie.includes('qishui-secret'), true);
+  assert.equal(calls[0].options.headers['x-luna-is-local-user'], '1');
+  assert.equal(account.loggedIn, true);
+  assert.equal(account.verified, true);
+  assert.equal(account.accountId, 'qishui-user');
+  assert.equal(account.nickname, 'Verified Listener');
+  assert.equal(JSON.stringify(account).includes('qishui-secret'), false);
+});
+
+test('Qishui account verification fails closed for unverified credentials', async t => {
+  assert.equal(typeof qishuiProvider.createQishuiAccountVerifier, 'function');
+  const cookie = 'sessionid=qishui-secret; sid_tt=qishui-sid';
+  const fixtures = {
+    'http 401': () => {
+      const error = new Error('401 with qishui-secret');
+      error.statusCode = 401;
+      throw error;
+    },
+    'provider error': () => ({
+      status_code: 1001,
+      data: { my_info: { user_id: 'qishui-user' } },
+    }),
+    'missing account id': () => ({
+      status_code: 0,
+      data: { my_info: { nickname: 'No identity' } },
+    }),
+    'inconsistent account ids': () => ({
+      status_code: 0,
+      data: {
+        user_id: 'other-user',
+        my_info: { user_id: 'qishui-user' },
+      },
+    }),
+  };
+
+  for (const [name, response] of Object.entries(fixtures)) {
+    await t.test(name, async () => {
+      const verify = qishuiProvider.createQishuiAccountVerifier({
+        async requestJson() {
+          return response();
+        },
+      });
+      const account = await verify({ cookie });
+
+      assert.equal(account.loggedIn, false);
+      assert.equal(account.verified, false);
+      assert.equal(JSON.stringify(account).includes('qishui-secret'), false);
+    });
+  }
+
+  await t.test('token without an identity boundary', async () => {
+    let calls = 0;
+    const verify = qishuiProvider.createQishuiAccountVerifier({
+      async requestJson() {
+        calls += 1;
+        return {};
+      },
+    });
+    const account = await verify({ token: 'qishui-token-secret' });
+
+    assert.equal(account.loggedIn, false);
+    assert.equal(account.verified, false);
+    assert.equal(calls, 0);
+    assert.equal(JSON.stringify(account).includes('qishui-token-secret'), false);
+  });
 });
 
 test('Spotify adapter searches with the encrypted-session access token', async () => {
