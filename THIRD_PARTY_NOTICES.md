@@ -30,9 +30,9 @@ Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必
 - 上游仓库：`https://github.com/XxHuberrr/Mineradio`
 - 固定 commit：`4abaa190de42c632365ae4244e041bad16443224`
 - 改编位置：`desktop/app-paths.js`、`desktop/main.js`、`desktop/system-memory-state.js`、桌面壁纸与图标模块、`server.js`、`server/platform/`、平台路由、`public/application-assembly.js`、`public/platform-*-state.js`、`public/platform-*-ui.js`、`public/playback-transaction.js`、`public/resource-governor.js`、Sonic Topography 与完整桌面相关模块。
-- 改编范围：稳定/Beta 数据目录、平台能力与账号隔离模型、多平台目录搜索、应用装配、播放事务、资源治理、有界 Sonic Topography 生命周期，以及 WorkerW/Progman 回退、Explorer 重启恢复、Wallpaper Engine 属性桥接和不接管真实 Windows Shell 的受限桌面图标视觉。
+- 改编范围：稳定/Beta 数据目录、平台能力与账号隔离模型、多平台目录搜索、酷狗只读远端会话验证、应用装配、播放事务、资源治理、有界 Sonic Topography 生命周期，以及 WorkerW/Progman 回退、Explorer 重启恢复、Wallpaper Engine 属性桥接和不接管真实 Windows Shell 的受限桌面图标视觉。
 - 许可证：GNU General Public License v3.0 only，完整文本见仓库根目录 `LICENSE`。
-- 功能边界：新增搜索适配仅返回公开目录元数据，不移植上游的音频解密、本地会话发现、账号写入或播放绕过逻辑；完整桌面只管理 Mineradio 壁纸窗口与视觉图标，不读取任意桌面文件、不替换 Explorer、不持有真实 Shell 图标。
+- 功能边界：新增搜索适配仅返回公开目录元数据；酷狗登录仅以只读歌单接口核对会话返回的用户 ID，验证通过后才交由本地账号生命周期保存。未移植上游的音频解密、本地会话发现、账号写入或播放绕过逻辑；完整桌面只管理 Mineradio 壁纸窗口与视觉图标，不读取任意桌面文件、不替换 Explorer、不持有真实 Shell 图标。
 
 ## yin-yizhen / Sonic Topography
 

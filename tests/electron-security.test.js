@@ -194,4 +194,25 @@ test('in-process server uses the credential session and one account-scoped runti
   );
   assert.match(neteaseLogin, /getLoginInfo/);
   assert.doesNotMatch(neteaseLogin, /pendingProfile|loggedIn:\s*true/);
+
+  const platformLoginStart = serverSource.indexOf(
+    'function loginPlatformCredential',
+  );
+  const platformLoginEnd = serverSource.indexOf(
+    'function logoutPlatformCredential',
+    platformLoginStart,
+  );
+  const platformLogin = serverSource.slice(platformLoginStart, platformLoginEnd);
+  const kugouLoginStart = platformLogin.indexOf("if (provider === 'kugou'");
+  const qishuiLoginStart = platformLogin.indexOf(
+    "if (provider === 'qishui'",
+    kugouLoginStart,
+  );
+  const kugouLogin = platformLogin.slice(kugouLoginStart, qishuiLoginStart);
+  assert.match(kugouLogin, /verifyKugouAccount\(credential\)/);
+  assert.ok(
+    kugouLogin.indexOf('verifyKugouAccount(credential)')
+      < kugouLogin.indexOf('accountLifecycle.login'),
+  );
+  assert.doesNotMatch(kugouLogin, /metadataAccountFor/);
 });

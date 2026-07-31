@@ -8,9 +8,10 @@ const test = require('node:test');
 const {
   createLegacySearchAdapter,
 } = require('../server/platform/providers/legacy-search');
+const kugouProvider = require('../server/platform/providers/kugou-search');
 const {
   createKugouSearchAdapter,
-} = require('../server/platform/providers/kugou-search');
+} = kugouProvider;
 const {
   createQishuiSearchAdapter,
 } = require('../server/platform/providers/qishui-search');
@@ -137,6 +138,90 @@ test('Kugou adapter uses the bounded public catalogue request and metadata model
   assert.equal(page.records[0].playable, false);
   assert.equal(page.pagination.total, 30);
   assert.equal(page.pagination.hasMore, true);
+});
+
+test('Kugou account verification requires a matching remote user id', async () => {
+  assert.equal(typeof kugouProvider.createKugouAccountVerifier, 'function');
+  const credential = {
+    cookie: 'userid=12345; token=kugou-secret; kg_mid=fixed-mid; kg_dfid=fixed-dfid',
+  };
+  const calls = [];
+  const verify = kugouProvider.createKugouAccountVerifier({
+    now: () => 1_700_000_000_000,
+    async requestJson(url, options, body) {
+      calls.push({ url, options, body });
+      return {
+        status: 1,
+        error_code: 0,
+        data: {
+          info: {
+            self: [{
+              list_create_userid: '12345',
+              list_create_username: 'Verified Listener',
+            }],
+          },
+        },
+      };
+    },
+  });
+
+  const account = await verify(credential);
+  const requestUrl = new URL(calls[0].url);
+  const requestBody = JSON.parse(calls[0].body);
+
+  assert.equal(requestUrl.origin, 'https://gateway.kugou.com');
+  assert.equal(requestUrl.pathname, '/v7/get_all_list');
+  assert.equal(calls[0].options.headers['x-router'], 'cloudlist.service.kugou.com');
+  assert.equal(requestBody.userid, 12345);
+  assert.equal(requestBody.token, 'kugou-secret');
+  assert.equal(account.loggedIn, true);
+  assert.equal(account.verified, true);
+  assert.equal(account.accountId, '12345');
+  assert.equal(account.nickname, 'Verified Listener');
+  assert.equal(JSON.stringify(account).includes('kugou-secret'), false);
+});
+
+test('Kugou account verification fails closed for rejected or unbound sessions', async t => {
+  assert.equal(typeof kugouProvider.createKugouAccountVerifier, 'function');
+  const credential = {
+    cookie: 'userid=12345; token=kugou-secret; kg_mid=fixed-mid; kg_dfid=fixed-dfid',
+  };
+  const fixtures = {
+    'http 401': () => {
+      const error = new Error('401 with kugou-secret');
+      error.statusCode = 401;
+      throw error;
+    },
+    'provider error': () => ({
+      status: 1,
+      error_code: 1001,
+      data: { userid: '12345' },
+    }),
+    'missing user id': () => ({ status: 1, error_code: 0, data: {} }),
+    'different user id': () => ({
+      status: 1,
+      error_code: 0,
+      data: { userid: '54321' },
+    }),
+  };
+
+  for (const [name, response] of Object.entries(fixtures)) {
+    await t.test(name, async () => {
+      let accountLifecycleCalls = 0;
+      const verify = kugouProvider.createKugouAccountVerifier({
+        async requestJson() {
+          return response();
+        },
+      });
+      const account = await verify(credential);
+      if (account.loggedIn === true) accountLifecycleCalls += 1;
+
+      assert.equal(account.loggedIn, false);
+      assert.equal(account.verified, false);
+      assert.equal(accountLifecycleCalls, 0);
+      assert.equal(JSON.stringify(account).includes('kugou-secret'), false);
+    });
+  }
 });
 
 test('Qishui adapter ranks relevant public metadata and paginates locally', async () => {

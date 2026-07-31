@@ -1,16 +1,27 @@
 'use strict';
 
 /*
- * Search-only adaptation from XxHuberrr/Mineradio v2.0.2
+ * Catalogue-search and read-only session-verification adaptation from
+ * XxHuberrr/Mineradio v2.0.2
  * commit 4abaa190de42c632365ae4244e041bad16443224 (GPL-3.0-only).
- * See THIRD_PARTY_NOTICES.md. Playback and account APIs are intentionally absent.
+ * See THIRD_PARTY_NOTICES.md. Playback and account mutation APIs are absent.
  */
 
 const crypto = require('node:crypto');
 const { normalizeSearchPage } = require('../search-model');
 
 const DEFAULT_ENDPOINT = 'http://songsearch.kugou.com/song_search_v2';
+const ACCOUNT_ENDPOINT = 'https://gateway.kugou.com/v7/get_all_list';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36';
+const KUGOU_H5_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt';
+const KUGOU_ACCOUNT_ID_KEYS = new Set([
+  'userid',
+  'user_id',
+  'uid',
+  'kugooid',
+  'list_create_userid',
+  'owner_id',
+]);
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} is required`);
@@ -39,6 +50,215 @@ function kugouCoverUrl(value) {
     .replace(/\{size\}/gi, '240')
     .replace(/\{width\}/gi, '240')
     .trim();
+}
+
+function parseCookieString(value) {
+  const parsed = Object.create(null);
+  String(value || '').split(';').forEach(part => {
+    const index = part.indexOf('=');
+    if (index <= 0) return;
+    const key = part.slice(0, index).trim();
+    const item = part.slice(index + 1).trim();
+    if (key) parsed[key] = item;
+  });
+  return parsed;
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ''));
+  } catch (_) {
+    return String(value || '');
+  }
+}
+
+function parseKugouCompound(value) {
+  const parsed = Object.create(null);
+  safeDecodeURIComponent(value).split('&').forEach(part => {
+    const index = part.indexOf('=');
+    if (index <= 0) return;
+    const key = part.slice(0, index).trim();
+    const item = part.slice(index + 1).trim();
+    if (key) parsed[key] = item;
+  });
+  return parsed;
+}
+
+function firstKugouValue(objects, keys) {
+  for (const object of objects) {
+    for (const key of keys) {
+      const value = object && object[key];
+      if (value !== undefined && value !== null && String(value).trim()) {
+        return String(value).trim();
+      }
+    }
+  }
+  return '';
+}
+
+function normalizeKugouUserId(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d{1,20}$/.test(text)) return '';
+  const normalized = text.replace(/^0+(?=\d)/, '');
+  return normalized === '0' ? '' : normalized;
+}
+
+function extractKugouAuth(credential) {
+  const cookieText = credential && typeof credential.cookie === 'string'
+    ? credential.cookie
+    : '';
+  const cookie = parseCookieString(cookieText);
+  const compound = parseKugouCompound(
+    cookie.KuGoo || cookie.Kugou || cookie.kugou || '',
+  );
+  const sources = [cookie, compound];
+  return {
+    cookie: cookieText,
+    userId: normalizeKugouUserId(firstKugouValue(sources, [
+      'userid', 'UserId', 'KugooID', 'kugouID', 'uid',
+    ])),
+    token: firstKugouValue(sources, ['token', 'Token', 't', 'T']),
+    mid: firstKugouValue(sources, [
+      'kg_mid', 'KG_MID', 'KUGOU_API_MID', 'mid',
+    ]),
+    dfid: firstKugouValue(sources, ['kg_dfid', 'KG_DFID', 'dfid', 'DFID']),
+    nickname: safeDecodeURIComponent(firstKugouValue(sources, [
+      'NickName', 'nickname', 'UserName', 'username',
+    ])),
+  };
+}
+
+function kugouH5Signature(params, body) {
+  const parts = Object.keys(params)
+    .sort()
+    .map(key => `${key}=${params[key]}`);
+  parts.push(JSON.stringify(body));
+  return crypto.createHash('md5')
+    .update(`${KUGOU_H5_SALT}${parts.join('')}${KUGOU_H5_SALT}`)
+    .digest('hex');
+}
+
+function findMatchingKugouIdentity(payload, expectedUserId) {
+  const queue = [{ value: payload, depth: 0 }];
+  const visited = new WeakSet();
+  let inspected = 0;
+  while (queue.length > 0 && inspected < 256) {
+    const { value, depth } = queue.shift();
+    if (!value || typeof value !== 'object' || visited.has(value)) continue;
+    visited.add(value);
+    inspected += 1;
+    for (const [key, item] of Object.entries(value)) {
+      if (KUGOU_ACCOUNT_ID_KEYS.has(key.toLowerCase())
+        && normalizeKugouUserId(item) === expectedUserId) {
+        return value;
+      }
+      if (depth < 6 && item && typeof item === 'object') {
+        queue.push({ value: item, depth: depth + 1 });
+      }
+    }
+  }
+  return null;
+}
+
+function unverifiedKugouAccount(reason) {
+  return {
+    provider: 'kugou',
+    loggedIn: false,
+    verified: false,
+    verification: 'unverified',
+    reason,
+  };
+}
+
+function createKugouAccountVerifier(options) {
+  options = options && typeof options === 'object' ? options : {};
+  const requestJson = requireFunction(options.requestJson, 'requestJson');
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const userAgent = String(options.userAgent || DEFAULT_USER_AGENT);
+  const fallbackMid = String(
+    options.mid || crypto.randomBytes(16).toString('hex'),
+  );
+
+  return async function verifyKugouAccount(credential) {
+    const auth = extractKugouAuth(credential);
+    const numericUserId = Number(auth.userId);
+    if (!auth.userId || !auth.token || !Number.isSafeInteger(numericUserId)) {
+      return unverifiedKugouAccount('credential-incomplete');
+    }
+
+    const timestamp = Math.floor(Number(now()));
+    const body = {
+      userid: numericUserId,
+      token: auth.token,
+      total_ver: 979,
+      type: 2,
+      page: 1,
+      pagesize: 20,
+    };
+    const params = {
+      srcappid: '2919',
+      clientver: '20000',
+      clienttime: timestamp,
+      mid: auth.mid || fallbackMid,
+      uuid: timestamp,
+      dfid: auth.dfid || '-',
+      appid: '1014',
+      token: auth.token,
+      userid: numericUserId,
+      plat: 1,
+    };
+    params.signature = kugouH5Signature(params, body);
+    const url = new URL(ACCOUNT_ENDPOINT);
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.set(key, String(value));
+    });
+
+    let payload;
+    try {
+      payload = await requestJson(url.toString(), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Referer: 'https://www.kugou.com/',
+          'User-Agent': userAgent,
+          Cookie: auth.cookie,
+          'x-router': 'cloudlist.service.kugou.com',
+        },
+      }, JSON.stringify(body));
+    } catch (_) {
+      return unverifiedKugouAccount('remote-rejected');
+    }
+
+    const errorCode = payload && (
+      payload.error_code ?? payload.errorCode ?? payload.errcode
+    );
+    if (!payload
+      || Number(payload.status) !== 1
+      || (errorCode !== undefined && Number(errorCode) !== 0)) {
+      return unverifiedKugouAccount('remote-rejected');
+    }
+    const identity = findMatchingKugouIdentity(payload.data, auth.userId);
+    if (!identity) return unverifiedKugouAccount('identity-unbound');
+
+    const nickname = stripKugouHtml(firstKugouValue([identity], [
+      'list_create_username',
+      'nickname',
+      'username',
+      'user_name',
+      'owner_name',
+    ]) || auth.nickname || '酷狗音乐用户');
+    return {
+      provider: 'kugou',
+      loggedIn: true,
+      verified: true,
+      verification: 'verified',
+      accountId: auth.userId,
+      nickname,
+      avatar: '',
+      membership: { known: false },
+    };
+  };
 }
 
 function mapKugouItem(item) {
@@ -148,5 +368,6 @@ function createKugouSearchAdapter(options) {
 }
 
 module.exports = {
+  createKugouAccountVerifier,
   createKugouSearchAdapter,
 };

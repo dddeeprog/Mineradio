@@ -99,7 +99,10 @@ const {
   loadOrCreateReportingBindingSecret,
 } = require('./server/platform/listen-reporter');
 const { createSearchAggregator } = require('./server/platform/search-aggregator');
-const { createKugouSearchAdapter } = require('./server/platform/providers/kugou-search');
+const {
+  createKugouAccountVerifier,
+  createKugouSearchAdapter,
+} = require('./server/platform/providers/kugou-search');
 const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
 const { createQishuiSearchAdapter } = require('./server/platform/providers/qishui-search');
 const { createSpotifySearchAdapter } = require('./server/platform/providers/spotify-search');
@@ -2826,20 +2829,7 @@ function logoutQQCredential() {
   return accountLifecycle.logout('qq');
 }
 
-function metadataAccountFor(provider, credential) {
-  credential = credential && typeof credential === 'object' ? credential : {};
-  const cookie = typeof credential.cookie === 'string'
-    ? parseCookieString(credential.cookie)
-    : {};
-  if (provider === 'kugou') {
-    return {
-      loggedIn: true,
-      accountId: cookie.userid || cookie.KugooID || '',
-      nickname: cookie.NickName || '酷狗音乐用户',
-      avatar: '',
-      membership: { known: false },
-    };
-  }
+function qishuiMetadataAccount() {
   return {
     loggedIn: true,
     accountId: '',
@@ -2880,18 +2870,36 @@ async function spotifyAccountFor(credential) {
   };
 }
 
-function loginPlatformCredential(provider, credential, method) {
+const verifyKugouAccount = createKugouAccountVerifier({
+  requestJson,
+  userAgent: UA,
+});
+
+async function loginPlatformCredential(provider, credential, method) {
   if (provider === 'netease') {
     return loginNeteaseCredential(credential && credential.cookie);
   }
   if (provider === 'qq') {
     return loginQQCredential(credential && credential.cookie);
   }
-  if (provider === 'kugou' || provider === 'qishui') {
+  if (provider === 'kugou') {
+    const account = await verifyKugouAccount(credential);
+    if (!account.loggedIn || account.verified !== true) {
+      const error = new Error('Kugou account could not be verified');
+      error.code = 'PLATFORM_LOGIN_UNVERIFIABLE';
+      throw error;
+    }
     return accountLifecycle.login(
       provider,
       credential,
-      async () => metadataAccountFor(provider, credential),
+      async () => account,
+    );
+  }
+  if (provider === 'qishui') {
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => qishuiMetadataAccount(),
     );
   }
   if (provider === 'spotify' && (method === 'pkce' || method === 'external-window')) {
