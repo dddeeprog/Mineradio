@@ -151,6 +151,7 @@ test('after-pack generates installer manifests only after executable resources a
       events.push('manifest');
       assert.equal(options.appOutDir, appOutDir);
       assert.equal(options.productName, 'Mineradio');
+      assert.equal(options.productFilename, 'Mineradio');
       assert.equal(options.appId, 'com.mineradio.desktop');
       assert.equal(options.version, '1.1.0');
       assert.equal(options.channel, 'stable');
@@ -179,7 +180,7 @@ test('after-pack derives beta channel from electron-builder extra metadata', asy
   const appOutDir = path.join(projectDir, 'dist-beta', 'win-unpacked');
   const buildResourcesDir = path.join(projectDir, 'build');
   touch(path.join(projectDir, 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe'));
-  touch(path.join(appOutDir, 'Mineradio Beta.exe'));
+  touch(path.join(appOutDir, 'MineradioBeta.exe'));
   touch(path.join(buildResourcesDir, 'icon.ico'));
 
   await afterPack({
@@ -193,7 +194,7 @@ test('after-pack derives beta channel from electron-builder extra metadata', asy
       },
       appInfo: {
         id: 'com.mineradio.desktop.beta',
-        productFilename: 'Mineradio Beta',
+        productFilename: 'MineradioBeta',
         productName: 'Mineradio Beta',
         version: '1.1.0',
       },
@@ -225,6 +226,7 @@ test('after-pack derives beta channel from electron-builder extra metadata', asy
     },
     generateInstallerManifest(options) {
       assert.equal(options.channel, 'beta');
+      assert.equal(options.productFilename, 'MineradioBeta');
       assert.match(options.buildId, /^beta-1\.1\.0-/);
       return { manifest: { manifestSha256: 'B'.repeat(64) } };
     },

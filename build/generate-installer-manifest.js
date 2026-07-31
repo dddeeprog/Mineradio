@@ -7,7 +7,6 @@ const { normalizeRelativeInstallEntry } = require('./installer-safety.js');
 const DEFAULT_INSTALLER_FILES = [
   '.mineradio-install-manifest.json',
   '.mineradio-install-owner.json',
-  'Uninstall Mineradio.exe',
   'uninstallerIcon.ico',
 ];
 const OWNERSHIP_MARKER_PATH = '.mineradio-install-owner.json';
@@ -157,9 +156,16 @@ function serializeInstallerManifest(manifest) {
 function createInstallerManifest(options) {
   const input = options || {};
   const collected = collectInstallEntries(input.appOutDir);
+  const productFilename = requireMetadata(
+    input.productFilename || input.productName,
+    'Product filename',
+  );
   const configuredInstallerFiles = Array.isArray(input.installerFiles)
     ? input.installerFiles
-    : DEFAULT_INSTALLER_FILES;
+    : [
+        ...DEFAULT_INSTALLER_FILES,
+        `Uninstall ${productFilename}.exe`,
+      ];
   const installerFiles = [
     OWNERSHIP_MARKER_PATH,
     ...configuredInstallerFiles,

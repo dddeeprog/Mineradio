@@ -91,6 +91,25 @@ test('generates a complete deterministic manifest from the packaged app director
   assert.ok(generated.every((entry) => entry.size === null && entry.sha256 === null));
 });
 
+test('manifest tracks the channel-specific NSIS uninstaller filename', () => {
+  const appOutDir = fixtureTree();
+  const stable = createInstallerManifest({
+    ...options(appOutDir),
+    productFilename: 'Mineradio',
+  });
+  const beta = createInstallerManifest({
+    ...options(appOutDir),
+    productName: 'Mineradio Beta',
+    productFilename: 'MineradioBeta',
+    appId: 'com.mineradio.desktop.beta',
+    channel: 'beta',
+  });
+
+  assert.ok(stable.files.some((entry) => entry.path === 'Uninstall Mineradio.exe'));
+  assert.ok(beta.files.some((entry) => entry.path === 'Uninstall MineradioBeta.exe'));
+  assert.ok(!beta.files.some((entry) => entry.path === 'Uninstall Mineradio.exe'));
+});
+
 test('renders allowlisted NSIS cleanup without recursive installation-directory removal', () => {
   const manifest = createInstallerManifest(options(fixtureTree()));
   const include = renderNsisDeleteInclude(manifest);

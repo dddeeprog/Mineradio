@@ -85,12 +85,43 @@ function platformTargets(...targetNames) {
   ]);
 }
 
+test('artifact verifier binds the manifest uninstaller to the packaged product filename', () => {
+  const stableManifest = {
+    files: [{
+      path: 'Uninstall Mineradio.exe',
+      size: null,
+      sha256: null,
+      source: 'installer',
+    }],
+  };
+  const betaManifest = {
+    files: [{
+      path: 'Uninstall MineradioBeta.exe',
+      size: null,
+      sha256: null,
+      source: 'installer',
+    }],
+  };
+
+  assert.doesNotThrow(
+    () => artifactVerifier.assertInstallerUninstallerEntry(stableManifest, 'Mineradio'),
+  );
+  assert.doesNotThrow(
+    () => artifactVerifier.assertInstallerUninstallerEntry(betaManifest, 'MineradioBeta'),
+  );
+  assert.throws(
+    () => artifactVerifier.assertInstallerUninstallerEntry(stableManifest, 'MineradioBeta'),
+    /uninstaller/i,
+  );
+});
+
 function buildFixture(options = {}) {
   const repoDir = makeTempDir();
   const distDir = path.join(repoDir, 'dist');
   const appOutDir = path.join(distDir, 'win-unpacked');
   const version = options.version || '1.1.0';
   const productName = options.productName || 'Mineradio';
+  const productFilename = options.productFilename || productName;
   const appId = options.appId || 'com.mineradio.desktop';
   const channel = options.channel || 'stable';
   const commit = options.commit || COMMIT;
@@ -137,6 +168,7 @@ function buildFixture(options = {}) {
       appId,
       files: BUILD_FILES,
       productName,
+      win: { executableName: productFilename },
     },
   };
   writeJson(path.join(repoDir, 'package.json'), packageMetadata);
@@ -182,6 +214,12 @@ function buildFixture(options = {}) {
     sha256: sha256(packagedPackageContents),
     source: 'package',
   });
+  manifestFiles.push({
+    path: `Uninstall ${productFilename}.exe`,
+    size: null,
+    sha256: null,
+    source: 'installer',
+  });
 
   const dependencies = sourceIdentity.createProductionDependencyProof({
     appDir: path.join(appOutDir, 'resources', 'app'),
@@ -219,6 +257,7 @@ function buildFixture(options = {}) {
     installerPath,
     manifest,
     manifestPath,
+    productFilename,
     productName,
     repoDir,
     version,
@@ -751,6 +790,7 @@ test('beta artifact uses the isolated builder identity and canonical release own
     channel: 'beta',
     installerName: 'Mineradio-Beta-1.1.0-Setup.exe',
     productName: 'Mineradio Beta',
+    productFilename: 'MineradioBeta',
   });
   const pkg = JSON.parse(fs.readFileSync(path.join(fixture.repoDir, 'package.json'), 'utf8'));
   writeJson(path.join(fixture.repoDir, 'build', 'electron-builder.beta.json'), {
@@ -758,6 +798,7 @@ test('beta artifact uses the isolated builder identity and canonical release own
     productName: fixture.productName,
     directories: { output: 'dist-beta' },
     files: BUILD_FILES,
+    win: { executableName: fixture.productFilename },
     nsis: { artifactName: 'Mineradio-Beta-${version}-Setup.${ext}' },
     publish: [{
       provider: 'github',

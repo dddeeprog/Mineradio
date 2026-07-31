@@ -385,6 +385,33 @@ function normalizeInstallPath(value) {
   return String(value || '').replace(/\//g, '\\').toLowerCase();
 }
 
+function assertInstallerUninstallerEntry(manifest, productFilename) {
+  if (!isRecord(manifest) || !Array.isArray(manifest.files)) {
+    throw new Error('Installer manifest files are missing or malformed.');
+  }
+  const expectedPath = `Uninstall ${requireString(
+    productFilename,
+    'Package product filename',
+  )}.exe`;
+  const uninstallers = manifest.files.filter((entry) => (
+    isRecord(entry)
+    && entry.source === 'installer'
+    && /^uninstall [^\\/]+\.exe$/i.test(String(entry.path || ''))
+  ));
+  if (uninstallers.length !== 1) {
+    throw new Error('Installer manifest must contain exactly one generated uninstaller entry.');
+  }
+  const [uninstaller] = uninstallers;
+  assertEqual(
+    normalizeInstallPath(uninstaller.path),
+    normalizeInstallPath(expectedPath),
+    'Installer manifest uninstaller filename',
+  );
+  if (uninstaller.size !== null || uninstaller.sha256 !== null) {
+    throw new Error('Installer manifest uninstaller metadata is malformed.');
+  }
+}
+
 function installerManifestDigest(manifest) {
   const copy = { ...manifest };
   delete copy.manifestSha256;
@@ -493,6 +520,10 @@ function readPackageReleaseConfig(repoDir, options) {
     buildConfig.productName || metadata.productName,
     'Package product name',
   );
+  const productFilename = requireString(
+    buildConfig.win && buildConfig.win.executableName || productName,
+    'Package product filename',
+  );
   const appId = requireString(buildConfig.appId, 'Package app ID');
   const version = requireString(pkg.version, 'Package version');
   const release = pkg.mineradio && pkg.mineradio.release;
@@ -566,6 +597,7 @@ function readPackageReleaseConfig(repoDir, options) {
       || declaredBuild.outputDirectory
       || (channel === 'beta' ? 'dist-beta' : 'dist'),
     pkg,
+    productFilename,
     productName,
     repo,
     signingPolicy,
@@ -624,6 +656,7 @@ function assertBuildIdentity(manifest, releaseConfig, identity) {
   if (identity.createdAt) {
     assertEqual(manifest.createdAt, identity.createdAt, 'Build createdAt');
   }
+  assertInstallerUninstallerEntry(manifest, releaseConfig.productFilename);
 }
 
 function assertDependencyProof(actual, expected, label) {
@@ -1484,6 +1517,7 @@ Object.assign(afterAllArtifactBuild, {
   ATTESTATION_SUFFIX,
   RELEASE_MATERIALS,
   TEXT_FILE_LIMITS,
+  assertInstallerUninstallerEntry,
   assertNoUnexpectedReleaseOutputs,
   attestationPathFor,
   buildAuthenticodeStatusCommand,

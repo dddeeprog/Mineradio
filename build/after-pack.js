@@ -182,6 +182,7 @@ async function afterPack(context, dependencies) {
   return manifestGenerator({
     appOutDir: context.appOutDir,
     productName,
+    productFilename: appName,
     appId: context.packager.appInfo.id,
     version,
     ...identity,
