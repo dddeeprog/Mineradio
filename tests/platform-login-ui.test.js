@@ -133,6 +133,8 @@ test('application shell wires the five-provider capability-driven login flow', (
     html.indexOf('function updateUserModalUi()'),
   );
   assert.match(qrSuccessFlow, /refreshPlatformLoginCapabilities\(true\)/);
+  assert.doesNotMatch(qrSuccessFlow, /r\.loggedIn\s*\|\|\s*r\.hasCookie/);
+  assert.doesNotMatch(qrSuccessFlow, /loggedIn:\s*true,\s*pendingProfile/);
 });
 
 test('syntax gate covers every platform login runtime module', () => {

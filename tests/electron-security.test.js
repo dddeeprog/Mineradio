@@ -187,4 +187,11 @@ test('in-process server uses the credential session and one account-scoped runti
     serverSource,
     /COOKIE_FILE|QQ_COOKIE_FILE|['"]\.cookie['"]|['"]\.qq-cookie['"]|D:\\\\MineradioCache/,
   );
+
+  const neteaseLogin = serverSource.slice(
+    serverSource.indexOf('async function loginNeteaseCredential'),
+    serverSource.indexOf('function logoutNeteaseCredential'),
+  );
+  assert.match(neteaseLogin, /getLoginInfo/);
+  assert.doesNotMatch(neteaseLogin, /pendingProfile|loggedIn:\s*true/);
 });

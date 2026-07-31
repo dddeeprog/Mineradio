@@ -2806,19 +2806,7 @@ async function loginNeteaseCredential(cookie) {
   return accountLifecycle.login(
     'netease',
     { cookie: normalized },
-    async () => {
-      const info = await getLoginInfo();
-      if (info.loggedIn) return info;
-      return {
-        loggedIn: true,
-        pendingProfile: true,
-        nickname: '网易云用户',
-        avatar: '',
-        vipLevel: 'none',
-        isVip: false,
-        isSvip: false,
-      };
-    },
+    () => getLoginInfo(normalized),
   );
 }
 

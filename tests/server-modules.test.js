@@ -644,6 +644,7 @@ test('netease route module dispatches core music endpoints', async () => {
   const calls = [];
   const invalidations = [];
   let loginAllowed = true;
+  let neteaseLoginVerified = true;
   const routes = createNeteaseRoutes({
     sendJSON(_res, payload, status) {
       writes.push({ payload, status: status || 200 });
@@ -669,7 +670,9 @@ test('netease route module dispatches core music endpoints', async () => {
       return saved[saved.length - 1] || 'MUSIC_U=old';
     },
     getLoginInfo() {
-      return Promise.resolve({ loggedIn: true, userId: 7, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' });
+      return Promise.resolve(neteaseLoginVerified
+        ? { loggedIn: true, userId: 7, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' }
+        : { loggedIn: false, hasCookie: true });
     },
     handleSearch(keywords, limit) {
       calls.push(['search', keywords, limit]);
@@ -811,6 +814,10 @@ test('netease route module dispatches core music endpoints', async () => {
   assert.equal(writes[11].status, 401);
   assert.equal(writes[11].payload.error, 'LOGIN_REQUIRED');
   assert.equal(calls.length, callCountBeforeLoggedOutWrite);
+  neteaseLoginVerified = false;
+  assert.equal(await routes.handleRoute('/api/login/cookie', { method: 'POST', body: { cookie: 'MUSIC_U=rejected' } }, {}, new URL('http://localhost/api/login/cookie')), true);
+  assert.equal(writes.at(-1).payload.loggedIn, false);
+  assert.equal(Object.hasOwn(writes.at(-1).payload, 'pendingProfile'), false);
   assert.equal(await routes.handleRoute('/api/qq/search', {}, {}, new URL('http://localhost/api/qq/search')), false);
 });
 

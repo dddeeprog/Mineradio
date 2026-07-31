@@ -154,20 +154,7 @@ function createNeteaseRoutes(deps) {
         return;
       }
       await loginCredential(normalized);
-      let info = await getLoginInfo();
-      if (!info.loggedIn && cookie()) {
-        info = {
-          loggedIn: true,
-          pendingProfile: true,
-          nickname: '网易云用户',
-          avatar: '',
-          vipType: 0,
-          vipLevel: 'none',
-          isVip: false,
-          isSvip: false,
-          vipLabel: '无VIP',
-        };
-      }
+      const info = await getLoginInfo();
       sendJSON(res, { ...info, saved: true, hasCookie: !!cookie() });
     } catch (err) {
       console.error('[LoginCookie]', err);
@@ -225,19 +212,6 @@ function createNeteaseRoutes(deps) {
         if (!info.loggedIn) {
           const profile = body.profile || (body.data && body.data.profile) || {};
           info = normalizeLoginInfo(profile, body.account || (body.data && body.data.account), body.data || body);
-        }
-        if (!info.loggedIn && loginCookie) {
-          info = {
-            loggedIn: true,
-            pendingProfile: true,
-            nickname: (body.nickname || (body.profile && body.profile.nickname) || '网易云用户'),
-            avatar: body.avatarUrl || (body.profile && body.profile.avatarUrl) || '',
-            vipType: 0,
-            vipLevel: 'none',
-            isVip: false,
-            isSvip: false,
-            vipLabel: '无VIP',
-          };
         }
         sendJSON(res, { code, message: msg, ...info, hasCookie: !!loginCookie });
         return;
