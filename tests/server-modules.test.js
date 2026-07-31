@@ -401,6 +401,7 @@ test('update route module dispatches update endpoints', async () => {
 
 test('proxy route module rejects unsafe media proxy requests', async () => {
   const writes = [];
+  const corsPorts = [];
   const res = {
     writeHead(status, headers) {
       writes.push({ type: 'head', status, headers });
@@ -410,9 +411,10 @@ test('proxy route module rejects unsafe media proxy requests', async () => {
     },
   };
   const routes = createProxyRoutes({
-    port: 3000,
+    port: () => 34567,
     userAgent: 'UA',
     corsHeadersForOrigin(origin, port) {
+      corsPorts.push(port);
       return { 'Access-Control-Allow-Origin': origin || 'http://127.0.0.1:' + port };
     },
     assertAllowedProxyTarget(value) {
@@ -432,6 +434,7 @@ test('proxy route module rejects unsafe media proxy requests', async () => {
   assert.equal(await routes.handleRoute('/api/cover', { headers: { origin: 'app://local' } }, res, new URL('http://localhost/api/cover?url=http://127.0.0.1/x')), true);
   assert.equal(writes[0].status, 400);
   assert.equal(writes[1].body, 'Invalid cover url');
+  assert.deepEqual(corsPorts, [34567]);
   writes.length = 0;
 
   assert.equal(await routes.handleRoute('/api/audio', { headers: { origin: 'app://local' } }, res, new URL('http://localhost/api/audio')), true);

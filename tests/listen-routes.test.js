@@ -802,7 +802,7 @@ test('real server recreates its reporting runtime after close and relisten', asy
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Origin: 'http://127.0.0.1:' + process.env.PORT,
+          Origin: 'http://127.0.0.1:' + port,
         },
         body: JSON.stringify(event(sessionId)),
       });

@@ -20,7 +20,7 @@ async function pipeReadableBody(upstream, res) {
 
 function createProxyRoutes(deps) {
   deps = deps || {};
-  const port = deps.port;
+  const resolvePort = typeof deps.port === 'function' ? deps.port : () => deps.port;
   const userAgent = deps.userAgent || '';
   const corsHeadersForOrigin = deps.corsHeadersForOrigin;
   const assertAllowedProxyTarget = deps.assertAllowedProxyTarget;
@@ -44,7 +44,7 @@ function createProxyRoutes(deps) {
       try {
         assertAllowedProxyTarget(coverUrl);
       } catch (e) {
-        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, port));
+        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, resolvePort()));
         res.end('Invalid cover url');
         return;
       }
@@ -53,7 +53,7 @@ function createProxyRoutes(deps) {
       const cl = resp.headers.get('content-length');
       const hdr = {
         'Content-Type': ct,
-        ...corsHeadersForOrigin(req.headers.origin, port),
+        ...corsHeadersForOrigin(req.headers.origin, resolvePort()),
         'Cross-Origin-Resource-Policy': 'cross-origin',
         'Cache-Control': 'public, max-age=86400',
       };
@@ -78,7 +78,7 @@ function createProxyRoutes(deps) {
       try {
         assertAllowedProxyTarget(audioUrl);
       } catch (e) {
-        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, port));
+        res.writeHead(400, corsHeadersForOrigin(req.headers.origin, resolvePort()));
         res.end('Invalid audio url');
         return;
       }
@@ -87,7 +87,7 @@ function createProxyRoutes(deps) {
       const up = await fetchImpl(audioUrl, { headers: hdr });
       const out = {
         'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
-        ...corsHeadersForOrigin(req.headers.origin, port),
+        ...corsHeadersForOrigin(req.headers.origin, resolvePort()),
         'Accept-Ranges': 'bytes',
       };
       const cl = up.headers.get('content-length');

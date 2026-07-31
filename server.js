@@ -128,8 +128,12 @@ const { createQQRoutes } = require('./server/routes/qq');
 const { createUpdateRoutes } = require('./server/routes/update');
 const { createWeatherFullRoutes } = require('./server/routes/weather-full');
 const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
+const { listenOnAvailablePort } = require('./server/listener');
 
-const PORT = process.env.PORT || 3000;
+const configuredPort = Number(process.env.PORT);
+const PREFERRED_PORT = Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65535
+  ? configuredPort
+  : 3000;
 const HOST = resolveBindHost(process.env);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
@@ -154,6 +158,15 @@ const UPDATE_FALLBACK_NOTES = [
 ];
 const WEATHER_DEFAULT_LOCATION = weatherTools.WEATHER_DEFAULT_LOCATION;
 const WEATHER_IP_LOCATION_URL = weatherTools.WEATHER_IP_LOCATION_URL;
+
+let server = null;
+
+function currentServerPort() {
+  const address = server && server.address();
+  return address && typeof address === 'object' && Number.isInteger(address.port)
+    ? address.port
+    : PREFERRED_PORT;
+}
 
 const updateDownloadJobs = new Map();
 const implementationRegistry = createBaselineImplementationRegistry();
@@ -283,7 +296,7 @@ function sendJSON(res, data, status) {
   const req = res.mineradioRequest || null;
   res.writeHead(status || 200, {
     'Content-Type': 'application/json; charset=utf-8',
-    ...corsHeadersForOrigin(req && req.headers && req.headers.origin, PORT),
+    ...corsHeadersForOrigin(req && req.headers && req.headers.origin, currentServerPort()),
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
@@ -3183,7 +3196,7 @@ const updateRoutes = createUpdateRoutes({
   updateDownloadJobs,
 });
 const proxyRoutes = createProxyRoutes({
-  port: PORT,
+  port: currentServerPort,
   userAgent: UA,
   corsHeadersForOrigin,
   assertAllowedProxyTarget,
@@ -3295,19 +3308,20 @@ const neteaseRoutes = createNeteaseRoutes({
 // ====================================================================
 //  HTTP Server
 // ====================================================================
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost:' + PORT);
+server = http.createServer(async (req, res) => {
+  const port = currentServerPort();
+  const url = new URL(req.url, 'http://localhost:' + port);
   const pn = url.pathname;
   res.mineradioRequest = req;
 
   if (pn.startsWith('/api/') && req.method === 'OPTIONS') {
     const origin = req.headers.origin || '';
-    if (!isAllowedCorsOrigin(origin, PORT)) {
+    if (!isAllowedCorsOrigin(origin, port)) {
       sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
       return;
     }
     res.writeHead(204, {
-      ...corsHeadersForOrigin(origin, PORT),
+      ...corsHeadersForOrigin(origin, port),
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Max-Age': '600',
@@ -3318,7 +3332,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pn.startsWith('/api/') && !isAllowedRequestOrigin(
     req.headers.origin || '',
-    PORT,
+    port,
     req.method,
   )) {
     sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
@@ -3405,11 +3419,22 @@ server.on('listening', () => {
   ensureListenReporter();
 });
 
-server.listen(PORT, HOST, () => {
+server.on('listening', () => {
+  const port = currentServerPort();
   console.log('======================================================');
-  console.log(' 粒子音乐可视化 v2  →  http://localhost:' + PORT);
+  console.log(' 粒子音乐可视化 v2  →  http://localhost:' + port);
   console.log(' 登录态: ' + (getUserCookie() ? '已登录(安全会话已加载)' : '未登录'));
   console.log('======================================================');
+});
+
+server.ready = listenOnAvailablePort(server, {
+  host: HOST,
+  preferredPort: PREFERRED_PORT,
+  maxAttempts: 32,
+});
+server.ready.catch((error) => {
+  console.error('[Server] Failed to bind a loopback port:', error && error.message || error);
+  if (require.main === module) process.exitCode = 1;
 });
 
 server.on('close', () => {

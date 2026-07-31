@@ -99,6 +99,26 @@ test('desktop credentials initialize after ready and before the local server', (
   assert.match(main, /MINERADIO_UPDATE_DIR = APP_PATHS\.updateDirectory/);
 });
 
+test('desktop loads the window from the port atomically claimed by the HTTP server', () => {
+  const main = fs.readFileSync(
+    path.join(__dirname, '..', 'desktop', 'main.js'),
+    'utf8',
+  );
+  const createWindow = main.slice(
+    main.indexOf('async function createWindow()'),
+    main.indexOf("if (process.platform === 'win32')"),
+  );
+
+  assert.doesNotMatch(main, /function findOpenPort\(/);
+  assert.match(createWindow, /configureLocalServerEnvironment\(3000\)/);
+  assert.match(createWindow, /await waitForServer\(localServer\)/);
+  assert.match(createWindow, /localServer\.address\(\)\.port/);
+  assert.ok(
+    createWindow.indexOf('mainServerPort = port')
+      < createWindow.indexOf('mainWindow.loadURL'),
+  );
+});
+
 test('desktop exposes credential set clear and redacted status but no read-back IPC', () => {
   const projectRoot = path.join(__dirname, '..');
   const main = fs.readFileSync(path.join(projectRoot, 'desktop', 'main.js'), 'utf8');

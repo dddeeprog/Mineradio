@@ -1,5 +1,4 @@
 const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu, safeStorage, powerMonitor } = require('electron');
-const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
@@ -186,36 +185,26 @@ const QISHUI_LOGIN_COOKIE_PRIORITY = [
 const localAssetsManager = createLocalAssetsManager();
 let localFileProtocolRegistered = false;
 
-function findOpenPort(startPort) {
-  return new Promise((resolve, reject) => {
-    function tryPort(port) {
-      const tester = net.createServer();
-
-      tester.once('error', (err) => {
-        if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
-          tryPort(port + 1);
-          return;
-        }
-        reject(err);
-      });
-
-      tester.once('listening', () => {
-        tester.close(() => resolve(port));
-      });
-
-      tester.listen(port, '127.0.0.1');
-    }
-
-    tryPort(startPort);
-  });
-}
-
 function waitForServer(server) {
-  if (!server || server.listening) return Promise.resolve();
+  if (!server) return Promise.reject(new TypeError('Local server is unavailable.'));
+  if (server.ready && typeof server.ready.then === 'function') return server.ready;
+  if (server.listening) return Promise.resolve(server.address().port);
 
   return new Promise((resolve, reject) => {
-    server.once('listening', resolve);
-    server.once('error', reject);
+    const cleanup = () => {
+      server.removeListener('listening', onListening);
+      server.removeListener('error', onError);
+    };
+    const onListening = () => {
+      cleanup();
+      resolve(server.address().port);
+    };
+    const onError = error => {
+      cleanup();
+      reject(error);
+    };
+    server.once('listening', onListening);
+    server.once('error', onError);
   });
 }
 
@@ -1935,12 +1924,14 @@ async function createWindow() {
   await initializePlatformCredentialRuntime();
   htmlFullscreenActive = false;
   windowFullscreenActive = false;
-  const port = await findOpenPort(3000);
-  mainServerPort = port;
-  configureLocalServerEnvironment(port);
-
-  localServer = require(path.join(__dirname, '..', 'server.js'));
+  if (!localServer) {
+    configureLocalServerEnvironment(3000);
+    localServer = require(path.join(__dirname, '..', 'server.js'));
+  }
   await waitForServer(localServer);
+  const port = localServer.address().port;
+  mainServerPort = port;
+  process.env.PORT = String(port);
 
   const initialBounds = getWindowedBounds();
 
