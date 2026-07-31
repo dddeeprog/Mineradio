@@ -25,7 +25,13 @@ const {
 } = require('./spotify-pkce');
 const { assertAllowedIpcSender } = require('./ipc-auth');
 const { WallpaperRuntime } = require('./wallpaper-runtime');
+const {
+  createDesktopWallpaperFeatureGate,
+} = require('./runtime-feature-gate');
 const { createSystemMemoryState } = require('./system-memory-state');
+const {
+  createReleaseFeatureFlags,
+} = require('../server/platform/feature-flags');
 const {
   createLocalAssetsManager,
   localFilePathFromProxyUrl,
@@ -66,6 +72,9 @@ let wallpaperRuntime = null;
 let systemMemoryPollTimer = null;
 let systemResourceMonitoringStarted = false;
 const systemMemoryState = createSystemMemoryState({ recoveryHoldMs: 15000 });
+const desktopWallpaperFeatureGate = createDesktopWallpaperFeatureGate(
+  createReleaseFeatureFlags(),
+);
 let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
@@ -1469,17 +1478,19 @@ function broadcastWallpaperRuntimeStatus(status) {
 }
 
 function ensureWallpaperRuntime() {
-  if (wallpaperRuntime && !wallpaperRuntime.disposed) return wallpaperRuntime;
-  wallpaperRuntime = new WallpaperRuntime({
-    BrowserWindow,
-    screen,
-    platform: process.platform,
-    preloadPath: path.join(__dirname, 'overlay-preload.js'),
-    overlayUrl: () => overlayUrl('wallpaper.html'),
-    execFileImpl: execFile,
-    onStatus: broadcastWallpaperRuntimeStatus,
-  });
-  return wallpaperRuntime;
+  return desktopWallpaperFeatureGate.run(() => {
+    if (wallpaperRuntime && !wallpaperRuntime.disposed) return wallpaperRuntime;
+    wallpaperRuntime = new WallpaperRuntime({
+      BrowserWindow,
+      screen,
+      platform: process.platform,
+      preloadPath: path.join(__dirname, 'overlay-preload.js'),
+      overlayUrl: () => overlayUrl('wallpaper.html'),
+      execFileImpl: execFile,
+      onStatus: broadcastWallpaperRuntimeStatus,
+    });
+    return wallpaperRuntime;
+  }, null);
 }
 
 function positionWallpaperWindow(reason = 'display-metrics-changed') {
@@ -1490,6 +1501,28 @@ function positionWallpaperWindow(reason = 'display-metrics-changed') {
 function closeWallpaperWindow(reason = 'disabled') {
   if (!wallpaperRuntime) return Promise.resolve({ ok: true, enabled: false });
   return wallpaperRuntime.stop(reason);
+}
+
+function wallpaperFeatureDisabledResult() {
+  return { ok: false, enabled: false, error: 'DESKTOP_WALLPAPER_DISABLED' };
+}
+
+function registerWallpaperSystemEventHandlers() {
+  return desktopWallpaperFeatureGate.register(() => {
+    screen.on('display-metrics-changed', () => {
+      positionWallpaperWindow('display-metrics-changed').catch(() => {});
+    });
+    screen.on('display-added', () => {
+      positionWallpaperWindow('display-added').catch(() => {});
+    });
+    screen.on('display-removed', () => {
+      positionWallpaperWindow('display-removed').catch(() => {});
+    });
+    powerMonitor.on('lock-screen', () => positionWallpaperWindow('lock-screen').catch(() => {}));
+    powerMonitor.on('unlock-screen', () => positionWallpaperWindow('unlock-screen').catch(() => {}));
+    powerMonitor.on('suspend', () => positionWallpaperWindow('suspend').catch(() => {}));
+    powerMonitor.on('resume', () => positionWallpaperWindow('resume').catch(() => {}));
+  });
 }
 
 function closeOverlayWindows() {
@@ -1847,7 +1880,11 @@ handleIpc('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
 
 handleIpc('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) => {
   try {
-    if (enabled) return await ensureWallpaperRuntime().start(payload || {});
+    if (enabled) {
+      const runtime = ensureWallpaperRuntime();
+      if (!runtime) return wallpaperFeatureDisabledResult();
+      return await runtime.start(payload || {});
+    }
     return await closeWallpaperWindow('disabled');
   } catch (e) {
     return { ok: false, error: e.message || 'WALLPAPER_FAILED' };
@@ -1856,7 +1893,9 @@ handleIpc('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) =>
 
 handleIpc('mineradio-wallpaper-update', async (_event, payload) => {
   try {
-    return await ensureWallpaperRuntime().update(payload || {});
+    const runtime = ensureWallpaperRuntime();
+    if (!runtime) return wallpaperFeatureDisabledResult();
+    return await runtime.update(payload || {});
   } catch (e) {
     return { ok: false, error: e.message || 'WALLPAPER_UPDATE_FAILED' };
   }
@@ -2005,21 +2044,15 @@ if (!gotSingleInstanceLock) {
     createTray();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
-      positionWallpaperWindow('display-metrics-changed').catch(() => {});
       scheduleWindowStateSend(mainWindow);
     });
     screen.on('display-added', () => {
-      positionWallpaperWindow('display-added').catch(() => {});
       scheduleWindowStateSend(mainWindow);
     });
     screen.on('display-removed', () => {
-      positionWallpaperWindow('display-removed').catch(() => {});
       scheduleWindowStateSend(mainWindow);
     });
-    powerMonitor.on('lock-screen', () => positionWallpaperWindow('lock-screen').catch(() => {}));
-    powerMonitor.on('unlock-screen', () => positionWallpaperWindow('unlock-screen').catch(() => {}));
-    powerMonitor.on('suspend', () => positionWallpaperWindow('suspend').catch(() => {}));
-    powerMonitor.on('resume', () => positionWallpaperWindow('resume').catch(() => {}));
+    registerWallpaperSystemEventHandlers();
     powerMonitor.on('lock-screen', () => sampleSystemResourceState({ locked: true }));
     powerMonitor.on('unlock-screen', () => sampleSystemResourceState({ locked: false }));
     powerMonitor.on('suspend', () => sampleSystemResourceState({ suspended: true }));

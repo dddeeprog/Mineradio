@@ -30,6 +30,7 @@ const RELEASE_FEATURE_FLAG_VALUES = Object.freeze({
   listenReporting: true,
   cuefield: true,
   sonicTopography: true,
+  desktopWallpaper: true,
   resourceGovernor: true,
 });
 

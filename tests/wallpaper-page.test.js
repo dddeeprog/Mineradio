@@ -45,6 +45,9 @@ test('complete desktop uses one bounded glass icon layer without filesystem or n
 test('Electron wallpaper lifecycle is extracted, authorized, sandboxed, and power-aware', () => {
   assert.match(main, /require\('\.\/wallpaper-runtime'\)/);
   assert.match(main, /new WallpaperRuntime\(/);
+  assert.match(main, /createDesktopWallpaperFeatureGate/);
+  assert.match(main, /desktopWallpaperFeatureGate\.run\(/);
+  assert.match(main, /desktopWallpaperFeatureGate\.register\(/);
   assert.match(main, /powerMonitor\.on\('lock-screen'/);
   assert.match(main, /powerMonitor\.on\('unlock-screen'/);
   assert.match(main, /powerMonitor\.on\('suspend'/);
