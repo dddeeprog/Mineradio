@@ -18,6 +18,34 @@ test('defines the eight stable native lyric modes and keeps Mineradio 3D as defa
   ]);
   assert.equal(STORAGE_KEY, 'mineradio-native-lyric-visualizer-v1');
   assert.equal(DEFAULT_NATIVE_LYRIC_CONFIG.mode, 'mineradio-3d');
+  assert.equal(DEFAULT_NATIVE_LYRIC_CONFIG.version, 2);
+  assert.equal(DEFAULT_NATIVE_LYRIC_CONFIG.sonic.enabled, false);
+});
+
+test('normalizes Sonic settings without changing the eight lyric modes', () => {
+  const normalized = normalizeNativeLyricConfig({
+    sonic: {
+      enabled: true,
+      amplitude: 12,
+      motion: -1,
+      opacity: 0,
+      historySize: 1000,
+      palette: 'invalid',
+    },
+  });
+
+  assert.deepEqual(normalized.sonic, {
+    enabled: true,
+    amplitude: 1.5,
+    motion: 0,
+    opacity: 0.15,
+    historySize: 96,
+    palette: 'theme',
+  });
+  assert.deepEqual(MODES, [
+    'mineradio-3d', 'classic', 'cadenza', 'partita',
+    'tilt', 'monet', 'cappella', 'fume',
+  ]);
 });
 
 test('normalizes common and mode-specific values without sharing default objects', () => {
@@ -90,19 +118,58 @@ test('migrates legacy Folia modes and retires the removed orbit effect', () => {
   );
 });
 
-test('leaves version 1 native config migration unchanged', () => {
+test('upgrades version 1 native config and legacy Sonic fields to schema 2', () => {
   const migrated = migrateLegacyNativeLyricConfig({
     version: 1,
     mode: 'classic',
     common: { scale: 1.2 },
+    sonicGroundEnabled: true,
+    sonicGroundAmplitude: 80,
+    sonicGroundMotionSpeed: 25,
+    sonicGroundOpacity: 70,
+    sonicGroundHistorySize: 60,
   }, {
     visualMode: 'cappella',
     foliaInspiredVisual: true,
     foliaInspiredPreset: 'monet',
   });
 
+  assert.equal(migrated.version, 2);
   assert.equal(migrated.mode, 'classic');
   assert.equal(migrated.common.scale, 1.2);
+  assert.deepEqual(migrated.sonic, {
+    enabled: true,
+    amplitude: 1.2,
+    motion: 0.25,
+    opacity: 0.7,
+    historySize: 60,
+    palette: 'theme',
+  });
+});
+
+test('archives bounded Sonic settings without local paths or blobs', () => {
+  const archived = toArchiveNativeLyricConfig({
+    sonic: {
+      enabled: true,
+      amplitude: 0.84,
+      motion: 0.36,
+      opacity: 0.62,
+      historySize: 44,
+      palette: 'cover',
+      localPath: 'C:\\private\\terrain.json',
+      objectUrl: 'blob:private',
+    },
+  });
+
+  assert.equal(archived.version, 2);
+  assert.deepEqual(archived.sonic, {
+    enabled: true,
+    amplitude: 0.84,
+    motion: 0.36,
+    opacity: 0.62,
+    historySize: 44,
+    palette: 'cover',
+  });
 });
 
 test('gives explicit legacy visualMode priority over inspired presets', () => {

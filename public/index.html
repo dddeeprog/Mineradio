@@ -33,6 +33,8 @@
 <script src="folia-native-lyric-state.js"></script>
 <script src="folia-native-lyric-visuals.js"></script>
 <script src="folia-native/config.js"></script>
+<script src="sonic-topography-state.js"></script>
+<script src="sonic-topography-renderer.js"></script>
 <script src="folia-native/state.js"></script>
 <script src="folia-native/layout.js"></script>
 <script src="folia-native/registry.js"></script>
@@ -627,6 +629,20 @@ try {
         <button data-performance-quality="balanced">中</button>
         <button data-performance-quality="high">高</button>
         <button data-performance-quality="ultra">超高</button>
+      </div>
+      <div class="fx-section-label">声波地形</div>
+      <div class="sonic-topography-settings" id="sonic-topography-settings">
+        <div class="fx-toggle-grid">
+          <div class="fx-toggle" id="t-sonicTopography" onclick="toggleSonicTopography()" title="使用现有音频频谱在舞台背景生成地形"><span>启用声波地形</span><span class="dot"></span></div>
+        </div>
+        <div class="fx-slider"><label>地形高度</label><input id="sonic-topography-amplitude" type="range" min="0.1" max="1.5" step="0.01" oninput="updateSonicTopographySetting('amplitude',this.value,'range',this.nextElementSibling)"><output></output></div>
+        <div class="fx-slider"><label>起伏速度</label><input id="sonic-topography-motion" type="range" min="0" max="1" step="0.01" oninput="updateSonicTopographySetting('motion',this.value,'range',this.nextElementSibling)"><output></output></div>
+        <div class="fx-slider"><label>地形透明</label><input id="sonic-topography-opacity" type="range" min="0.15" max="1" step="0.01" oninput="updateSonicTopographySetting('opacity',this.value,'range',this.nextElementSibling)"><output></output></div>
+        <div class="fx-slider"><label>历史深度</label><input id="sonic-topography-history" type="range" min="12" max="96" step="1" oninput="updateSonicTopographySetting('historySize',this.value,'range',this.nextElementSibling)"><output></output></div>
+        <div class="fx-seg" id="sonic-topography-palette-seg" aria-label="声波地形配色">
+          <button type="button" data-sonic-palette="theme" onclick="setSonicTopographyPalette('theme')">主题</button>
+          <button type="button" data-sonic-palette="cover" onclick="setSonicTopographyPalette('cover')">封面</button>
+        </div>
       </div>
       <div class="fx-section-label">自动混音</div>
       <div class="fx-seg cuefield-intensity-seg" id="cuefield-intensity-seg" data-state="disabled">
@@ -1277,6 +1293,9 @@ var nativeLyricConfig = readNativeLyricConfigState();
 var nativeLyricRegistry = null;
 var nativeLyricRuntime = null;
 var nativeThreeLyricHost = null;
+var sonicTopographyRuntime = null;
+var sonicTopographyFailed = false;
+var sonicTopographyFailureNotified = false;
 var nativeThreeLyricForward = null;
 var nativeThreeLyricPosition = null;
 var nativeLyricDocument = null;
@@ -2246,6 +2265,7 @@ function applyVisualReleaseBudget(reason, aggressive) {
   }
   visualBudgetState.lastReason = reason;
   if (nativeLyricRuntime && typeof nativeLyricRuntime.release === 'function') nativeLyricRuntime.release(reason);
+  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.release === 'function') sonicTopographyRuntime.release(reason);
   if (nativeThreeLyricHost && typeof nativeThreeLyricHost.suspend === 'function') nativeThreeLyricHost.suspend();
   if (nativeThreeLyricHost && typeof nativeThreeLyricHost.trim === 'function') dropped += nativeThreeLyricHost.trim(aggressive ? 3 : 1) || 0;
   if (typeof clearCommentBarrage3D === 'function') {
@@ -2273,6 +2293,7 @@ function resumeVisualReleaseBudget(reason) {
   visualBudgetState.lastResumeAt = visualBudgetNow();
   visualBudgetState.lastReason = reason;
   if (nativeThreeLyricHost && typeof nativeThreeLyricHost.resume === 'function') nativeThreeLyricHost.resume();
+  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.restore === 'function') sonicTopographyRuntime.restore();
   if (nativeLyricRuntime && typeof nativeLyricRuntime.resume === 'function') nativeLyricRuntime.resume();
   return true;
 }
@@ -2471,6 +2492,7 @@ function collectRuntimePerfSnapshot(now) {
       interactionReason: (typeof renderInteractionReason !== 'undefined') ? renderInteractionReason : ''
     } : null,
     nativeLyrics: nativeLyricRuntime && typeof nativeLyricRuntime.snapshot === 'function' ? nativeLyricRuntime.snapshot() : null,
+    sonicTopography: sonicTopographyRuntime && typeof sonicTopographyRuntime.snapshot === 'function' ? sonicTopographyRuntime.snapshot() : null,
     visualBudget: {
       mode: visualBudgetState.mode,
       commentBarrageReleased: visualBudgetState.commentBarrageReleased,
@@ -19189,6 +19211,73 @@ function nativeLyricConfigApi() {
 function nativeLyricStateApi() {
   return window.MineradioNativeLyricState || {};
 }
+function sonicTopographyStateApi() {
+  return window.MineradioSonicTopographyState || {};
+}
+function sonicTopographyConfig() {
+  var api = sonicTopographyStateApi();
+  var value = nativeLyricConfig && nativeLyricConfig.sonic || {};
+  return api && typeof api.normalizeSonicTopographyConfig === 'function'
+    ? api.normalizeSonicTopographyConfig(value)
+    : value;
+}
+function syncSonicTopographyControls() {
+  var value = sonicTopographyConfig();
+  var toggle = document.getElementById('t-sonicTopography');
+  if (toggle) {
+    toggle.classList.toggle('on', value.enabled === true);
+    toggle.classList.toggle('is-unavailable', sonicTopographyFailed);
+    toggle.setAttribute('aria-disabled', sonicTopographyFailed ? 'true' : 'false');
+  }
+  var controls = {
+    amplitude:'sonic-topography-amplitude',
+    motion:'sonic-topography-motion',
+    opacity:'sonic-topography-opacity',
+    historySize:'sonic-topography-history'
+  };
+  Object.keys(controls).forEach(function(key){
+    var input = document.getElementById(controls[key]);
+    if (!input) return;
+    input.value = value[key];
+    input.disabled = sonicTopographyFailed;
+    var output = input.nextElementSibling;
+    if (output) output.textContent = key === 'historySize' ? String(Math.round(value[key])) : Number(value[key]).toFixed(2);
+  });
+  document.querySelectorAll('#sonic-topography-palette-seg [data-sonic-palette]').forEach(function(button){
+    button.classList.toggle('active', button.getAttribute('data-sonic-palette') === value.palette);
+    button.disabled = sonicTopographyFailed;
+  });
+}
+function updateSonicTopographySetting(key, value, type, output) {
+  if (sonicTopographyFailed) return false;
+  if (type === 'checkbox') value = value === true;
+  else if (type === 'range') value = Number(value);
+  var patch = {};
+  patch[key] = value;
+  var api = nativeLyricConfigApi();
+  var next = api && typeof api.patchNativeLyricConfig === 'function'
+    ? api.patchNativeLyricConfig(nativeLyricConfig || {}, { sonic:patch })
+    : Object.assign({}, nativeLyricConfig || {}, { sonic:Object.assign({}, nativeLyricConfig && nativeLyricConfig.sonic || {}, patch) });
+  applyNativeLyricConfig(next, 'sonic.' + key, { skipControls:true, skipMode:true });
+  syncSonicTopographyControls();
+  if (output) output.textContent = key === 'historySize' ? String(Math.round(Number(value))) : Number(value).toFixed(2);
+  return true;
+}
+function toggleSonicTopography() {
+  if (sonicTopographyFailed) {
+    showToast('声波地形暂不可用');
+    return false;
+  }
+  var enabled = !sonicTopographyConfig().enabled;
+  updateSonicTopographySetting('enabled', enabled, 'checkbox');
+  showToast(enabled ? '声波地形已开启' : '声波地形已关闭');
+  return enabled;
+}
+function setSonicTopographyPalette(value) {
+  value = value === 'cover' ? 'cover' : 'theme';
+  updateSonicTopographySetting('palette', value, 'select');
+  return value;
+}
 var NATIVE_LYRIC_MODE_META = {
   'mineradio-3d': { label:'Mineradio 3D', kind:'Three.js' },
   classic: { label:'流光', kind:'DOM / CSS' },
@@ -19488,6 +19577,7 @@ function syncNativeLyricControls() {
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   renderNativeLyricModeControls();
+  syncSonicTopographyControls();
 }
 function resetNativeLyricSettings() {
   var api = nativeLyricConfigApi();
@@ -19634,6 +19724,78 @@ function createNativeThreeLyricHost() {
     console.warn('native Three lyric host failed:', error);
   }
   return nativeThreeLyricHost;
+}
+function initSonicTopographyRuntime() {
+  if (sonicTopographyRuntime || sonicTopographyFailed) return !!sonicTopographyRuntime;
+  var api = window.MineradioSonicTopographyRenderer || {};
+  if (typeof api.createSonicTopographyRenderer !== 'function' || !scene || !renderer) return false;
+  try {
+    sonicTopographyRuntime = api.createSonicTopographyRenderer({
+      THREE:THREE,
+      scene:scene,
+      renderer:renderer,
+      host:nativeThreeLyricHost,
+      canvasRoot:document.getElementById('canvas-container'),
+      viewport:nativeLyricViewport(),
+      config:sonicTopographyConfig()
+    });
+    sonicTopographyRuntime.mount();
+    sonicTopographyRuntime.resize(nativeLyricViewport());
+    return true;
+  } catch (error) {
+    sonicTopographyRuntime = null;
+    sonicTopographyFailed = true;
+    console.warn('Sonic Topography init failed:', error);
+    syncSonicTopographyControls();
+    return false;
+  }
+}
+function sonicTopographyQualityMode() {
+  var common = nativeLyricConfig && nativeLyricConfig.common || {};
+  if (common.performanceMode === 'battery') return 'battery';
+  if (common.performanceMode === 'quality') return 'quality';
+  var globalQuality = fx && fx.performanceQuality || 'balanced';
+  if (globalQuality === 'eco') return 'battery';
+  if (globalQuality === 'high' || globalQuality === 'ultra') return 'quality';
+  return 'balanced';
+}
+function updateSonicTopographyRuntime(dt) {
+  if (sonicTopographyFailed || visualBudgetState.mode === 'released') return false;
+  if (!sonicTopographyRuntime && !initSonicTopographyRuntime()) return false;
+  var palette = stageLyrics && stageLyrics.palette || {};
+  var generatedTheme = foliaThemeCurrent && foliaThemeCurrent.theme || foliaThemeCurrent || {};
+  try {
+    return sonicTopographyRuntime.update({
+      dt:dt,
+      playing:playing && !!audio && !audio.paused,
+      reducedMotion:!!(nativeLyricConfig && nativeLyricConfig.common && nativeLyricConfig.common.reduceMotion),
+      quality:sonicTopographyQualityMode(),
+      viewport:nativeLyricViewport(),
+      audio:{ frequencyData:frequencyData, timeDomainData:timeDomainData, bass:bass, mid:mid, treble:treble, energy:audioEnergy, beatPulse:beatPulse },
+      theme:Object.assign({}, palette, generatedTheme, {
+        wordColors:foliaThemeCurrent && foliaThemeCurrent.wordColors || palette.wordColors || [],
+        coverColors:stageLyrics && stageLyrics.coverPalette ? [
+          stageLyrics.coverPalette.primary,
+          stageLyrics.coverPalette.secondary,
+          stageLyrics.coverPalette.highlight
+        ].filter(Boolean) : []
+      }),
+      config:sonicTopographyConfig()
+    });
+  } catch (error) {
+    sonicTopographyFailed = true;
+    if (sonicTopographyRuntime && typeof sonicTopographyRuntime.release === 'function') sonicTopographyRuntime.release('runtime-error');
+    var api = nativeLyricConfigApi();
+    if (api && typeof api.patchNativeLyricConfig === 'function') nativeLyricConfig = api.patchNativeLyricConfig(nativeLyricConfig || {}, { sonic:{ enabled:false } });
+    saveNativeLyricConfig();
+    syncSonicTopographyControls();
+    if (!sonicTopographyFailureNotified) {
+      sonicTopographyFailureNotified = true;
+      showToast('声波地形已关闭，播放器可继续使用');
+    }
+    console.warn('Sonic Topography update failed:', error);
+    return false;
+  }
 }
 function notifyNativeClassicThreeFallback(info) {
   showToast('流光 3D 暂不可用，已临时切换兼容歌词');
@@ -19812,9 +19974,11 @@ function updateNativeLyricRuntime(dt) {
   }));
 }
 function destroyNativeLyricRuntime() {
+  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.destroy === 'function') sonicTopographyRuntime.destroy();
   if (nativeLyricRuntime && typeof nativeLyricRuntime.destroy === 'function') nativeLyricRuntime.destroy();
   if (nativeThreeLyricHost && typeof nativeThreeLyricHost.destroy === 'function') nativeThreeLyricHost.destroy();
   nativeLyricRuntime = null;
+  sonicTopographyRuntime = null;
   nativeThreeLyricHost = null;
   nativeLyricRegistry = null;
   nativeLyricDocument = null;
@@ -30757,6 +30921,7 @@ function refreshMainRendererViewport(reason) {
     camera.updateProjectionMatrix();
   }
   applyRendererPowerMode();
+  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.resize === 'function') sonicTopographyRuntime.resize(nativeLyricViewport());
   if (nativeLyricRuntime && typeof nativeLyricRuntime.resize === 'function') nativeLyricRuntime.resize(nativeLyricViewport());
   if (typeof requestStageLyricCameraSnap === 'function' && (desktopRuntimeState.fullscreen || document.fullscreenElement)) {
     requestStageLyricCameraSnap(reason === 'resize' ? 4 : 10);
@@ -32708,9 +32873,11 @@ function animate() {
     if (thumbCoverEl) thumbCoverEl.style.transform = 'scale(' + s + ')';
   }
 
+  updateSonicTopographyRuntime(dt);
   renderSceneWithShelfOverlay();
 }
 initNativeLyricRuntime();
+initSonicTopographyRuntime();
 animate();
 </script>
 </body>

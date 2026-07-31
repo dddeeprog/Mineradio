@@ -10,9 +10,17 @@
   var PERFORMANCE_MODES = ['quality', 'balanced', 'battery'];
 
   var DEFAULT_NATIVE_LYRIC_CONFIG = {
-    version: 1,
+    version: 2,
     enabled: true,
     mode: 'mineradio-3d',
+    sonic: {
+      enabled: false,
+      amplitude: 0.72,
+      motion: 0.55,
+      opacity: 0.7,
+      historySize: 48,
+      palette: 'theme',
+    },
     common: {
       scale: 1,
       opacity: 1,
@@ -118,6 +126,7 @@
 
   function normalizeNativeLyricConfig(input) {
     input = input && typeof input === 'object' ? input : {};
+    var sonic = input.sonic && typeof input.sonic === 'object' ? input.sonic : {};
     var common = input.common && typeof input.common === 'object' ? input.common : {};
     var modes = input.modes && typeof input.modes === 'object' ? input.modes : {};
     var mineradio3d = modes.mineradio3d || {};
@@ -137,9 +146,17 @@
       : classic.breathing;
 
     return {
-      version: 1,
+      version: 2,
       enabled: input.enabled !== false,
       mode: oneOf(input.mode, MODES, DEFAULT_NATIVE_LYRIC_CONFIG.mode),
+      sonic: {
+        enabled: sonic.enabled === true,
+        amplitude: clamp(sonic.amplitude, 0.1, 1.5, DEFAULT_NATIVE_LYRIC_CONFIG.sonic.amplitude),
+        motion: clamp(sonic.motion, 0, 1, DEFAULT_NATIVE_LYRIC_CONFIG.sonic.motion),
+        opacity: clamp(sonic.opacity, 0.15, 1, DEFAULT_NATIVE_LYRIC_CONFIG.sonic.opacity),
+        historySize: integer(sonic.historySize, 12, 96, DEFAULT_NATIVE_LYRIC_CONFIG.sonic.historySize),
+        palette: oneOf(sonic.palette, ['theme', 'cover'], DEFAULT_NATIVE_LYRIC_CONFIG.sonic.palette),
+      },
       common: {
         scale: clamp(common.scale, 0.65, 1.8, DEFAULT_NATIVE_LYRIC_CONFIG.common.scale),
         opacity: clamp(common.opacity, 0.2, 1, DEFAULT_NATIVE_LYRIC_CONFIG.common.opacity),
@@ -228,14 +245,44 @@
     var base = normalizeNativeLyricConfig(current);
     patch = patch && typeof patch === 'object' ? patch : {};
     return normalizeNativeLyricConfig(Object.assign({}, base, patch, {
+      sonic: Object.assign({}, base.sonic, patch.sonic || {}),
       common: Object.assign({}, base.common, patch.common || {}),
       modes: mergeModePatches(base.modes, patch.modes || {}),
     }));
   }
 
+  function legacySonicConfig(input, legacyFoliaFx) {
+    input = input && typeof input === 'object' ? input : {};
+    legacyFoliaFx = legacyFoliaFx && typeof legacyFoliaFx === 'object' ? legacyFoliaFx : {};
+    if (input.sonic && typeof input.sonic === 'object') return input.sonic;
+    var source = Object.assign({}, legacyFoliaFx, input);
+    var hasLegacy = source.sonicGroundEnabled != null
+      || source.sonicGroundAmplitude != null
+      || source.sonicGroundMotionSpeed != null
+      || source.sonicGroundOpacity != null
+      || source.sonicGroundHistorySize != null;
+    if (!hasLegacy) return DEFAULT_NATIVE_LYRIC_CONFIG.sonic;
+    return {
+      enabled: source.sonicGroundEnabled === true,
+      amplitude: source.sonicGroundAmplitude == null
+        ? DEFAULT_NATIVE_LYRIC_CONFIG.sonic.amplitude
+        : Math.round(finite(source.sonicGroundAmplitude, 48) * 15) / 1000,
+      motion: source.sonicGroundMotionSpeed == null
+        ? DEFAULT_NATIVE_LYRIC_CONFIG.sonic.motion
+        : finite(source.sonicGroundMotionSpeed, 55) / 100,
+      opacity: source.sonicGroundOpacity == null
+        ? DEFAULT_NATIVE_LYRIC_CONFIG.sonic.opacity
+        : finite(source.sonicGroundOpacity, 70) / 100,
+      historySize: source.sonicGroundHistorySize,
+      palette: source.sonicGroundPalette === 'cover' ? 'cover' : 'theme',
+    };
+  }
+
   function migrateLegacyNativeLyricConfig(input, legacyFoliaFx) {
-    if (input && typeof input === 'object' && Number(input.version) === 1) {
-      return normalizeNativeLyricConfig(input);
+    if (input && typeof input === 'object' && Number(input.version) >= 1) {
+      return normalizeNativeLyricConfig(Object.assign({}, input, {
+        sonic: legacySonicConfig(input, legacyFoliaFx),
+      }));
     }
     legacyFoliaFx = legacyFoliaFx && typeof legacyFoliaFx === 'object' ? legacyFoliaFx : {};
     var modeMap = {
@@ -259,6 +306,7 @@
     return normalizeNativeLyricConfig({
       mode: mode,
       enabled: legacyFoliaFx.enabled !== false,
+      sonic: legacySonicConfig(null, legacyFoliaFx),
       common: {
         scale: legacyFoliaFx.lyricScale,
         lineSpacing: legacyFoliaFx.lineSpacing,

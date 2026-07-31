@@ -77,8 +77,13 @@ body.custom-background-video #custom-bg::before{opacity:0!important}
 body.custom-background-override #album-bg{opacity:0!important}
 #canvas-container{position:fixed;inset:0;z-index:1;transition:opacity 1450ms cubic-bezier(.16,1,.3,1),transform 1450ms cubic-bezier(.16,1,.3,1)}
 #canvas-container canvas{display:block;width:100%!important;height:100%!important}
+.sonic-topography-fallback{position:absolute;inset:0;z-index:2;display:block;width:100%!important;height:100%!important;pointer-events:none;contain:strict}
 #canvas-container:focus,#canvas-container:focus-visible,#canvas-container canvas:focus,#canvas-container canvas:focus-visible,html:focus,html:focus-visible,body:focus,body:focus-visible{outline:none!important;box-shadow:none!important}
 #canvas-container canvas{outline:none!important;border:0!important}
+.sonic-topography-settings{display:grid;gap:7px;margin:0 0 12px}
+.sonic-topography-settings .fx-toggle-grid{margin:0}
+.sonic-topography-settings .fx-seg{margin-top:1px}
+.sonic-topography-settings .is-unavailable{opacity:.45;pointer-events:none}
 body.render-deep-sleep #canvas-container,body.render-deep-sleep #idle-guide-canvas,body.render-deep-sleep #splash-canvas,body.render-deep-sleep #hand-canvas{opacity:0!important;visibility:hidden!important}
 body.splash-active:not(.splash-revealing) #canvas-container{opacity:.16;transform:scale(1)}
 body.splash-active.splash-revealing #canvas-container{opacity:1;transform:scale(1)}

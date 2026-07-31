@@ -28,10 +28,18 @@ Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必
 - 项目名称：Mineradio
 - 上游仓库：`https://github.com/XxHuberrr/Mineradio`
 - 固定 commit：`4abaa190de42c632365ae4244e041bad16443224`
-- 改编位置：`desktop/main.js`、`server.js`、`server/platform/`、`server/routes/platform-search.js`、`public/platform-search-state.js`、`public/platform-search-ui.js`。
-- 改编范围：稳定用户数据目录、平台能力与账号隔离模型，以及酷狗、汽水和 Spotify 的只读目录搜索适配。
+- 改编位置：`desktop/main.js`、`server.js`、`server/platform/`、`server/routes/platform-search.js`、`public/platform-search-state.js`、`public/platform-search-ui.js`、`public/sonic-topography-state.js`、`public/sonic-topography-renderer.js`。
+- 改编范围：稳定用户数据目录、平台能力与账号隔离模型、酷狗/汽水/Spotify 的只读目录搜索适配，以及基于 `public/sonic-topography-preset.js` 公开行为重新设计的有界 Sonic Topography 状态和渲染生命周期。
 - 许可证：GNU General Public License v3.0 only，完整文本见仓库根目录 `LICENSE`。
 - 功能边界：新增搜索适配仅返回公开目录元数据，不移植上游的音频解密、本地会话发现、账号写入或播放绕过逻辑。
+
+## yin-yizhen / Sonic Topography
+
+- 上游仓库：`https://github.com/yin-yizhen/sonic-topography`
+- 固定参考：`1.1.1`，commit `3ff303e`。
+- 参考关系：`XxHuberrr/Mineradio@4abaa19` 的 `public/sonic-topography-preset.js` 声明其视觉算法来源于该项目。
+- 许可证：Non-Commercial Learning License，仅允许学习、研究和个人非商业使用；商业使用或分发衍生作品需要版权所有者明确授权。
+- 本地边界：本仓库没有复制该项目的源文件、播放器或着色器；`public/sonic-topography-state.js` 与 `public/sonic-topography-renderer.js` 根据公开视觉行为、Mineradio 既有音频帧合同和现有 Three.js 宿主独立重写。任何改变该边界的后续迁移都必须重新完成许可证审查。
 
 ## 发布包注意事项
 

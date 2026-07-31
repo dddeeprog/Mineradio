@@ -119,6 +119,7 @@ async function preparePage(page, viewport) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (
     window.nativeLyricRuntime
+    && window.sonicTopographyRuntime
     && window.MineradioNativeLyricState
     && window.MineradioNativeLyricConfig
     && window.MineradioNativeLyricThreePerformance
@@ -327,6 +328,65 @@ async function preparePage(page, viewport) {
         if (stageLyrics.current) updateLyricMeshProgress(stageLyrics.current, 0.56);
       }
       return nativeLyricRuntime.snapshot();
+    };
+    window.__renderSonicTopographyFixture = function(enabled) {
+      nativeLyricConfig = configApi.patchNativeLyricConfig(nativeLyricConfig, {
+        sonic: {
+          enabled: enabled !== false,
+          amplitude: 0.84,
+          motion: 0.62,
+          opacity: 0.78,
+          historySize: 48,
+          palette: 'theme',
+        },
+      });
+      const timeDomain = Uint8Array.from({ length: 512 }, (_, index) => (
+        128 + Math.round(Math.sin(index / 7) * 66)
+      ));
+      for (let index = 0; index < 12; index += 1) {
+        sonicTopographyRuntime.update({
+          dt: 1 / 30,
+          playing: true,
+          reducedMotion: false,
+          quality: nativeLyricConfig.common.performanceMode,
+          viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio || 1 },
+          audio: {
+            frequencyData: window.__foliaNativeFixture.spectrum,
+            timeDomainData: timeDomain,
+            bass: 0.72,
+            mid: 0.48,
+            treble: 0.4,
+            energy: 0.66,
+            beatPulse: index % 4 === 0 ? 0.86 : 0.35,
+          },
+          theme: Object.assign({}, window.__foliaNativeFixture.theme, {
+            coverColors: ['#7fd8ff', '#ff91b8', '#fff0b8'],
+          }),
+          config: nativeLyricConfig.sonic,
+        });
+      }
+      window.__renderFoliaNativeFixtureThree();
+      return sonicTopographyRuntime.snapshot();
+    };
+    window.__isolateSonicTopographyFixture = function() {
+      const foliaRoot = nativeThreeLyricHost && nativeThreeLyricHost.getRoot();
+      const sonic = foliaRoot && foliaRoot.getObjectByName('MineradioSonicTopography');
+      scene.children.forEach(child => { child.visible = child === foliaRoot; });
+      if (foliaRoot) foliaRoot.children.forEach(child => { child.visible = child === sonic; });
+      const nativeRoot = document.getElementById('native-lyric-root');
+      if (nativeRoot) nativeRoot.style.display = 'none';
+      window.__renderFoliaNativeFixtureThree();
+      const position = sonic && sonic.getObjectByName('MineradioSonicTerrain')
+        && sonic.getObjectByName('MineradioSonicTerrain').geometry.getAttribute('position');
+      const heights = position ? Array.from({ length: position.count }, (_, index) => position.array[index * 3 + 1]) : [];
+      return {
+        found: !!sonic,
+        vertices: position ? position.count : 0,
+        heightSpan: heights.length ? Math.max(...heights) - Math.min(...heights) : 0,
+        heightMin: heights.length ? Math.min(...heights) : 0,
+        heightMax: heights.length ? Math.max(...heights) : 0,
+        renderer: sonicTopographyRuntime.snapshot(),
+      };
     };
     window.__activateClassicFixture = async function(name, quality) {
       const fixture = window.__foliaClassicFixture;
@@ -1648,6 +1708,51 @@ for (const viewport of viewports) {
         expect(Math.max(0, ...diagnostics.canvasSignals), `${mode} canvas pixels`).toBeGreaterThan(0.002);
       }
     }
+    expect(pageErrors).toEqual([]);
+  });
+}
+
+test('Sonic Topography coexists with all eight Folia modes', async ({ page }) => {
+  test.setTimeout(300000);
+  const viewport = { width: 1366, height: 768 };
+  const pageErrors = await preparePage(page, viewport);
+
+  for (const mode of modes) {
+    await renderMode(page, mode);
+    const sonic = await page.evaluate(() => window.__renderSonicTopographyFixture(true));
+    expect(sonic.backend).toBe('three');
+    expect(sonic.enabled).toBe(true);
+    expect(sonic.vertices).toBeGreaterThan(0);
+    expect(sonic.historyRows).toBeGreaterThan(0);
+    expect(await page.evaluate(() => nativeLyricRuntime.snapshot().mode)).toBe(mode);
+    const buffer = await page.screenshot({
+      path: path.join(screenshotRoot, `sonic-1366x768-${mode}.png`),
+      animations: 'disabled',
+    });
+    expect(imageStats(buffer).brightRatio, `${mode} with Sonic composed pixels`).toBeGreaterThan(0.002);
+  }
+
+  expect(pageErrors).toEqual([]);
+});
+
+for (const viewport of [
+  { name: 'mobile', width: 390, height: 844 },
+  { name: 'desktop', width: 1920, height: 1080 },
+]) {
+  test(`Sonic Topography has nonblank isolated canvas pixels at ${viewport.name}`, async ({ page }) => {
+    const pageErrors = await preparePage(page, viewport);
+    await renderMode(page, 'partita');
+    await page.evaluate(() => window.__renderSonicTopographyFixture(true));
+    const geometry = await page.evaluate(() => window.__isolateSonicTopographyFixture());
+    expect(geometry.found).toBe(true);
+    expect(geometry.vertices).toBeGreaterThan(300);
+    expect(geometry.heightSpan, JSON.stringify(geometry)).toBeGreaterThan(0.08);
+    const buffer = await page.screenshot({
+      path: path.join(screenshotRoot, `sonic-isolated-${viewport.width}x${viewport.height}.png`),
+      animations: 'disabled',
+    });
+    const stats = imageStats(buffer);
+    expect(stats.brightRatio).toBeGreaterThan(0.0004);
     expect(pageErrors).toEqual([]);
   });
 }
