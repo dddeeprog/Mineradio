@@ -161,6 +161,55 @@ test('after-pack generates installer manifests only after executable resources a
   assert.equal(result.manifest.manifestSha256, 'A'.repeat(64));
 });
 
+test('after-pack derives beta channel from electron-builder extra metadata', async () => {
+  const projectDir = makeTempProject();
+  const appOutDir = path.join(projectDir, 'dist-beta', 'win-unpacked');
+  const buildResourcesDir = path.join(projectDir, 'build');
+  touch(path.join(projectDir, 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe'));
+  touch(path.join(appOutDir, 'Mineradio Beta.exe'));
+  touch(path.join(buildResourcesDir, 'icon.ico'));
+
+  await afterPack({
+    electronPlatformName: 'win32',
+    appOutDir,
+    packager: {
+      projectDir,
+      config: {
+        files: BUILD_FILES,
+        extraMetadata: { mineradioBuild: { channel: 'beta' } },
+      },
+      appInfo: {
+        id: 'com.mineradio.desktop.beta',
+        productFilename: 'Mineradio Beta',
+        productName: 'Mineradio Beta',
+        version: '1.1.0',
+      },
+      info: { buildResourcesDir },
+    },
+  }, {
+    env: {
+      MINERADIO_BUILD_COMMIT: COMMIT,
+      SOURCE_DATE_EPOCH: '1785283200',
+    },
+    execFileSync(executable, args) {
+      assert.equal(args[args.indexOf('ProductName') + 1], 'Mineradio Beta');
+      assert.equal(args[args.indexOf('FileDescription') + 1], 'Mineradio Beta');
+    },
+    gitRunner(command, args) {
+      if (args.join(' ') === 'rev-parse --verify HEAD^{commit}') return `${COMMIT}\n`;
+      if (args.join(' ') === 'rev-parse --verify HEAD^{tree}') return `${SOURCE_TREE}\n`;
+      if (args.join(' ') === 'status --porcelain=v1 --untracked-files=all') return '';
+      if (args[0] === 'ls-files') return '';
+      throw new Error(`Unexpected git arguments: ${args.join(' ')}`);
+    },
+    generateInstallerManifest(options) {
+      assert.equal(options.channel, 'beta');
+      assert.match(options.buildId, /^beta-1\.1\.0-/);
+      return { manifest: { manifestSha256: 'B'.repeat(64) } };
+    },
+  });
+});
+
 test('after-pack resolves stable build identity without accepting unsafe metadata', () => {
   assert.deepEqual(afterPack.resolveInstallerBuildIdentity({
     version: '1.1.0',

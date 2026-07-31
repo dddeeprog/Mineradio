@@ -20,11 +20,13 @@ test('maintenance baseline scripts are wired', () => {
   assert.match(scripts.check, /node --check build\/installer-safety\.js/);
   assert.match(scripts.check, /node --check build\/source-identity\.js/);
   assert.match(scripts.check, /node --check build\/generate-installer-manifest\.js/);
+  assert.match(scripts.check, /node --check build\/desktop-diagnostics\.js/);
   assert.match(scripts.check, /node --check server\/routes\/weather-full\.js/);
   assert.match(scripts.check, /node --check public\/home-weather-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-ui\.js/);
   assert.match(scripts.check, /node --check public\/weather-lively-visuals\.js/);
   assert.match(scripts.check, /node --check public\/memory-cache-state\.js/);
+  assert.match(scripts.check, /node --check public\/application-assembly\.js/);
   assert.equal(scripts['audit:prod'], 'npm audit --omit=dev');
   assert.match(scripts.test, /^node --test\b/);
   assert.match(scripts.test, /tests\/\*\.test\.js/);
@@ -33,8 +35,16 @@ test('maintenance baseline scripts are wired', () => {
   assert.equal(scripts['build:win'], 'electron-builder --win nsis --publish never');
   assert.equal(scripts['build:win:dir'], 'electron-builder --win dir --publish never');
   assert.equal(
+    scripts['build:win:beta'],
+    'electron-builder --config build/electron-builder.beta.json --win nsis --publish never'
+  );
+  assert.equal(
+    scripts['build:win:beta:dir'],
+    'electron-builder --config build/electron-builder.beta.json --win dir --publish never'
+  );
+  assert.equal(
     scripts['verify:release'],
-    'npm run check && npm run test && npm run audit:prod && npm run build:win && npm run verify:artifacts -- --fresh'
+    'npm run diagnostics:desktop && npm run check && npm run test && npm run audit:prod && npm run build:win && npm run verify:artifacts -- --fresh'
   );
   assert.equal(pkg.build.afterAllArtifactBuild, 'build/verify-release-artifacts.js');
   const githubPublisher = pkg.build.publish.find(
@@ -55,6 +65,9 @@ test('maintenance baseline scripts are wired', () => {
     'NOTICE.md',
     'THIRD_PARTY_NOTICES.md',
     'docs/VENDOR_MANIFEST.md',
+    'third_party/folia-major/LICENSE',
+    'third_party/folia-major/README.md',
+    'public/vendor/pretext-0.0.7.LICENSE',
   ]) {
     assert.ok(
       pkg.build.files.includes(releaseMaterial),
@@ -62,6 +75,28 @@ test('maintenance baseline scripts are wired', () => {
     );
   }
   assert.ok(pkg.build.files.includes('!build/.generated/**/*'));
+});
+
+test('search, login, and playback assembly live outside the monolithic page script', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+  const assembly = fs.readFileSync(
+    path.join(repoRoot, 'public', 'application-assembly.js'),
+    'utf8',
+  );
+  const scriptOffset = html.indexOf('<script src="application-assembly.js"></script>');
+  const firstInline = html.search(/<script>\s*try\s*\{/);
+
+  assert.notEqual(scriptOffset, -1);
+  assert.ok(scriptOffset < firstInline);
+  assert.match(html, /MineradioApplicationAssembly/);
+  assert.doesNotMatch(html, /MineradioPlatformSearchUI\.createController/);
+  assert.doesNotMatch(html, /MineradioPlatformLoginUI\.mountLoginCenter/);
+  assert.doesNotMatch(html, /helper\.createPlaybackTransactionManager/);
+  assert.doesNotMatch(html, /function scoreSongSearchResult/);
+  assert.doesNotMatch(html, /function mergeSongSearchResults/);
+  assert.match(assembly, /createPlatformSearchController/);
+  assert.match(assembly, /mountPlatformLoginCenter/);
+  assert.match(assembly, /createPlaybackTransactionManager/);
 });
 
 test('release workflow explicitly disables electron-builder publishing', () => {

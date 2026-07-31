@@ -224,6 +224,9 @@ test('page loads unified search modules and exposes all platform tabs', () => {
   const uiScript = html.indexOf(
     '<script src="platform-search-ui.js"></script>',
   );
+  const assemblyScript = html.indexOf(
+    '<script src="application-assembly.js"></script>',
+  );
   const firstInline = html.search(/<script>\s*try\s*\{/);
   const boundedListScript = html.indexOf(
     '<script src="content-list-controller.js"></script>',
@@ -232,9 +235,12 @@ test('page loads unified search modules and exposes all platform tabs', () => {
   assert.notEqual(boundedListScript, -1);
   assert.notEqual(stateScript, -1);
   assert.notEqual(uiScript, -1);
+  assert.notEqual(assemblyScript, -1);
   assert.ok(stateScript < uiScript);
+  assert.ok(uiScript < assemblyScript);
   assert.ok(boundedListScript < firstInline);
   assert.ok(uiScript < firstInline);
+  assert.ok(assemblyScript < firstInline);
   for (const provider of stateApi.PROVIDER_ORDER) {
     assert.match(html, new RegExp('id="search-mode-' + provider + '"'));
     assert.match(html, new RegExp("setSearchMode\\('" + provider + "'\\)"));
@@ -281,7 +287,7 @@ test('page renders incremental state and gates row commands through capabilities
     'utf8',
   );
 
-  assert.match(html, /MineradioPlatformSearchUI\.createController/);
+  assert.match(html, /MineradioApplicationAssembly\.createPlatformSearchController/);
   assert.match(html, /renderIncrementalSearchSession/);
   assert.match(html, /platformSearchController\.search\(/);
   assert.match(html, /platformSearchController\.loadMore\(\)/);

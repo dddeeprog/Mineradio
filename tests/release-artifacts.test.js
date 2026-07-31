@@ -23,11 +23,16 @@ const SOURCE_TREE = '89abcdef0123456789abcdef0123456789abcdef';
 const TRUSTED_THUMBPRINT = 'A'.repeat(40);
 const CREATED_AT = '2026-07-29T08:00:00.000Z';
 const GENERATED_AT = '2026-07-29T08:05:00.000Z';
+const CANONICAL_OWNER = 'English-worse';
+const CANONICAL_REPO = 'Mineradio';
 const MATERIALS = [
   ['LICENSE', 'resources/app/LICENSE'],
   ['NOTICE.md', 'resources/app/NOTICE.md'],
   ['THIRD_PARTY_NOTICES.md', 'resources/app/THIRD_PARTY_NOTICES.md'],
   ['docs/VENDOR_MANIFEST.md', 'resources/app/docs/VENDOR_MANIFEST.md'],
+  ['third_party/folia-major/LICENSE', 'resources/app/third_party/folia-major/LICENSE'],
+  ['third_party/folia-major/README.md', 'resources/app/third_party/folia-major/README.md'],
+  ['public/vendor/pretext-0.0.7.LICENSE', 'resources/app/public/vendor/pretext-0.0.7.LICENSE'],
 ];
 const BUILD_FILES = [
   'desktop/**/*',
@@ -41,6 +46,9 @@ const BUILD_FILES = [
   'NOTICE.md',
   'THIRD_PARTY_NOTICES.md',
   'docs/VENDOR_MANIFEST.md',
+  'third_party/folia-major/LICENSE',
+  'third_party/folia-major/README.md',
+  'public/vendor/pretext-0.0.7.LICENSE',
   'package.json',
   '!public/index.*.html',
   'public/index.html',
@@ -94,11 +102,30 @@ function buildFixture(options = {}) {
   const trustedSignerThumbprints = options.trustedSignerThumbprints
     || (signingPolicy === 'require-signed' ? [TRUSTED_THUMBPRINT] : []);
 
-  writeJson(path.join(repoDir, 'package.json'), {
+  const packageMetadata = {
     name: 'mineradio',
     version,
     productName,
+    repository: {
+      type: 'git',
+      url: `https://github.com/${CANONICAL_OWNER}/${CANONICAL_REPO}.git`,
+    },
+    mineradioBuild: {
+      channel,
+      appId,
+      productName,
+      userDataRoot: channel === 'beta' ? 'Mineradio Beta' : 'Mineradio',
+      updateChannel: channel === 'beta' ? 'beta' : 'latest',
+      releaseOwner: CANONICAL_OWNER,
+      releaseRepo: CANONICAL_REPO,
+    },
     mineradio: {
+      update: {
+        provider: 'github',
+        owner: CANONICAL_OWNER,
+        repo: CANONICAL_REPO,
+        channel: channel === 'beta' ? 'beta' : 'latest',
+      },
       release: {
         signingPolicy,
         freshnessMaxAgeMinutes: 240,
@@ -110,7 +137,8 @@ function buildFixture(options = {}) {
       files: BUILD_FILES,
       productName,
     },
-  });
+  };
+  writeJson(path.join(repoDir, 'package.json'), packageMetadata);
   writeFile(
     path.join(repoDir, 'docs', `RELEASE_NOTES_v${version}.md`),
     options.releaseNotes === undefined
@@ -131,6 +159,16 @@ function buildFixture(options = {}) {
       source: 'package',
     });
   }
+
+  const packagedPackagePath = path.join(appOutDir, 'resources', 'app', 'package.json');
+  const packagedPackageContents = `${JSON.stringify(packageMetadata, null, 2)}\n`;
+  writeFile(packagedPackagePath, packagedPackageContents);
+  manifestFiles.push({
+    path: 'resources\\app\\package.json',
+    size: Buffer.byteLength(packagedPackageContents),
+    sha256: sha256(packagedPackageContents),
+    source: 'package',
+  });
 
   const manifest = {
     schemaVersion: 1,
@@ -550,6 +588,8 @@ test('afterAllArtifactBuild writes an atomic attestation bound to the installer 
     appId: fixture.appId,
     version: fixture.version,
     channel: fixture.channel,
+    owner: CANONICAL_OWNER,
+    repo: CANONICAL_REPO,
     commit: fixture.commit,
     sourceTree: fixture.sourceTree,
     buildId: fixture.buildId,
@@ -576,6 +616,43 @@ test('valid current unsigned artifact passes only under the explicit unsigned po
     fixture.installerPath,
     `${fixture.installerPath}.mineradio-attestation.json`,
   ]);
+});
+
+test('beta artifact uses the isolated builder identity and canonical release owner', async () => {
+  const fixture = buildFixture({
+    appId: 'com.mineradio.desktop.beta',
+    channel: 'beta',
+    installerName: 'Mineradio-Beta-1.1.0-Setup.exe',
+    productName: 'Mineradio Beta',
+  });
+  const pkg = JSON.parse(fs.readFileSync(path.join(fixture.repoDir, 'package.json'), 'utf8'));
+  writeJson(path.join(fixture.repoDir, 'build', 'electron-builder.beta.json'), {
+    appId: fixture.appId,
+    productName: fixture.productName,
+    directories: { output: 'dist-beta' },
+    files: BUILD_FILES,
+    nsis: { artifactName: 'Mineradio-Beta-${version}-Setup.${ext}' },
+    publish: [{
+      provider: 'github',
+      owner: CANONICAL_OWNER,
+      repo: CANONICAL_REPO,
+      channel: 'beta',
+    }],
+    extraMetadata: {
+      mineradioBuild: pkg.mineradioBuild,
+      mineradio: { update: pkg.mineradio.update },
+    },
+  });
+
+  await attest(fixture);
+  const attestation = JSON.parse(fs.readFileSync(
+    `${fixture.installerPath}.mineradio-attestation.json`,
+    'utf8',
+  ));
+  assert.equal(attestation.artifact.fileName, 'Mineradio-Beta-1.1.0-Setup.exe');
+  assert.equal(attestation.build.channel, 'beta');
+  assert.equal(attestation.build.owner, CANONICAL_OWNER);
+  assert.equal(attestation.build.repo, CANONICAL_REPO);
 });
 
 test('verification rejects an additional setup installer or a setup for another version', async (t) => {
@@ -740,6 +817,44 @@ test('verification rejects missing or changed release materials', async (t) => {
     fs.appendFileSync(path.join(fixture.repoDir, 'THIRD_PARTY_NOTICES.md'), 'changed');
     assert.throws(() => verify(fixture), /THIRD_PARTY_NOTICES\.md|material|SHA256/i);
   });
+});
+
+test('release verifier covers Folia and Pretext source acquisition materials', () => {
+  assert.deepEqual(
+    artifactVerifier.RELEASE_MATERIALS.map(material => material.sourcePath),
+    MATERIALS.map(material => material[0]),
+  );
+});
+
+test('packaged metadata must retain build identity and canonical release ownership', () => {
+  const fixture = buildFixture();
+  const expected = {
+    appId: fixture.appId,
+    channel: fixture.channel,
+    owner: CANONICAL_OWNER,
+    productName: fixture.productName,
+    repo: CANONICAL_REPO,
+    version: fixture.version,
+  };
+
+  assert.deepEqual(
+    artifactVerifier.readPackagedReleaseIdentity(fixture.appOutDir, expected),
+    expected,
+  );
+
+  const packagedPackagePath = path.join(
+    fixture.appOutDir,
+    'resources',
+    'app',
+    'package.json',
+  );
+  const packagedPackage = JSON.parse(fs.readFileSync(packagedPackagePath, 'utf8'));
+  packagedPackage.mineradioBuild.releaseOwner = 'foreign-owner';
+  writeJson(packagedPackagePath, packagedPackage);
+  assert.throws(
+    () => artifactVerifier.readPackagedReleaseIdentity(fixture.appOutDir, expected),
+    /owner|ownership|repository/i,
+  );
 });
 
 test('fresh verification rejects stale build, sidecar, and artifact timestamps', async () => {
@@ -1300,9 +1415,12 @@ test('release artifact hashing uses bounded reads', () => {
   assert.ok(readSizes.every((size) => size <= 64 * 1024));
 });
 
-test('CLI argument parser accepts only --fresh', () => {
-  assert.deepEqual(artifactVerifier.parseCliArguments([]), { fresh: false });
-  assert.deepEqual(artifactVerifier.parseCliArguments(['--fresh']), { fresh: true });
+test('CLI argument parser accepts beta and freshness gates once each', () => {
+  assert.deepEqual(artifactVerifier.parseCliArguments([]), { beta: false, fresh: false });
+  assert.deepEqual(
+    artifactVerifier.parseCliArguments(['--beta', '--fresh']),
+    { beta: true, fresh: true },
+  );
   assert.throws(
     () => artifactVerifier.parseCliArguments(['--force']),
     /unknown|unsupported|--force/i,

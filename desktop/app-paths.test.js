@@ -9,6 +9,7 @@ const appPathsModule = require('./app-paths');
 const {
   APP_OWNED_DIRECTORIES,
   configureStableAppPaths,
+  resolveDesktopBuildIdentity,
 } = appPathsModule;
 
 function makeTempDirectory(t) {
@@ -34,10 +35,11 @@ function expectedPaths(userData) {
   };
 }
 
-test('exports only the stable path API and exact owned directory contract', () => {
+test('exports the channel-aware stable path API and exact owned directory contract', () => {
   assert.deepEqual(Object.keys(appPathsModule).sort(), [
     'APP_OWNED_DIRECTORIES',
     'configureStableAppPaths',
+    'resolveDesktopBuildIdentity',
   ]);
   assert.deepEqual(APP_OWNED_DIRECTORIES, [
     'credentials',
@@ -49,6 +51,63 @@ test('exports only the stable path API and exact owned directory contract', () =
     'journal',
   ]);
   assert.equal(Object.isFrozen(APP_OWNED_DIRECTORIES), true);
+});
+
+test('resolves only stable and beta build identities from package metadata', () => {
+  assert.deepEqual(resolveDesktopBuildIdentity({ packageMetadata: {} }), {
+    channel: 'stable',
+    productName: 'Mineradio',
+    appId: 'com.mineradio.desktop',
+    userDataRoot: 'Mineradio',
+  });
+  assert.deepEqual(resolveDesktopBuildIdentity({
+    packageMetadata: {
+      mineradioBuild: {
+        channel: 'beta',
+        productName: 'Mineradio Beta',
+        appId: 'com.mineradio.desktop.beta',
+        userDataRoot: 'Mineradio Beta',
+      },
+    },
+  }), {
+    channel: 'beta',
+    productName: 'Mineradio Beta',
+    appId: 'com.mineradio.desktop.beta',
+    userDataRoot: 'Mineradio Beta',
+  });
+  assert.throws(
+    () => resolveDesktopBuildIdentity({ channel: 'nightly', packageMetadata: {} }),
+    /unsupported/i,
+  );
+  assert.throws(
+    () => resolveDesktopBuildIdentity({
+      packageMetadata: { mineradioBuild: { userDataRoot: '..' } },
+    }),
+    /user data root/i,
+  );
+});
+
+test('packaged build metadata cannot be redirected by a runtime channel environment variable', () => {
+  assert.deepEqual(resolveDesktopBuildIdentity({
+    env: { MINERADIO_BUILD_CHANNEL: 'beta' },
+    packageMetadata: {
+      mineradioBuild: {
+        channel: 'stable',
+        productName: 'Mineradio',
+        appId: 'com.mineradio.desktop',
+        userDataRoot: 'Mineradio',
+      },
+    },
+  }), {
+    channel: 'stable',
+    productName: 'Mineradio',
+    appId: 'com.mineradio.desktop',
+    userDataRoot: 'Mineradio',
+  });
+  assert.equal(resolveDesktopBuildIdentity({
+    env: { MINERADIO_BUILD_CHANNEL: 'beta' },
+    packageMetadata: {},
+  }).channel, 'beta');
 });
 
 test('creates every stable owned directory before publishing userData', () => {

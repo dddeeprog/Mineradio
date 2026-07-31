@@ -16,6 +16,18 @@ const RELEASE_MATERIALS = Object.freeze([
     sourcePath: 'docs/VENDOR_MANIFEST.md',
     packagedPath: 'resources/app/docs/VENDOR_MANIFEST.md',
   }),
+  Object.freeze({
+    sourcePath: 'third_party/folia-major/LICENSE',
+    packagedPath: 'resources/app/third_party/folia-major/LICENSE',
+  }),
+  Object.freeze({
+    sourcePath: 'third_party/folia-major/README.md',
+    packagedPath: 'resources/app/third_party/folia-major/README.md',
+  }),
+  Object.freeze({
+    sourcePath: 'public/vendor/pretext-0.0.7.LICENSE',
+    packagedPath: 'resources/app/public/vendor/pretext-0.0.7.LICENSE',
+  }),
 ]);
 const WINDOWS_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 const TEXT_FILE_LIMITS = Object.freeze({
@@ -405,16 +417,80 @@ function readInstallerManifest(repoDir, options) {
   return { manifest, manifestPath };
 }
 
+function mergePackagedMetadata(pkg, extraMetadata) {
+  const extra = isRecord(extraMetadata) ? extraMetadata : {};
+  const baseMineradio = isRecord(pkg.mineradio) ? pkg.mineradio : {};
+  const extraMineradio = isRecord(extra.mineradio) ? extra.mineradio : {};
+  return {
+    ...pkg,
+    ...extra,
+    mineradioBuild: {
+      ...(isRecord(pkg.mineradioBuild) ? pkg.mineradioBuild : {}),
+      ...(isRecord(extra.mineradioBuild) ? extra.mineradioBuild : {}),
+    },
+    mineradio: {
+      ...baseMineradio,
+      ...extraMineradio,
+      update: {
+        ...(isRecord(baseMineradio.update) ? baseMineradio.update : {}),
+        ...(isRecord(extraMineradio.update) ? extraMineradio.update : {}),
+      },
+    },
+  };
+}
+
+function firstGithubPublisher(buildConfig) {
+  const publishers = Array.isArray(buildConfig.publish)
+    ? buildConfig.publish
+    : [buildConfig.publish];
+  return publishers.find((publisher) => isRecord(publisher) && publisher.provider === 'github')
+    || null;
+}
+
+function expandArtifactName(template, version) {
+  const result = requireString(template, 'Setup artifact template')
+    .replace(/\$\{version\}/g, version)
+    .replace(/\$\{ext\}/g, 'exe');
+  if (/\$\{[^}]+\}/.test(result) || !/^Mineradio-.+-Setup\.exe$/i.test(result)) {
+    throw new Error(`Setup artifact template is unsupported: ${template}.`);
+  }
+  return result;
+}
+
 function readPackageReleaseConfig(repoDir, options) {
+  const input = options || {};
   const packagePath = path.join(repoDir, 'package.json');
   const pkg = readJsonFile(packagePath, 'package.json', {
-    maxBytes: resolveReadLimit(options, 'packageJson'),
+    maxBytes: resolveReadLimit(input, 'packageJson'),
   });
+  const declaredChannel = input.channel
+    || (input.beta === true ? 'beta' : '')
+    || (pkg.mineradioBuild && pkg.mineradioBuild.channel)
+    || 'stable';
+  const channel = requireString(declaredChannel, 'Package build channel');
+  if (!['stable', 'beta'].includes(channel)) {
+    throw new Error(`Unsupported package build channel: ${channel}.`);
+  }
+
+  let buildConfig = pkg.build;
+  let metadata = pkg;
+  if (channel === 'beta') {
+    const betaPath = path.join(repoDir, 'build', 'electron-builder.beta.json');
+    if (fs.existsSync(betaPath)) {
+      const beta = readJsonFile(betaPath, 'Beta electron-builder configuration', {
+        maxBytes: resolveReadLimit(input, 'packageJson'),
+      });
+      buildConfig = beta;
+      metadata = mergePackagedMetadata(pkg, beta.extraMetadata);
+    }
+  }
+  if (!isRecord(buildConfig)) throw new Error(`${channel} build configuration is missing.`);
+
   const productName = requireString(
-    pkg.build && pkg.build.productName ? pkg.build.productName : pkg.productName,
+    buildConfig.productName || metadata.productName,
     'Package product name',
   );
-  const appId = requireString(pkg.build && pkg.build.appId, 'Package app ID');
+  const appId = requireString(buildConfig.appId, 'Package app ID');
   const version = requireString(pkg.version, 'Package version');
   const release = pkg.mineradio && pkg.mineradio.release;
   if (!isRecord(release)) throw new Error('Package release policy is missing.');
@@ -435,11 +511,60 @@ function readPackageReleaseConfig(repoDir, options) {
   if (!Number.isFinite(freshnessMaxAgeMinutes) || freshnessMaxAgeMinutes <= 0) {
     throw new Error('Release freshnessMaxAgeMinutes must be positive.');
   }
+  const declaredBuild = isRecord(metadata.mineradioBuild) ? metadata.mineradioBuild : {};
+  const update = metadata.mineradio && metadata.mineradio.update;
+  if (!isRecord(update)) throw new Error('Package update ownership is missing.');
+  const publisher = firstGithubPublisher(buildConfig);
+  const owner = requireString(
+    publisher && publisher.owner || declaredBuild.releaseOwner || update.owner,
+    'Release owner',
+  );
+  const repo = requireString(
+    publisher && publisher.repo || declaredBuild.releaseRepo || update.repo,
+    'Release repository',
+  );
+  for (const [value, label] of [
+    [declaredBuild.releaseOwner, 'Build release owner'],
+    [declaredBuild.releaseRepo, 'Build release repository'],
+    [update.owner, 'Update release owner'],
+    [update.repo, 'Update release repository'],
+  ]) {
+    if (value !== undefined) {
+      assertEqual(value, label.includes('owner') ? owner : repo, label);
+    }
+  }
+  const expectedUpdateChannel = channel === 'beta' ? 'beta' : 'latest';
+  assertEqual(
+    requireString(update.channel || declaredBuild.updateChannel, 'Update channel'),
+    expectedUpdateChannel,
+    'Update channel',
+  );
+  if (declaredBuild.channel !== undefined) {
+    assertEqual(declaredBuild.channel, channel, 'Package build channel');
+  }
+  if (declaredBuild.appId !== undefined) assertEqual(declaredBuild.appId, appId, 'Package app ID');
+  if (declaredBuild.productName !== undefined) {
+    assertEqual(declaredBuild.productName, productName, 'Package product name');
+  }
+  const artifactName = requireString(
+    buildConfig.nsis && buildConfig.nsis.artifactName
+      || declaredBuild.artifactName
+      || `Mineradio-${'${version}'}-Setup.${'${ext}'}`,
+    'Setup artifact template',
+  );
   return {
     appId,
+    artifactName,
+    buildFiles: Array.isArray(buildConfig.files) ? buildConfig.files : [],
+    channel,
     freshnessMaxAgeMinutes,
+    owner,
+    outputDirectory: buildConfig.directories && buildConfig.directories.output
+      || declaredBuild.outputDirectory
+      || (channel === 'beta' ? 'dist-beta' : 'dist'),
     pkg,
     productName,
+    repo,
     signingPolicy,
     trustedSignerThumbprints,
     version,
@@ -451,7 +576,8 @@ function resolveExpectedBuildIdentity(options) {
   const env = input.env || process.env;
   const version = requireString(input.version, 'Build version');
   const channel = requireString(
-    env.MINERADIO_BUILD_CHANNEL
+    input.channel
+      || env.MINERADIO_BUILD_CHANNEL
       || (/(?:^|[-.])beta(?:[.-]|$)/i.test(version) ? 'beta' : 'stable'),
     'Build channel',
   );
@@ -510,6 +636,67 @@ function locatePackagedApp(distDir) {
     throw new Error(`Exactly one packaged Windows app directory is required in ${distDir}.`);
   }
   return candidates[0];
+}
+
+function githubRepositoryIdentity(repository) {
+  const value = typeof repository === 'string'
+    ? repository
+    : (isRecord(repository) ? repository.url : '');
+  const match = String(value || '').match(/github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?$/i);
+  if (!match) throw new Error('Packaged repository ownership is missing or malformed.');
+  return { owner: match[1], repo: match[2] };
+}
+
+function readPackagedReleaseIdentity(appOutDir, expected, options) {
+  const input = options || {};
+  const expectedIdentity = isRecord(expected) ? expected : {};
+  const packagePath = path.join(appOutDir, 'resources', 'app', 'package.json');
+  const pkg = readJsonFile(packagePath, 'Packaged package.json', {
+    maxBytes: resolveReadLimit(input, 'packageJson'),
+  });
+  const build = isRecord(pkg.mineradioBuild) ? pkg.mineradioBuild : {};
+  const update = pkg.mineradio && pkg.mineradio.update;
+  if (!isRecord(update)) throw new Error('Packaged update ownership is missing.');
+  const repository = githubRepositoryIdentity(pkg.repository);
+  const identity = {
+    appId: requireString(build.appId, 'Packaged app ID'),
+    channel: requireString(build.channel, 'Packaged build channel'),
+    owner: requireString(build.releaseOwner, 'Packaged release owner'),
+    productName: requireString(build.productName || pkg.productName, 'Packaged product name'),
+    repo: requireString(build.releaseRepo, 'Packaged release repository'),
+    version: requireString(pkg.version, 'Packaged version'),
+  };
+
+  for (const key of ['appId', 'channel', 'owner', 'productName', 'repo', 'version']) {
+    assertEqual(identity[key], requireString(expectedIdentity[key], `Expected packaged ${key}`), `Packaged ${key}`);
+  }
+  assertEqual(repository.owner, identity.owner, 'Packaged repository owner');
+  assertEqual(repository.repo, identity.repo, 'Packaged repository name');
+  assertEqual(update.owner, identity.owner, 'Packaged update owner');
+  assertEqual(update.repo, identity.repo, 'Packaged update repository');
+  assertEqual(
+    update.channel,
+    identity.channel === 'beta' ? 'beta' : 'latest',
+    'Packaged update channel',
+  );
+
+  if (isRecord(input.manifest) && Array.isArray(input.manifest.files)) {
+    const manifestEntry = input.manifest.files.find(
+      (entry) => normalizeInstallPath(entry && entry.path) === 'resources\\app\\package.json',
+    );
+    if (!isRecord(manifestEntry)) {
+      throw new Error('Installer manifest is missing packaged package.json identity metadata.');
+    }
+    const packageStat = fs.statSync(packagePath);
+    assertEqual(manifestEntry.source, 'package', 'Packaged package.json manifest source');
+    assertEqual(manifestEntry.size, packageStat.size, 'Packaged package.json manifest size');
+    assertEqual(
+      String(manifestEntry.sha256 || '').toUpperCase(),
+      sha256File(packagePath),
+      'Packaged package.json manifest SHA256',
+    );
+  }
+  return identity;
 }
 
 function collectReleaseMaterials(repoDir, appOutDir, manifest) {
@@ -571,10 +758,14 @@ function attestationPathFor(installerPath) {
 }
 
 function loadBuildContext(repoDir, distDir, options) {
-  const releaseConfig = readPackageReleaseConfig(repoDir, options);
   const { manifest, manifestPath } = readInstallerManifest(repoDir, options);
+  const releaseConfig = readPackageReleaseConfig(repoDir, {
+    ...(options || {}),
+    channel: manifest.channel,
+  });
   const identity = resolveExpectedBuildIdentity({
-    buildFiles: releaseConfig.pkg.build && releaseConfig.pkg.build.files,
+    buildFiles: releaseConfig.buildFiles,
+    channel: manifest.channel,
     env: options && options.env,
     gitRunner: options && options.gitRunner,
     repoDir,
@@ -584,8 +775,27 @@ function loadBuildContext(repoDir, distDir, options) {
   const appOutDir = options && options.appOutDir
     ? options.appOutDir
     : locatePackagedApp(distDir);
+  const releaseIdentity = readPackagedReleaseIdentity(appOutDir, {
+    appId: releaseConfig.appId,
+    channel: identity.channel,
+    owner: releaseConfig.owner,
+    productName: releaseConfig.productName,
+    repo: releaseConfig.repo,
+    version: releaseConfig.version,
+  }, {
+    ...(options || {}),
+    manifest,
+  });
   const materials = collectReleaseMaterials(repoDir, appOutDir, manifest);
-  return { appOutDir, identity, manifest, manifestPath, materials, releaseConfig };
+  return {
+    appOutDir,
+    identity,
+    manifest,
+    manifestPath,
+    materials,
+    releaseConfig,
+    releaseIdentity,
+  };
 }
 
 function inspectBuildTargets(buildResult) {
@@ -821,7 +1031,10 @@ function createArtifactAttestations(buildResult, options) {
   const input = options || {};
   const repoDir = input.repoDir || path.resolve(__dirname, '..');
   const context = loadBuildContext(repoDir, distDir, input);
-  const expectedName = `Mineradio-${context.releaseConfig.version}-Setup.exe`;
+  const expectedName = expandArtifactName(
+    context.releaseConfig.artifactName,
+    context.releaseConfig.version,
+  );
   const generatedAt = requireIsoTimestamp(
     new Date((input.now || (() => new Date()))()).toISOString(),
     'Attestation generatedAt',
@@ -846,6 +1059,8 @@ function createArtifactAttestations(buildResult, options) {
         appId: context.manifest.appId,
         version: context.manifest.version,
         channel: context.manifest.channel,
+        owner: context.releaseIdentity.owner,
+        repo: context.releaseIdentity.repo,
         commit: context.manifest.commit,
         sourceTree: context.identity.sourceTree,
         buildId: context.manifest.buildId,
@@ -1022,6 +1237,8 @@ function assertAttestation(
   for (const key of ['productName', 'appId', 'version', 'channel', 'commit', 'buildId', 'createdAt']) {
     assertEqual(attestation.build[key], context.manifest[key], `Attestation build ${key}`);
   }
+  assertEqual(attestation.build.owner, context.releaseIdentity.owner, 'Attestation build owner');
+  assertEqual(attestation.build.repo, context.releaseIdentity.repo, 'Attestation build repository');
   assertEqual(
     attestation.build.sourceTree,
     context.identity.sourceTree,
@@ -1096,9 +1313,12 @@ function assertFreshness(options) {
 function verifyReleaseArtifacts(options) {
   const input = options || {};
   const repoDir = input.repoDir || path.resolve(__dirname, '..');
-  const distDir = input.distDir || path.join(repoDir, 'dist');
-  const releaseConfig = readPackageReleaseConfig(repoDir, input);
-  const expectedName = `Mineradio-${releaseConfig.version}-Setup.exe`;
+  const releaseConfig = readPackageReleaseConfig(repoDir, {
+    ...input,
+    channel: input.channel || (input.beta === true ? 'beta' : undefined),
+  });
+  const distDir = input.distDir || path.join(repoDir, releaseConfig.outputDirectory);
+  const expectedName = expandArtifactName(releaseConfig.artifactName, releaseConfig.version);
   const expectedInstallerPath = path.join(distDir, expectedName);
   assertNoUnexpectedReleaseOutputs(distDir, [
     expectedInstallerPath,
@@ -1208,15 +1428,20 @@ function verifyReleaseArtifacts(options) {
 
 function parseCliArguments(args) {
   const input = Array.isArray(args) ? args : [];
+  let beta = false;
   let fresh = false;
   for (const argument of input) {
+    if (argument === '--beta' && !beta) {
+      beta = true;
+      continue;
+    }
     if (argument === '--fresh' && !fresh) {
       fresh = true;
       continue;
     }
     throw new Error(`Unknown or duplicate release verification argument: ${argument}.`);
   }
-  return { fresh };
+  return { beta, fresh };
 }
 
 function afterAllArtifactBuild(buildResult) {
@@ -1239,6 +1464,7 @@ Object.assign(afterAllArtifactBuild, {
   isReleaseLikeOutputName,
   parseCliArguments,
   readBoundedTextFile,
+  readPackagedReleaseIdentity,
   selectSetupArtifact,
   readAuthenticodeStatus,
   readWindowsArtifactMetadata,

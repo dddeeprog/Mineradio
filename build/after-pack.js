@@ -33,11 +33,12 @@ function resolveRceditExecutable(projectDir) {
 }
 
 function buildRceditArgs(options) {
+  const productName = options.productName || 'Mineradio';
   return [
     options.exePath,
     '--set-icon', options.iconPath,
-    '--set-version-string', 'FileDescription', 'Mineradio',
-    '--set-version-string', 'ProductName', 'Mineradio',
+    '--set-version-string', 'FileDescription', productName,
+    '--set-version-string', 'ProductName', productName,
     '--set-version-string', 'CompanyName', 'Mineradio',
     '--set-version-string', 'OriginalFilename', `${options.appName}.exe`,
     '--set-file-version', options.version,
@@ -101,7 +102,8 @@ function resolveInstallerBuildIdentity(options) {
     buildFiles: input.buildFiles,
     gitRunner: input.gitRunner,
   });
-  var channel = env.MINERADIO_BUILD_CHANNEL
+  var channel = input.channel
+    || env.MINERADIO_BUILD_CHANNEL
     || (/(?:^|[-.])beta(?:[.-]|$)/i.test(version) ? 'beta' : 'stable');
   channel = requireBuildIdentity(channel, 'Build channel', /^(?:stable|beta)$/);
 
@@ -143,15 +145,20 @@ async function afterPack(context, dependencies) {
   if (!fs.existsSync(iconPath)) throw new Error(`Mineradio icon was not found: ${iconPath}`);
 
   const version = context.packager.appInfo.version;
+  const productName = context.packager.appInfo.productName || appName;
   console.log(`  • injecting Mineradio resources  rcedit=${rceditPath}`);
   commandRunner(
     rceditPath,
-    buildRceditArgs({ exePath, iconPath, appName, version }),
+    buildRceditArgs({ exePath, iconPath, appName, productName, version }),
     { stdio: 'inherit' },
   );
 
   const buildFiles = resolvePackagedFileRules(context);
+  const buildMetadata = context.packager.config
+    && context.packager.config.extraMetadata
+    && context.packager.config.extraMetadata.mineradioBuild;
   const identity = resolveInstallerBuildIdentity({
+    channel: buildMetadata && buildMetadata.channel,
     version,
     projectDir: context.packager.projectDir,
     buildFiles,
@@ -165,7 +172,7 @@ async function afterPack(context, dependencies) {
   );
   return manifestGenerator({
     appOutDir: context.appOutDir,
-    productName: context.packager.appInfo.productName || appName,
+    productName,
     appId: context.packager.appInfo.id,
     version,
     ...identity,

@@ -1,3 +1,8 @@
+/*
+ * Adapted from XxHuberrr/Mineradio at
+ * 4abaa190de42c632365ae4244e041bad16443224.
+ * Upstream project license: GPL-3.0-only.
+ */
 (function(root, factory) {
   var api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;

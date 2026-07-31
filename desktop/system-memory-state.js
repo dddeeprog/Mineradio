@@ -1,3 +1,8 @@
+/*
+ * Adapted from XxHuberrr/Mineradio at
+ * 4abaa190de42c632365ae4244e041bad16443224.
+ * Upstream project license: GPL-3.0-only.
+ */
 'use strict';
 
 const PRESSURE_RANK = Object.freeze({ normal: 0, moderate: 1, critical: 2 });

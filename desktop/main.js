@@ -6,6 +6,7 @@ const { execFile, spawn } = require('child_process');
 const { Readable } = require('stream');
 const {
   configureStableAppPaths,
+  resolveDesktopBuildIdentity,
 } = require('./app-paths');
 const {
   createPlatformCredentialRuntime,
@@ -78,16 +79,19 @@ const WINDOWED_SCALE = 3 / 4;
 const WINDOWED_MARGIN = 32;
 const MIN_WINDOWED_WIDTH = 960;
 const MIN_WINDOWED_HEIGHT = 540;
-const APP_NAME = 'Mineradio';
-const APP_USER_MODEL_ID = 'com.mineradio.desktop';
+const APP_IDENTITY = resolveDesktopBuildIdentity();
+const APP_NAME = APP_IDENTITY.productName;
+const APP_USER_MODEL_ID = APP_IDENTITY.appId;
 const APP_ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico');
 const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
 const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
-const APP_PATHS = configureStableAppPaths(app);
-const LEGACY_APP_DATA_ROOTS = Object.freeze([
-  path.resolve(__dirname, '..'),
-  path.join(path.dirname(APP_PATHS.userData), 'mineradio'),
-]);
+const APP_PATHS = configureStableAppPaths(app, { identity: APP_IDENTITY });
+const LEGACY_APP_DATA_ROOTS = Object.freeze(APP_IDENTITY.channel === 'stable'
+  ? [
+    path.resolve(__dirname, '..'),
+    path.join(path.dirname(APP_PATHS.userData), 'mineradio'),
+  ]
+  : []);
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],

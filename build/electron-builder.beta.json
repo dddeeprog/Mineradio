@@ -1,0 +1,98 @@
+{
+  "extends": null,
+  "appId": "com.mineradio.desktop.beta",
+  "productName": "Mineradio Beta",
+  "directories": {
+    "output": "dist-beta",
+    "buildResources": "build"
+  },
+  "afterPack": "build/after-pack.js",
+  "afterAllArtifactBuild": "build/verify-release-artifacts.js",
+  "toolsets": {
+    "winCodeSign": "1.1.0"
+  },
+  "files": [
+    "desktop/**/*",
+    "public/**/*",
+    "build/**/*",
+    "!build/.generated/**/*",
+    "server.js",
+    "server/**/*",
+    "dj-analyzer.js",
+    "LICENSE",
+    "NOTICE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/VENDOR_MANIFEST.md",
+    "third_party/folia-major/LICENSE",
+    "third_party/folia-major/README.md",
+    "public/vendor/pretext-0.0.7.LICENSE",
+    "package.json",
+    "!public/index.*.html",
+    "public/index.html"
+  ],
+  "asar": false,
+  "extraMetadata": {
+    "name": "mineradio-beta",
+    "productName": "Mineradio Beta",
+    "mineradioBuild": {
+      "channel": "beta",
+      "appId": "com.mineradio.desktop.beta",
+      "productName": "Mineradio Beta",
+      "userDataRoot": "Mineradio Beta",
+      "uninstallKey": "7ad8d2c1-0c4b-4ab5-9d1d-c8fb34a7bc77",
+      "updateChannel": "beta",
+      "artifactName": "Mineradio-Beta-${version}-Setup.${ext}",
+      "outputDirectory": "dist-beta",
+      "releaseOwner": "English-worse",
+      "releaseRepo": "Mineradio"
+    },
+    "mineradio": {
+      "update": {
+        "provider": "github",
+        "owner": "English-worse",
+        "repo": "Mineradio",
+        "channel": "beta"
+      }
+    }
+  },
+  "win": {
+    "executableName": "MineradioBeta",
+    "icon": "build/icon.ico",
+    "signAndEditExecutable": false,
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
+  "nsis": {
+    "guid": "7ad8d2c1-0c4b-4ab5-9d1d-c8fb34a7bc77",
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Mineradio Beta",
+    "uninstallDisplayName": "Mineradio Beta",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerSidebar": "build/installerSidebar.bmp",
+    "uninstallerSidebar": "build/installerSidebar.bmp",
+    "installerHeader": "build/installerHeader.bmp",
+    "include": "build/installer.nsh",
+    "differentialPackage": false,
+    "artifactName": "Mineradio-Beta-${version}-Setup.${ext}"
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "English-worse",
+      "repo": "Mineradio",
+      "channel": "beta",
+      "publishAutoUpdate": false
+    }
+  ]
+}

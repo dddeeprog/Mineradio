@@ -10,6 +10,7 @@
 - 固定 commit：`baa5e846b7404f1893e8b7812bca79e959f21d3f`
 - 引入方式：从上游仓库复制源码树，排除 `.git`、依赖目录和本地构建输出目录。
 - 许可证：GNU Affero General Public License v3.0，见 `third_party/folia-major/LICENSE`。
+- 源码获取：发布包包含 `third_party/folia-major/README.md`、固定 commit 与上游仓库地址；对应完整源码可从上述上游仓库按固定 commit 获取。
 - 当前修改状态：已在 `src/mineradioBridge/` 增加 Mineradio Bridge 接入层，并调整 `src/App.tsx` 让 Folia bridge mode 消费 Mineradio 传入的播放状态、歌词和 DIY 舞台效果配置；`public/folia-native/` 继续以原生 JavaScript 改编歌词时序、语义排版和七种视觉效果，改编文件保留来源头；未改变 Folia 原始项目的许可证。
 
 Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必须保留 Folia 原始许可证、作者声明和本通知，并按 AGPL-3.0 及 GPL-3.0 兼容组合要求提供对应源码获取方式。
@@ -28,8 +29,8 @@ Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必
 - 项目名称：Mineradio
 - 上游仓库：`https://github.com/XxHuberrr/Mineradio`
 - 固定 commit：`4abaa190de42c632365ae4244e041bad16443224`
-- 改编位置：`desktop/main.js`、`desktop/wallpaper-runtime.js`、`desktop/wallpaper-properties.js`、`desktop/desktop-icon-state.js`、`desktop/wallpaper-diagnostics.js`、`server.js`、`server/platform/`、`server/routes/platform-search.js`、`public/platform-search-state.js`、`public/platform-search-ui.js`、`public/sonic-topography-state.js`、`public/sonic-topography-renderer.js`、`public/wallpaper.html`、`public/desktop-icon-layer.js`。
-- 改编范围：稳定用户数据目录、平台能力与账号隔离模型、酷狗/汽水/Spotify 的只读目录搜索适配、基于 `public/sonic-topography-preset.js` 公开行为重新设计的有界 Sonic Topography 状态和渲染生命周期，以及 WorkerW/Progman 回退、Explorer 重启恢复、Wallpaper Engine 属性桥接和不接管真实 Windows Shell 的受限桌面图标视觉。
+- 改编位置：`desktop/app-paths.js`、`desktop/main.js`、`desktop/system-memory-state.js`、桌面壁纸与图标模块、`server.js`、`server/platform/`、平台路由、`public/application-assembly.js`、`public/platform-*-state.js`、`public/platform-*-ui.js`、`public/playback-transaction.js`、`public/resource-governor.js`、Sonic Topography 与完整桌面相关模块。
+- 改编范围：稳定/Beta 数据目录、平台能力与账号隔离模型、多平台目录搜索、应用装配、播放事务、资源治理、有界 Sonic Topography 生命周期，以及 WorkerW/Progman 回退、Explorer 重启恢复、Wallpaper Engine 属性桥接和不接管真实 Windows Shell 的受限桌面图标视觉。
 - 许可证：GNU General Public License v3.0 only，完整文本见仓库根目录 `LICENSE`。
 - 功能边界：新增搜索适配仅返回公开目录元数据，不移植上游的音频解密、本地会话发现、账号写入或播放绕过逻辑；完整桌面只管理 Mineradio 壁纸窗口与视觉图标，不读取任意桌面文件、不替换 Explorer、不持有真实 Shell 图标。
 
@@ -43,6 +44,6 @@ Mineradio 后续若复制、修改、链接、组合或分发 Folia 代码，必
 
 ## 发布包注意事项
 
-- 发布安装包或压缩包前，必须确认包含或明确提供 Mineradio 与 Folia 对应源码获取方式。
+- 发布安装包或压缩包前，必须包含根目录 `LICENSE`、`NOTICE.md`、本文件、`docs/VENDOR_MANIFEST.md`、`third_party/folia-major/LICENSE`、`third_party/folia-major/README.md` 与 `public/vendor/pretext-0.0.7.LICENSE`，并明确提供 Mineradio 与 Folia 对应源码获取方式。
 - 如果 Folia 源码发生修改，必须在本文件或相邻变更日志中记录修改范围、日期和对应 commit。
 - 如果仅作为本地私有实验使用且不分发，仍建议保留本通知，避免后续误将实验包发布。

@@ -10,14 +10,17 @@ Mineradio 使用了以下第三方项目或服务。各项目版权归其原作�
 - music-tempo
 - NeteaseCloudMusicApi
 - mpg123-decoder
-- Folia / folia-major (AGPL-3.0, source imported under `third_party/folia-major/`)
+- Folia / folia-major (AGPL-3.0, fixed source commit `baa5e846b7404f1893e8b7812bca79e959f21d3f`; license packaged at `third_party/folia-major/LICENSE`)
+- @chenglou/pretext 0.0.7 (MIT; license packaged at `public/vendor/pretext-0.0.7.LICENSE`)
 
 更完整的第三方源码、许可证和引入 commit 记录见 `THIRD_PARTY_NOTICES.md`。
 
 ## Upstream Reference Adaptations
 
 - [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio)，固定参考 commit `4abaa190de42c632365ae4244e041bad16443224`，许可证为 GPL-3.0-only。
-  本批参考其 `desktop/main.js`、`desktop/wallpaper-mode-runtime.js`、完整桌面图标相关模块、`server.js`、`build/installer.nsh`、`build/after-pack.js`、`cuefield/adapter-mineradio.js`、`public/js/modules/05-playback/16-cuefield-automix-core.js`、`public/js/modules/05-playback/17-cuefield-timeline-executor.js` 与 `public/sonic-topography-preset.js`，改编了稳定用户数据目录、平台能力模型、账号隔离概念、Cuefield 节拍适配与过渡生命周期、Sonic Topography 视觉行为、WorkerW/资源管理器恢复、Wallpaper Engine 属性桥接、受限桌面图标视觉，以及安装器视觉/资源注入流程；音频所有权、事务回退、Sonic 状态/渲染器、桌面窗口生命周期、IPC 授权、状态诊断、安装归属、危险路径、生成式清单、事务恢复与卸载保护由本地重写实现。
+  本批参考其桌面运行时、平台搜索/登录/动作模块、播放事务、资源治理、安装器与 Cuefield/Sonic 相关实现；具体上游文件包括 `build/installer.nsh`、`build/after-pack.js`、`cuefield/adapter-mineradio.js`、`public/js/modules/05-playback/16-cuefield-automix-core.js`、`public/js/modules/05-playback/17-cuefield-timeline-executor.js` 与 `public/sonic-topography-preset.js`。本地改编覆盖稳定用户数据目录、平台能力模型、账号隔离概念、应用装配、播放事务、资源管理、桌面生命周期和安装器流程；高风险文件操作、发布身份与卸载保护由本地重写实现。
+
+随安装包一并分发上述 Folia 固定源码说明、Folia 许可证和 Pretext 许可证；完整源码获取方式见 `THIRD_PARTY_NOTICES.md`。
 
 - XxHuberrr 的 Sonic 文件声明其视觉来源参考 [yin-yizhen/sonic-topography](https://github.com/yin-yizhen/sonic-topography) `1.1.1@3ff303e`。该项目采用 Non-Commercial Learning License。Mineradio 本地实现仅依据公开行为独立重写，没有复制其着色器、播放器或源文件；完整来源边界见 `THIRD_PARTY_NOTICES.md`。
 
