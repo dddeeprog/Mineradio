@@ -14,6 +14,7 @@
 <script src="storage.js"></script>
 <script src="actions.js"></script>
 <script src="performance.js"></script>
+<script src="resource-governor.js"></script>
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="content-list-controller.js"></script>
@@ -37,6 +38,7 @@
 <script src="sonic-topography-renderer.js"></script>
 <script src="folia-native/state.js"></script>
 <script src="folia-native/layout.js"></script>
+<script src="folia-native/cache-policy.js"></script>
 <script src="folia-native/registry.js"></script>
 <script src="folia-native/runtime.js"></script>
 <script src="folia-native/three/performance-budget.js"></script>
@@ -1421,6 +1423,7 @@ var aiDepthLastRunAt = 0, aiDepthMinGapMs = 18000;
 var visualCoverHandoffTimer = null, visualCoverHandoffSeq = 0, pendingVisualCoverSource = null;
 var rendererPerformanceTools = window.MineradioPerformance || {};
 var memoryCacheTools = window.MineradioMemoryCacheState || {};
+var resourceGovernorTools = window.MineradioResourceGovernor || {};
 var lyricLineFinder = rendererPerformanceTools.createLyricLineFinder
   ? rendererPerformanceTools.createLyricLineFinder()
   : {
@@ -2266,7 +2269,200 @@ var runtimePerfState = {
   heapMB: 0,
   cacheCounts: {}
 };
+var systemResourceState = {
+  pressure: 'normal',
+  totalMB: 0,
+  freeMB: 0,
+  availableRatio: 0,
+  onBattery: false,
+  thermalState: 'unknown',
+  speedLimit: 100,
+  locked: false,
+  suspended: false,
+  revision: 0,
+  updatedAt: 0
+};
+var resourceGovernor = resourceGovernorTools && typeof resourceGovernorTools.createResourceGovernor === 'function'
+  ? resourceGovernorTools.createResourceGovernor({ recoveryHoldMs:5000, maxFrameSamples:120 })
+  : null;
+var resourceGovernorDecision = null;
+var resourceGovernorApplying = false;
+var resourceGovernorLastCacheProfile = '';
+var resourceGovernorLastWallpaperFps = 0;
+window.__mineradioResourceGovernor = resourceGovernor;
+function normalizeSystemResourceSnapshot(value) {
+  value = value || {};
+  var pressure = /^(normal|moderate|critical)$/.test(String(value.pressure || '')) ? String(value.pressure) : 'normal';
+  var thermal = /^(unknown|nominal|fair|serious|critical)$/.test(String(value.thermalState || '')) ? String(value.thermalState) : 'unknown';
+  return {
+    pressure:pressure,
+    totalMB:Math.max(0, Math.round(Number(value.totalMB) || 0)),
+    freeMB:Math.max(0, Math.round(Number(value.freeMB) || 0)),
+    availableRatio:Math.max(0, Math.min(1, Number(value.availableRatio) || 0)),
+    onBattery:value.onBattery === true,
+    thermalState:thermal,
+    speedLimit:Math.max(0, Math.min(100, Number(value.speedLimit) || 100)),
+    locked:value.locked === true,
+    suspended:value.suspended === true,
+    revision:Math.max(0, Math.round(Number(value.revision) || 0)),
+    updatedAt:Math.max(0, Number(value.updatedAt) || 0)
+  };
+}
+function resourceGovernorFeatureState() {
+  var standbyActive = false;
+  try {
+    standbyActive = !!(nextTrackPreloadState && (
+      nextTrackPreloadState.pending
+      || nextTrackPreloadState.prepared
+      || nextTrackPreloadState.switching
+    ));
+    if (!standbyActive && gaplessPlaybackCoordinator && typeof gaplessPlaybackCoordinator.snapshot === 'function') {
+      var standbySnapshot = gaplessPlaybackCoordinator.snapshot() || {};
+      standbyActive = !!(standbySnapshot.standbyKey || standbySnapshot.standbyReady);
+    }
+    if (!standbyActive) {
+      standbyActive = !!(
+        playing
+        && playMode === 'loop'
+        && Array.isArray(playQueue)
+        && playQueue.length > 1
+        && currentIdx >= 0
+      );
+    }
+  } catch (e) {}
+  var sonicEnabled = !!(nativeLyricConfig && nativeLyricConfig.sonic && nativeLyricConfig.sonic.enabled);
+  return {
+    autoMix:!!(fx && fx.cuefieldAutoMixIntensity && fx.cuefieldAutoMixIntensity !== 'off'),
+    standbyMedia:standbyActive,
+    sonicTopography:sonicEnabled || !!sonicTopographyRuntime,
+    nativeLyrics:!!nativeLyricRuntime,
+    wallpaper:!!(fx && fx.wallpaperMode),
+    completeDesktop:!!(fx && fx.fullDesktopMode)
+  };
+}
+function resourceGovernorInput(reason, now) {
+  return {
+    now:now == null ? visualBudgetNow() : now,
+    reason:reason || '',
+    hidden:!!document.hidden,
+    minimized:!!desktopRuntimeState.minimized,
+    windowVisible:desktopRuntimeState.visible !== false,
+    focused:desktopRuntimeState.focused !== false,
+    locked:systemResourceState.locked === true,
+    suspended:systemResourceState.suspended === true,
+    backgroundMode:currentPerformanceBackgroundMode(),
+    requestedQuality:normalizePerformanceQuality(fx && fx.performanceQuality),
+    wallpaperFrameRate:normalizeWallpaperFrameRate(fx && fx.wallpaperFrameRate),
+    system:systemResourceState,
+    activeFeatures:resourceGovernorFeatureState()
+  };
+}
+function isGovernedResourceReleased(name) {
+  return !!(resourceGovernorDecision
+    && Array.isArray(resourceGovernorDecision.desiredReleased)
+    && resourceGovernorDecision.desiredReleased.indexOf(String(name || '')) >= 0);
+}
+function releaseGovernedResource(name, reason) {
+  reason = reason || 'background';
+  if (name === 'autoMix') {
+    if (typeof cancelCuefieldAutoMix === 'function') cancelCuefieldAutoMix('resource-' + reason);
+    return;
+  }
+  if (name === 'standbyMedia') {
+    if (typeof cancelNextTrackPreload === 'function') cancelNextTrackPreload('resource-' + reason);
+    return;
+  }
+  if (name === 'sonicTopography') {
+    if (sonicTopographyRuntime && typeof sonicTopographyRuntime.release === 'function') sonicTopographyRuntime.release(reason);
+    return;
+  }
+  if (name === 'nativeLyrics') {
+    if (nativeLyricRuntime && typeof nativeLyricRuntime.release === 'function') nativeLyricRuntime.release(reason);
+    if (nativeThreeLyricHost && typeof nativeThreeLyricHost.suspend === 'function') nativeThreeLyricHost.suspend();
+  }
+}
+function restoreGovernedResource(name, reason) {
+  reason = reason || 'foreground';
+  if (name === 'nativeLyrics') {
+    if (nativeThreeLyricHost && typeof nativeThreeLyricHost.resume === 'function') nativeThreeLyricHost.resume();
+    if (nativeLyricRuntime && typeof nativeLyricRuntime.resume === 'function') nativeLyricRuntime.resume();
+    return;
+  }
+  if (name === 'sonicTopography') {
+    if (sonicTopographyRuntime && typeof sonicTopographyRuntime.restore === 'function') sonicTopographyRuntime.restore();
+    return;
+  }
+  if (name === 'standbyMedia') {
+    if (playing && typeof scheduleNextTrackPreload === 'function') scheduleNextTrackPreload('resource-' + reason);
+    return;
+  }
+  if (name === 'autoMix' && typeof syncCuefieldAutoMixRuntime === 'function') syncCuefieldAutoMixRuntime('resource-' + reason);
+}
+function applyResourceGovernorDecision(decision, previous, reason) {
+  if (!decision || resourceGovernorApplying) return decision;
+  resourceGovernorApplying = true;
+  try {
+    (decision.releaseSet || []).forEach(function(name){ releaseGovernedResource(name, reason); });
+    var releasedVisuals = (decision.desiredReleased || []).indexOf('nativeLyrics') >= 0
+      || (decision.desiredReleased || []).indexOf('sonicTopography') >= 0;
+    if (releasedVisuals && visualBudgetState.mode !== 'released') {
+      visualBudgetState.mode = 'released';
+      visualBudgetState.releaseCount += 1;
+      visualBudgetState.lastReleaseAt = visualBudgetNow();
+      visualBudgetState.lastReason = reason || decision.reason || 'resource-release';
+      if (typeof clearCommentBarrage3D === 'function') {
+        try {
+          clearCommentBarrage3D(true);
+          visualBudgetState.commentBarrageReleased = true;
+        } catch (e) {}
+      }
+    }
+    (decision.restoreSet || []).forEach(function(name){ restoreGovernedResource(name, reason); });
+    if (!releasedVisuals && visualBudgetState.mode !== 'active') {
+      visualBudgetState.mode = 'active';
+      visualBudgetState.resumeCount += 1;
+      visualBudgetState.lastResumeAt = visualBudgetNow();
+      visualBudgetState.lastReason = reason || decision.reason || 'resource-restore';
+      visualBudgetState.commentBarrageReleased = false;
+    }
+    var layoutBudget = decision.cacheBudgets && decision.cacheBudgets.layoutCaches || null;
+    if (nativeLyricRuntime && typeof nativeLyricRuntime.setResourcePolicy === 'function') {
+      nativeLyricRuntime.setResourcePolicy({
+        qualityTier:decision.qualityTier,
+        targetFps:decision.targetFps,
+        cacheBudget:layoutBudget,
+        textureCacheBudget:decision.cacheBudgets && decision.cacheBudgets.lyricTextures || null
+      });
+    }
+    var profileChanged = resourceGovernorLastCacheProfile && resourceGovernorLastCacheProfile !== decision.cacheProfile;
+    resourceGovernorLastCacheProfile = decision.cacheProfile;
+    if (profileChanged && typeof trimRuntimeCaches === 'function') {
+      visualBudgetState.lastDropped = trimRuntimeCaches('resource-' + (reason || decision.mode), decision.cacheProfile !== 'active');
+    }
+    if (resourceGovernorLastWallpaperFps !== decision.wallpaperFps) {
+      resourceGovernorLastWallpaperFps = decision.wallpaperFps;
+      if (fx && fx.wallpaperMode && typeof pushWallpaperState === 'function') pushWallpaperState(true);
+    }
+  } finally {
+    resourceGovernorApplying = false;
+  }
+  return decision;
+}
+function syncResourceGovernor(reason, now) {
+  if (!resourceGovernor || typeof resourceGovernor.update !== 'function') return resourceGovernorDecision;
+  var previous = resourceGovernorDecision;
+  resourceGovernorDecision = resourceGovernor.update(resourceGovernorInput(reason, now));
+  return applyResourceGovernorDecision(resourceGovernorDecision, previous, reason);
+}
+function updateSystemResourceState(value) {
+  systemResourceState = normalizeSystemResourceSnapshot(value);
+  syncResourceGovernor('system-resource-state');
+  updateRenderPowerClasses();
+  applyRendererPowerMode();
+  return systemResourceState;
+}
 function isDeepBackgroundMode() {
+  if (systemResourceState.locked || systemResourceState.suspended) return true;
   if (isLiveBackgroundKeepMode()) return false;
   return !!(document.hidden || desktopRuntimeState.minimized || desktopRuntimeState.visible === false);
 }
@@ -2283,52 +2479,17 @@ function visualBudgetNow() {
   return (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
 }
 function applyVisualReleaseBudget(reason, aggressive) {
-  if (!isDeepBackgroundMode() || !isBackgroundReleaseMode()) return false;
-  reason = reason || 'release';
-  var dropped = 0;
-  if (visualBudgetState.mode !== 'released') {
-    visualBudgetState.mode = 'released';
-    visualBudgetState.releaseCount += 1;
-    visualBudgetState.lastReleaseAt = visualBudgetNow();
-  }
-  visualBudgetState.lastReason = reason;
-  if (nativeLyricRuntime && typeof nativeLyricRuntime.release === 'function') nativeLyricRuntime.release(reason);
-  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.release === 'function') sonicTopographyRuntime.release(reason);
-  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.suspend === 'function') nativeThreeLyricHost.suspend();
-  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.trim === 'function') dropped += nativeThreeLyricHost.trim(aggressive ? 3 : 1) || 0;
-  if (typeof clearCommentBarrage3D === 'function') {
-    try {
-      clearCommentBarrage3D(true);
-      visualBudgetState.commentBarrageReleased = true;
-    } catch (e) {}
-  }
-  if (typeof trimLyricTextureCache === 'function') {
-    visualBudgetState.lyricTextureKeep = aggressive ? 2 : 8;
-    try { dropped += trimLyricTextureCache(aggressive ? 2 : 8) || 0; } catch (e) {}
-  }
-  if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
-    try { renderer.renderLists.dispose(); } catch (e) {}
-  }
-  visualBudgetState.lastDropped = dropped;
-  return true;
+  var decision = syncResourceGovernor(reason || (aggressive ? 'release' : 'background'));
+  return !!(decision && (decision.mode === 'released' || decision.mode === 'suspended'));
 }
 function resumeVisualReleaseBudget(reason) {
-  if (visualBudgetState.mode === 'active') return false;
-  reason = reason || 'restore';
-  visualBudgetState.mode = 'active';
-  visualBudgetState.commentBarrageReleased = false;
-  visualBudgetState.resumeCount += 1;
-  visualBudgetState.lastResumeAt = visualBudgetNow();
-  visualBudgetState.lastReason = reason;
-  if (nativeThreeLyricHost && typeof nativeThreeLyricHost.resume === 'function') nativeThreeLyricHost.resume();
-  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.restore === 'function') sonicTopographyRuntime.restore();
-  if (nativeLyricRuntime && typeof nativeLyricRuntime.resume === 'function') nativeLyricRuntime.resume();
-  return true;
+  var before = visualBudgetState.resumeCount;
+  syncResourceGovernor(reason || 'restore');
+  return visualBudgetState.resumeCount > before;
 }
 function syncVisualBudgetForPowerMode(reason) {
-  if (isDeepBackgroundMode() && isBackgroundReleaseMode()) return applyVisualReleaseBudget(reason || 'power-mode', true);
-  if (!isDeepBackgroundMode()) return resumeVisualReleaseBudget(reason || 'foreground');
-  return false;
+  var decision = syncResourceGovernor(reason || 'power-mode');
+  return !!(decision && decision.mode !== 'active');
 }
 function isHiddenForBackgroundOptimization() {
   return !!(document.hidden && !isLiveBackgroundKeepMode());
@@ -2427,6 +2588,20 @@ function collectProtectedCoverDepthIds() {
   return keep;
 }
 function trimObjectCache(cache, keep, protectedKeys, skipRecord) {
+  var maxBytes = arguments.length > 4 ? arguments[4] : Number.POSITIVE_INFINITY;
+  var sizeOf = arguments.length > 5 ? arguments[5] : null;
+  var dispose = arguments.length > 6 ? arguments[6] : null;
+  if (memoryCacheTools && typeof memoryCacheTools.trimObjectCacheToBudget === 'function') {
+    var budgetResult = memoryCacheTools.trimObjectCacheToBudget(cache, {
+      maxCount:keep,
+      maxBytes:maxBytes,
+      protectedKeys:protectedKeys,
+      skipRecord:skipRecord,
+      sizeOf:sizeOf,
+      dispose:dispose
+    });
+    return budgetResult && budgetResult.droppedCount ? budgetResult.droppedCount : 0;
+  }
   if (memoryCacheTools && typeof memoryCacheTools.trimObjectCache === 'function') {
     var result = memoryCacheTools.trimObjectCache(cache, {
       keep: keep,
@@ -2450,26 +2625,55 @@ function trimObjectCache(cache, keep, protectedKeys, skipRecord) {
   }
   return dropped;
 }
-function trimCoverDepthCache(keep, protectedKeys) {
+function imageSurfaceBytes(image) {
+  if (!image) return 0;
+  var width = Number(image.naturalWidth || image.videoWidth || image.width) || 0;
+  var height = Number(image.naturalHeight || image.videoHeight || image.height) || 0;
+  return Math.max(0, Math.round(width * height * 4));
+}
+function runtimeCacheRecordBytes(name, record) {
+  if (!record) return 0;
+  if (name === 'playlistCovers') return imageSurfaceBytes(record.img) + 256;
+  if (name === 'coverDepth') return imageSurfaceBytes(record.canvas) + 128;
+  if (name === 'lyricTextures') {
+    var textureImage = record.texture && record.texture.image || record.image || null;
+    return imageSurfaceBytes(textureImage) + 256;
+  }
+  if (memoryCacheTools && typeof memoryCacheTools.estimateValueBytes === 'function') {
+    try { return memoryCacheTools.estimateValueBytes(record); } catch (e) {}
+  }
+  try { return JSON.stringify(record).length * 2; } catch (e) { return 0; }
+}
+function cacheApproxBytes(cache, name) {
+  if (memoryCacheTools && typeof memoryCacheTools.cacheApproxBytes === 'function') {
+    return memoryCacheTools.cacheApproxBytes(cache, function(record){ return runtimeCacheRecordBytes(name, record); });
+  }
+  return 0;
+}
+function currentRuntimeCacheBudget(name, activeCount, deepCount) {
+  var configured = resourceGovernorDecision && resourceGovernorDecision.cacheBudgets && resourceGovernorDecision.cacheBudgets[name];
+  if (configured) return configured;
+  return { maxCount:isDeepBackgroundMode() ? deepCount : activeCount, maxBytes:Number.POSITIVE_INFINITY };
+}
+function trimCoverDepthCache(keep, protectedKeys, maxBytes) {
   if (!coverDepthCache || !coverDepthCacheKeys) return 0;
   var keys = coverDepthCacheKeys.filter(function(key){ return !!coverDepthCache[key]; });
-  if (keys.length <= keep) {
-    coverDepthCacheKeys = keys;
-    return 0;
-  }
-  var keepSet = Object.create(null);
-  var count = 0;
-  for (var i = keys.length - 1; i >= 0 && count < keep; i--) {
-    keepSet[keys[i]] = true;
-    count++;
-  }
-  Object.keys(protectedKeys || {}).forEach(function(key){ keepSet[key] = true; });
+  keep = Math.max(0, Math.floor(Number(keep) || 0));
+  maxBytes = Number(maxBytes);
+  if (!isFinite(maxBytes)) maxBytes = Number.POSITIVE_INFINITY;
+  var totalBytes = keys.reduce(function(total, key){ return total + runtimeCacheRecordBytes('coverDepth', coverDepthCache[key]); }, 0);
   var dropped = 0;
-  keys.forEach(function(key){
-    if (keepSet[key]) return;
+  for (var i = 0; i < keys.length && (keys.length - dropped > keep || totalBytes > maxBytes); i++) {
+    var key = keys[i];
+    if (protectedKeys && protectedKeys[key]) continue;
+    var record = coverDepthCache[key];
+    totalBytes = Math.max(0, totalBytes - runtimeCacheRecordBytes('coverDepth', record));
+    if (record && record.canvas) {
+      try { record.canvas.width = 1; record.canvas.height = 1; } catch (e) {}
+    }
     delete coverDepthCache[key];
     dropped++;
-  });
+  }
   coverDepthCacheKeys = keys.filter(function(key){ return !!coverDepthCache[key]; });
   return dropped;
 }
@@ -2488,6 +2692,16 @@ function collectRuntimePerfSnapshot(now) {
     localLibraryScanFiles: localLibraryState && localLibraryState.lastScan && Array.isArray(localLibraryState.lastScan.files) ? localLibraryState.lastScan.files.length : 0,
     localLibraryScanAssets: localLibraryState && localLibraryState.lastScan && Array.isArray(localLibraryState.lastScan.assets) ? localLibraryState.lastScan.assets.length : 0,
     queueSongs: playQueue.length
+  };
+  runtimePerfState.cacheBytes = {
+    playlistCovers:cacheApproxBytes(playlistCoverCache, 'playlistCovers'),
+    coverDepth:cacheApproxBytes(coverDepthCache, 'coverDepth'),
+    beatMaps:cacheApproxBytes(beatMapCache, 'beatMaps'),
+    djBeatMaps:cacheApproxBytes(djBeatMapCache, 'djBeatMaps'),
+    commentBarrage:cacheApproxBytes(commentBarrageCache, 'commentBarrage'),
+    foliaThemes:cacheApproxBytes(foliaThemeCache, 'foliaThemes'),
+    lyricTextures:cacheApproxBytes(lyricTextureCache, 'lyricTextures'),
+    localBeatMaps:cacheApproxBytes(localBeatMapCache, 'localBeatMaps')
   };
   if (performance && performance.memory && now - runtimePerfState.lastHeapSampleAt > 12000) {
     runtimePerfState.lastHeapSampleAt = now;
@@ -2521,6 +2735,16 @@ function collectRuntimePerfSnapshot(now) {
     } : null,
     nativeLyrics: nativeLyricRuntime && typeof nativeLyricRuntime.snapshot === 'function' ? nativeLyricRuntime.snapshot() : null,
     sonicTopography: sonicTopographyRuntime && typeof sonicTopographyRuntime.snapshot === 'function' ? sonicTopographyRuntime.snapshot() : null,
+    resourceGovernor:resourceGovernor && typeof resourceGovernor.snapshot === 'function' ? resourceGovernor.snapshot() : null,
+    resourceDecision:resourceGovernorDecision ? {
+      mode:resourceGovernorDecision.mode,
+      qualityTier:resourceGovernorDecision.qualityTier,
+      targetFps:resourceGovernorDecision.targetFps,
+      wallpaperFps:resourceGovernorDecision.wallpaperFps,
+      cacheProfile:resourceGovernorDecision.cacheProfile,
+      desiredReleased:(resourceGovernorDecision.desiredReleased || []).slice()
+    } : null,
+    systemResources:normalizeSystemResourceSnapshot(systemResourceState),
     visualBudget: {
       mode: visualBudgetState.mode,
       commentBarrageReleased: visualBudgetState.commentBarrageReleased,
@@ -2563,6 +2787,8 @@ function collectPerformanceDiagnosticRows(snapshot) {
   var viewport = snapshot.viewport || {};
   var visualBudget = snapshot.visualBudget || {};
   var nativeLyrics = snapshot.nativeLyrics || {};
+  var governor = snapshot.resourceGovernor || {};
+  var system = snapshot.systemResources || {};
   return [
     ['JS Heap', performanceDiagnosticMetric(snapshot.runtime && snapshot.runtime.heapMB, ' MB')],
     ['Renderer 纹理', performanceDiagnosticMetric(snapshot.renderer && snapshot.renderer.textures)],
@@ -2570,6 +2796,10 @@ function collectPerformanceDiagnosticRows(snapshot) {
     ['Draw Calls', performanceDiagnosticMetric(rendererInfo.calls)],
     ['渲染像素', viewport.renderPixels ? Math.round(viewport.renderPixels / 10000) + ' 万' : '0'],
     ['目标 FPS', performanceDiagnosticMetric(viewport.targetFps)],
+    ['有效画质', performanceDiagnosticMetric(governor.qualityTier || 'high')],
+    ['帧 P95', performanceDiagnosticMetric(Math.round((governor.frameP95Ms || 0) * 10) / 10, ' ms')],
+    ['系统内存', performanceDiagnosticMetric(system.pressure || 'normal')],
+    ['系统可用', performanceDiagnosticMetric(system.freeMB, ' MB')],
     ['播放队列', performanceDiagnosticMetric(caches.queueSongs)],
     ['本地库歌曲', performanceDiagnosticMetric(caches.localLibrarySongs)],
     ['歌词贴图', performanceDiagnosticMetric(caches.lyricTextures)],
@@ -2655,22 +2885,29 @@ function trimRuntimeCaches(reason, aggressive) {
   var protectedCovers = collectProtectedCoverUrls();
   var protectedBeats = collectProtectedBeatMapKeys();
   var dropped = 0;
-  dropped += trimObjectCache(playlistCoverCache, aggressive ? 72 : 180, protectedCovers, function(rec){
+  var coverBudget = currentRuntimeCacheBudget('playlistCovers', 180, 72);
+  var depthBudget = currentRuntimeCacheBudget('coverDepth', 10, 4);
+  var beatBudget = currentRuntimeCacheBudget('beatMaps', 36, 12);
+  var djBeatBudget = currentRuntimeCacheBudget('djBeatMaps', 12, 4);
+  var commentBudget = currentRuntimeCacheBudget('commentBarrage', 8, 2);
+  var themeBudget = currentRuntimeCacheBudget('foliaThemes', 48, 12);
+  var lyricBudget = currentRuntimeCacheBudget('lyricTextures', 24, 6);
+  var localBeatBudget = currentRuntimeCacheBudget('localBeatMaps', 80, 16);
+  dropped += trimObjectCache(playlistCoverCache, coverBudget.maxCount, protectedCovers, function(rec){
     return rec && rec.loading;
-  });
-  dropped += trimCoverDepthCache(aggressive ? 4 : 10, collectProtectedCoverDepthIds());
-  dropped += trimObjectCache(beatMapCache, aggressive ? 12 : 36, protectedBeats);
-  dropped += trimObjectCache(djBeatMapCache, aggressive ? 4 : 12, protectedBeats);
-  dropped += trimObjectCache(commentBarrageCache, aggressive ? 2 : 8, collectProtectedCommentKeys(), function(rec){
+  }, coverBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('playlistCovers', rec); });
+  dropped += trimCoverDepthCache(depthBudget.maxCount, collectProtectedCoverDepthIds(), depthBudget.maxBytes);
+  dropped += trimObjectCache(beatMapCache, beatBudget.maxCount, protectedBeats, null, beatBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('beatMaps', rec); });
+  dropped += trimObjectCache(djBeatMapCache, djBeatBudget.maxCount, protectedBeats, null, djBeatBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('djBeatMaps', rec); });
+  dropped += trimObjectCache(commentBarrageCache, commentBudget.maxCount, collectProtectedCommentKeys(), function(rec){
     return rec && rec.loading;
-  });
-  dropped += trimObjectCache(foliaThemeCache, aggressive ? 12 : 48);
-  dropped += trimLyricTextureCache(aggressive ? 6 : 24);
-  dropped += trimObjectCache(localBeatMapCache, aggressive ? 16 : 80, protectedBeats);
+  }, commentBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('commentBarrage', rec); });
+  dropped += trimObjectCache(foliaThemeCache, themeBudget.maxCount, null, null, themeBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('foliaThemes', rec); });
+  dropped += trimLyricTextureCache(lyricBudget.maxCount, lyricBudget.maxBytes);
+  dropped += trimObjectCache(localBeatMapCache, localBeatBudget.maxCount, protectedBeats, null, localBeatBudget.maxBytes, function(rec){ return runtimeCacheRecordBytes('localBeatMaps', rec); });
   if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
     try { renderer.renderLists.dispose(); } catch (e) {}
   }
-  if (aggressive && isBackgroundReleaseMode()) applyVisualReleaseBudget(reason || 'runtime-cache-trim', true);
   runtimePerfState.lastCacheTrimAt = performance.now();
   runtimePerfState.cacheTrimCount += 1;
   runtimePerfState.lastCacheTrimReason = reason || (aggressive ? 'deep' : 'active');
@@ -2760,6 +2997,12 @@ function installRenderPowerHooks() {
       window.desktopWindow.getState().then(updateDesktopRuntimeState).catch(function(){});
     }
   }
+  if (window.desktopWindow && typeof window.desktopWindow.onSystemResourceState === 'function') {
+    window.desktopWindow.onSystemResourceState(updateSystemResourceState);
+  }
+  if (window.desktopWindow && typeof window.desktopWindow.getSystemResourceState === 'function') {
+    window.desktopWindow.getSystemResourceState().then(updateSystemResourceState).catch(function(){});
+  }
 }
 
 // ============================================================
@@ -2784,7 +3027,9 @@ var RENDER_INTERACTION_HOLD_MS = 900;
 var renderInteractionBoostUntil = 0;
 var renderInteractionReason = '';
 function renderQualityProfile() {
-  var quality = normalizePerformanceQuality(fx && fx.performanceQuality);
+  var quality = resourceGovernorDecision && resourceGovernorDecision.qualityTier
+    ? resourceGovernorDecision.qualityTier
+    : normalizePerformanceQuality(fx && fx.performanceQuality);
   if (quality === 'eco') return { cap: 0.95, min: 0.56, budget: 2400000 };
   if (quality === 'balanced') return { cap: 1.12, min: 0.66, budget: 3800000 };
   if (quality === 'ultra') return { cap: 1.75, min: 0.85, budget: 7800000 };
@@ -8108,6 +8353,7 @@ function lyricThreeColor(css, fallback, minLum) {
 
 var STAGE_LYRIC_MAX_LINES = 1;
 var lyricTextureCache = new Map();
+var nativeLyric3DCacheBudget = null;
 function lyricTextureStyleKey() {
   return [
     normalizeLyricFontKey(fx && fx.lyricFont),
@@ -8125,9 +8371,17 @@ function markCachedLyricTexture(texture) {
   return texture;
 }
 function cachedLyricTextureValue(key, factory) {
-  if (lyricTextureCache.has(key)) return lyricTextureCache.get(key);
+  if (lyricTextureCache.has(key)) {
+    var cached = lyricTextureCache.get(key);
+    lyricTextureCache.delete(key);
+    lyricTextureCache.set(key, cached);
+    return cached;
+  }
   var value = factory();
   lyricTextureCache.set(key, value);
+  if (nativeLyric3DCacheBudget) {
+    trimLyricTextureCache(nativeLyric3DCacheBudget.maxCount, nativeLyric3DCacheBudget.maxBytes);
+  }
   return value;
 }
 function disposeLyricTexture(texture) {
@@ -8144,8 +8398,17 @@ function clearLyricTextureCache() {
   lyricTextureCache.forEach(disposeCachedLyricTextureValue);
   lyricTextureCache.clear();
 }
-function trimLyricTextureCache(keep) {
+function trimLyricTextureCache(keep, maxBytes) {
   if (!lyricTextureCache) return 0;
+  if (memoryCacheTools && typeof memoryCacheTools.trimMapCacheToBudget === 'function') {
+    var budgetResult = memoryCacheTools.trimMapCacheToBudget(lyricTextureCache, {
+      maxCount:keep,
+      maxBytes:maxBytes,
+      sizeOf:function(value){ return runtimeCacheRecordBytes('lyricTextures', value); },
+      dispose:disposeCachedLyricTextureValue
+    });
+    return budgetResult && budgetResult.droppedCount ? budgetResult.droppedCount : 0;
+  }
   if (memoryCacheTools && typeof memoryCacheTools.trimMapCache === 'function') {
     var result = memoryCacheTools.trimMapCache(lyricTextureCache, {
       keep: keep,
@@ -19800,15 +20063,17 @@ function initSonicTopographyRuntime() {
 }
 function sonicTopographyQualityMode() {
   var common = nativeLyricConfig && nativeLyricConfig.common || {};
-  if (common.performanceMode === 'battery') return 'battery';
-  if (common.performanceMode === 'quality') return 'quality';
-  var globalQuality = fx && fx.performanceQuality || 'balanced';
-  if (globalQuality === 'eco') return 'battery';
-  if (globalQuality === 'high' || globalQuality === 'ultra') return 'quality';
-  return 'balanced';
+  return governedNativeLyricQuality(common.performanceMode);
+}
+function governedNativeLyricQuality(configured) {
+  configured = /^(battery|balanced|quality)$/.test(String(configured || '')) ? String(configured) : 'balanced';
+  var tier = resourceGovernorDecision && resourceGovernorDecision.qualityTier || normalizePerformanceQuality(fx && fx.performanceQuality);
+  if (tier === 'eco') return 'battery';
+  if (tier === 'balanced') return configured === 'battery' ? 'battery' : 'balanced';
+  return configured;
 }
 function updateSonicTopographyRuntime(dt) {
-  if (sonicTopographyFailed || visualBudgetState.mode === 'released') return false;
+  if (sonicTopographyFailed || isGovernedResourceReleased('sonicTopography')) return false;
   if (!sonicTopographyRuntime && !initSonicTopographyRuntime()) return false;
   var palette = stageLyrics && stageLyrics.palette || {};
   var generatedTheme = foliaThemeCurrent && foliaThemeCurrent.theme || foliaThemeCurrent || {};
@@ -19872,7 +20137,22 @@ function captureNative3DLyricTransition() {
   return layer;
 }
 function nativeLyric3DSnapshot() {
-  return { domNodes:0, canvases:0, cacheEntries:cacheCount(lyricTextureCache), cacheBytes:0 };
+  return {
+    domNodes:0,
+    canvases:0,
+    cacheEntries:cacheCount(lyricTextureCache),
+    cacheBytes:cacheApproxBytes(lyricTextureCache, 'lyricTextures')
+  };
+}
+function applyNativeLyric3DResourcePolicy(policy) {
+  var budget = policy && (policy.textureCacheBudget || policy.cacheBudget);
+  if (!budget) return false;
+  nativeLyric3DCacheBudget = {
+    maxCount:Math.max(0, Math.floor(Number(budget.maxCount) || 0)),
+    maxBytes:Math.max(0, Number(budget.maxBytes) || 0)
+  };
+  trimLyricTextureCache(nativeLyric3DCacheBudget.maxCount, nativeLyric3DCacheBudget.maxBytes);
+  return true;
 }
 function loadNativeLyricRendererScript(src) {
   src = String(src || '');
@@ -19922,6 +20202,7 @@ function initNativeLyricRuntime() {
         setVisible:setNative3DLyricVisible,
         clear:function(){ clearStageLyrics(); },
         captureTransition:captureNative3DLyricTransition,
+        setResourcePolicy:applyNativeLyric3DResourcePolicy,
         snapshot:nativeLyric3DSnapshot
       });
     };
@@ -19993,12 +20274,13 @@ function initNativeLyricRuntime() {
   });
   nativeLyricRuntime.resize(nativeLyricViewport());
   nativeLyricRuntime.setDocument(nativeLyricDocument || refreshNativeLyricDocument('runtime-init'));
+  syncResourceGovernor('native-lyrics-init');
   nativeLyricRuntime.setMode(nativeLyricConfig.mode || 'mineradio-3d');
   syncNativeLyricControls();
   return true;
 }
 function updateNativeLyricRuntime(dt) {
-  if (!nativeLyricRuntime || !nativeLyricDocument || visualBudgetState.mode === 'released') return false;
+  if (!nativeLyricRuntime || !nativeLyricDocument || isGovernedResourceReleased('nativeLyrics')) return false;
   var api = nativeLyricStateApi();
   if (!api || typeof api.buildNativeLyricFrame !== 'function') return false;
   var now = audio && isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -20015,7 +20297,7 @@ function updateNativeLyricRuntime(dt) {
       wordColors:foliaThemeCurrent && foliaThemeCurrent.wordColors || []
     }),
     viewport:nativeLyricViewport(),
-    quality:nativeLyricConfig.common.performanceMode,
+    quality:governedNativeLyricQuality(nativeLyricConfig.common.performanceMode),
     reducedMotion:nativeLyricConfig.common.reduceMotion,
     track:nativeLyricTrackMetadata(),
     config:nativeLyricConfig
@@ -32336,6 +32618,7 @@ function desktopLyricsPayloadSignature(payload) {
 }
 function wallpaperPayload() {
   var meta = currentDesktopSongMeta();
+  var governedWallpaperFps = resourceGovernorDecision && Number(resourceGovernorDecision.wallpaperFps);
   return {
     enabled: !!fx.wallpaperMode,
     fullDesktop: !!fx.fullDesktopMode,
@@ -32347,7 +32630,9 @@ function wallpaperPayload() {
     playing: !!playing,
     preset: fx.preset,
     opacity: clampRange(fx.wallpaperOpacity == null ? fxDefaults.wallpaperOpacity : Number(fx.wallpaperOpacity), 0.35, 1),
-    frameRate: normalizeWallpaperFrameRate(fx.wallpaperFrameRate),
+    frameRate:isFinite(governedWallpaperFps) && governedWallpaperFps > 0
+      ? Math.min(normalizeWallpaperFrameRate(fx.wallpaperFrameRate), governedWallpaperFps)
+      : normalizeWallpaperFrameRate(fx.wallpaperFrameRate),
     particleDensity: normalizeWallpaperParticleDensity(fx.wallpaperParticleDensity),
     audioInput: true,
     colors: desktopOverlayColors()
@@ -32685,6 +32970,9 @@ function isMainSceneCoveredBySplash() {
   return document.body.classList.contains('splash-active') && !document.body.classList.contains('splash-revealing');
 }
 function getAdaptiveRenderFps() {
+  if (resourceGovernorDecision && isFinite(Number(resourceGovernorDecision.targetFps))) {
+    return Math.max(0, Number(resourceGovernorDecision.targetFps));
+  }
   if (isDeepBackgroundMode()) return 1;
   if (RENDER_VISIBLE_VSYNC) return 0;
   var tier = (typeof getRenderLoadTier === 'function') ? getRenderLoadTier() : 0;
@@ -32713,6 +33001,11 @@ function shouldSkipAdaptiveRenderFrame(now) {
   return false;
 }
 function sampleRenderPerf(now, dt) {
+  if (resourceGovernor && typeof resourceGovernor.recordFrame === 'function') resourceGovernor.recordFrame(dt * 1000, now);
+  if (!runtimePerfState.lastGovernorSyncAt || now - runtimePerfState.lastGovernorSyncAt >= 500) {
+    runtimePerfState.lastGovernorSyncAt = now;
+    syncResourceGovernor('frame', now);
+  }
   renderPerfState.frames += 1;
   if (dt > 0.034) renderPerfState.longFrames += 1;
   if (now - renderPerfState.lastSampleAt >= 1000) {

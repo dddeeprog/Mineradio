@@ -24,6 +24,9 @@ function fakeRenderer(name, calls, options = {}) {
       calls.push(`${name}:resize:${viewport && viewport.width}`);
       if (options.failResize) throw new Error(`${name} resize failed`);
     },
+    setResourcePolicy(policy) {
+      calls.push(`${name}:budget:${policy && policy.cacheBudget && policy.cacheBudget.maxCount}`);
+    },
     release() { calls.push(`${name}:release`); },
     resume() { calls.push(`${name}:resume`); },
     captureTransition() {
@@ -52,6 +55,28 @@ test('adaptive renderer keeps public classic mode while switching to DOM fallbac
   assert.deepEqual(calls, [
     'three:mount', 'three:document:song', 'three:update:1', 'three:destroy',
     'dom:mount', 'dom:document:song', 'dom:update:1',
+  ]);
+});
+
+test('adaptive renderer replays resource policy when switching to fallback', () => {
+  const calls = [];
+  const renderer = createAdaptiveThreeRenderer({
+    mode: 'classic',
+    createPrimary: () => fakeRenderer('three', calls, { failUpdate: true }),
+    createFallback: () => fakeRenderer('dom', calls),
+  });
+  renderer.mount({ root: {} });
+  renderer.setResourcePolicy({ cacheBudget: { maxCount: 2, maxBytes: 4096 } });
+  renderer.update({ now: 1 });
+
+  assert.deepEqual(calls, [
+    'three:mount',
+    'three:budget:2',
+    'three:update:1',
+    'three:destroy',
+    'dom:mount',
+    'dom:budget:2',
+    'dom:update:1',
   ]);
 });
 

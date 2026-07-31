@@ -5,6 +5,7 @@ const {
   createFrameCoalescer,
   createLyricLineFinder,
   createMeasuredRectCache,
+  createRollingFrameStats,
 } = require('../public/performance');
 
 test('lyric line finder advances with a cursor and falls back for seeks', () => {
@@ -57,4 +58,20 @@ test('frame coalescer runs once per animation frame with the latest payload', ()
   assert.equal(frames.length, 1);
   frames[0](16);
   assert.deepEqual(seen, [{ x: 3 }]);
+});
+
+test('rolling frame stats keep a bounded window and deterministic percentiles', () => {
+  const stats = createRollingFrameStats({ maxSamples: 4 });
+  [8, 12, 20, 40, 16].forEach(value => stats.record(value));
+
+  assert.deepEqual(stats.snapshot(), {
+    count: 4,
+    averageMs: 22,
+    p50Ms: 20,
+    p95Ms: 40,
+    p99Ms: 40,
+    maxMs: 40,
+  });
+  stats.clear();
+  assert.equal(stats.snapshot().count, 0);
 });

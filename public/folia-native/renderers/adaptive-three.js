@@ -27,6 +27,7 @@
     var currentDocumentKey = '';
     var latestViewport = null;
     var latestFrame = null;
+    var resourcePolicy = null;
     var usingFallback = false;
     var fallbackCount = 0;
     var fallbackReason = '';
@@ -72,6 +73,7 @@
     function replay(renderer) {
       if (currentDocument && typeof renderer.setDocument === 'function') renderer.setDocument(currentDocument);
       if (latestViewport && typeof renderer.resize === 'function') renderer.resize(latestViewport);
+      if (resourcePolicy && typeof renderer.setResourcePolicy === 'function') renderer.setResourcePolicy(resourcePolicy);
       if (latestFrame && typeof renderer.update === 'function') renderer.update(latestFrame);
     }
 
@@ -176,6 +178,13 @@
       invoke('resize', latestViewport, 'resize');
     }
 
+    function setResourcePolicy(policy) {
+      if (destroyed) return false;
+      resourcePolicy = policy || null;
+      invoke('setResourcePolicy', resourcePolicy, 'resource-policy');
+      return true;
+    }
+
     function release(reason) {
       if (destroyed || released) return;
       released = true;
@@ -220,6 +229,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       captureTransition: captureTransition,

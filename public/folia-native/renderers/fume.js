@@ -7,12 +7,16 @@
   var state = root && root.MineradioNativeLyricFumeState;
   var pretext = root && root.MineradioPretext;
   var layout = root && root.MineradioNativeLyricLayout;
-  if (typeof module === 'object' && module.exports) state = require('../fume-state');
-  if (typeof module === 'object' && module.exports) layout = require('../layout');
-  var api = factory(state || {}, pretext || null, layout || {});
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
+  if (typeof module === 'object' && module.exports) {
+    state = require('../fume-state');
+    layout = require('../layout');
+    cachePolicy = require('../cache-policy');
+  }
+  var api = factory(state || {}, pretext || null, layout || {}, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricFume = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, pretext, layout) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, pretext, layout, cachePolicy) {
   'use strict';
 
   function clamp(value, min, max, fallback) {
@@ -53,6 +57,7 @@
     var lastPreheatLine = -2;
     var lastFrame = null;
     var released = false;
+    var resourcePolicy = null;
 
     function clearRoot() {
       if (!root) return;
@@ -93,7 +98,22 @@
       }
     }
 
+    function governedCacheConfig(config) {
+      var maxEntries = Math.max(1, Math.floor(Number(config.cacheEntries) || 24));
+      var maxBytes = Math.max(1, Math.floor(Number(config.cacheBytes) || 33554432));
+      if (typeof cachePolicy.resolveCacheBudget === 'function') {
+        var budget = cachePolicy.resolveCacheBudget(resourcePolicy, {
+          maxCount: maxEntries + 1,
+          maxBytes: maxBytes,
+        });
+        maxEntries = Math.max(1, Math.min(maxEntries, budget.maxCount - 1));
+        maxBytes = Math.max(1, Math.min(maxBytes, budget.maxBytes));
+      }
+      return { cacheEntries: maxEntries, cacheBytes: maxBytes };
+    }
+
     function ensureSnapshotCache(config) {
+      config = governedCacheConfig(config);
       var signature = [config.cacheEntries, config.cacheBytes].join('|');
       if (snapshotCache && snapshotCacheSignature === signature) return snapshotCache;
       if (snapshotCache) snapshotCache.clear();
@@ -104,6 +124,14 @@
         dispose: disposeSnapshot,
       });
       return snapshotCache;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      if (snapshotCache) snapshotCache.clear();
+      snapshotCache = null;
+      snapshotCacheSignature = '';
+      return true;
     }
 
     function mount(mountContext) {
@@ -493,6 +521,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,

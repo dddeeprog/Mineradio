@@ -168,6 +168,68 @@ test('release and destroy forward lifecycle and clear diagnostics', async () => 
   assert.equal(runtime.snapshot().released, true);
 });
 
+test('resource policy survives release and all eight renderer switches with one live owner', async () => {
+  const calls = [];
+  const registry = createRendererRegistry();
+  const modes = ['mineradio-3d', 'classic', 'cadenza', 'partita', 'tilt', 'monet', 'cappella', 'fume'];
+  let live = 0;
+  for (const mode of modes) {
+    registry.register(mode, () => () => ({
+      kind: 'test',
+      mount() { live += 1; },
+      setDocument() {},
+      update() {},
+      resize() {},
+      setResourcePolicy(policy) { calls.push([mode, policy.qualityTier, policy.targetFps, policy.textureCacheBudget.maxCount]); },
+      release() { calls.push([mode, 'release']); },
+      resume() { calls.push([mode, 'resume']); },
+      destroy() { live -= 1; },
+      snapshot() { return {}; },
+    }));
+  }
+  const runtime = createNativeLyricRuntime({ registry });
+  runtime.setResourcePolicy({
+    qualityTier: 'eco',
+    targetFps: 24,
+    cacheBudget: { maxCount: 12, maxBytes: 1024 },
+    textureCacheBudget: { maxCount: 4, maxBytes: 2048 },
+  });
+
+  for (const mode of modes) await runtime.setMode(mode);
+  runtime.release('background');
+  runtime.resume();
+
+  assert.equal(live, 1);
+  const policyCalls = calls.filter(call => call[1] === 'eco');
+  assert.deepEqual(policyCalls.slice(0, modes.length).map(call => call[0]), modes);
+  assert.equal(policyCalls.length, modes.length + 1);
+  assert.deepEqual(calls.slice(-3), [
+    ['fume', 'release'],
+    ['fume', 'resume'],
+    ['fume', 'eco', 24, 4],
+  ]);
+  assert.deepEqual(runtime.snapshot().resourcePolicy, {
+    qualityTier: 'eco',
+    targetFps: 24,
+    cacheBudget: { maxCount: 12, maxBytes: 1024 },
+    textureCacheBudget: { maxCount: 4, maxBytes: 2048 },
+  });
+});
+
+test('a renderer mounted after background release stays released', async () => {
+  const calls = [];
+  const registry = createRendererRegistry();
+  registry.register('classic', () => () => createRenderer('classic', calls));
+  const runtime = createNativeLyricRuntime({ registry });
+
+  runtime.release('background-before-load');
+  await runtime.setMode('classic');
+
+  assert.equal(runtime.snapshot().released, true);
+  assert.equal(runtime.update({ now: 1 }), false);
+  assert.deepEqual(calls, ['classic:mount', 'classic:release']);
+});
+
 test('mode switch freezes the old stage for 340ms but destroys its renderer immediately', async () => {
   const calls = [];
   const timers = [];

@@ -591,9 +591,10 @@ test('search and podcast result panels render bounded batches with load more con
 test('media resource caches are visible in runtime snapshots and trimmed in background', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 
-  assert.match(html, /function trimLyricTextureCache\(keep\)/);
+  assert.match(html, /function trimLyricTextureCache\(keep, maxBytes\)/);
   assert.match(html, /lyricTextures: cacheCount\(lyricTextureCache\)/);
-  assert.match(html, /trimLyricTextureCache\(aggressive \? 6 : 24\)/);
+  assert.match(html, /var lyricBudget = currentRuntimeCacheBudget\('lyricTextures', 24, 6\)/);
+  assert.match(html, /trimLyricTextureCache\(lyricBudget\.maxCount, lyricBudget\.maxBytes\)/);
   assert.match(html, /memoryCacheTools\.trimMapCache/);
 });
 
@@ -606,9 +607,9 @@ test('visual release budget releases native lyrics and low priority 3D resources
   assert.match(html, /nativeLyricRuntime\.release\(reason\)/);
   assert.match(html, /nativeLyricRuntime\.resume\(\)/);
   assert.match(html, /clearCommentBarrage3D\(true\)/);
-  assert.match(html, /trimLyricTextureCache\(aggressive \? 2 : 8\)/);
+  assert.match(html, /trimLyricTextureCache\(nativeLyric3DCacheBudget\.maxCount, nativeLyric3DCacheBudget\.maxBytes\)/);
   assert.match(html, /visualBudget: \{/);
-  assert.match(html, /applyVisualReleaseBudget\(reason \|\| 'runtime-cache-trim', true\)/);
+  assert.match(html, /function applyVisualReleaseBudget[\s\S]*?syncResourceGovernor\(reason \|\| \(aggressive \? 'release' : 'background'\)\)/);
   assert.match(html, /resumeVisualReleaseBudget\(reason \|\| 'restore'\)/);
 });
 

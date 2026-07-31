@@ -7,12 +7,16 @@
   var state = root && root.MineradioNativeLyricCadenzaState;
   var pretext = root && root.MineradioPretext;
   var layout = root && root.MineradioNativeLyricLayout;
-  if (typeof module === 'object' && module.exports) state = require('../cadenza-state');
-  if (typeof module === 'object' && module.exports) layout = require('../layout');
-  var api = factory(state || {}, pretext || null, layout || {});
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
+  if (typeof module === 'object' && module.exports) {
+    state = require('../cadenza-state');
+    layout = require('../layout');
+    cachePolicy = require('../cache-policy');
+  }
+  var api = factory(state || {}, pretext || null, layout || {}, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricCadenza = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, pretext, layout) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, pretext, layout, cachePolicy) {
   'use strict';
 
   function clamp(value, min, max, fallback) {
@@ -58,6 +62,25 @@
     var glowRefs = [];
     var modelCache = new Map();
     var released = false;
+    var resourcePolicy = null;
+
+    function trimModelCache() {
+      if (typeof cachePolicy.trimMapToPolicy === 'function') {
+        return cachePolicy.trimMapToPolicy(modelCache, resourcePolicy, {
+          maxCount: 16,
+          maxBytes: 16 * 12288,
+          bytesPerEntry: 12288,
+        });
+      }
+      while (modelCache.size > 16) modelCache.delete(modelCache.keys().next().value);
+      return null;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      trimModelCache();
+      return true;
+    }
 
     function clearRoot() {
       if (!root) return;
@@ -134,7 +157,7 @@
       }
       var model = state.buildCadenzaLineLayout(line, viewport, config, measureText);
       modelCache.set(key, model);
-      while (modelCache.size > 16) modelCache.delete(modelCache.keys().next().value);
+      trimModelCache();
       return model;
     }
 
@@ -348,6 +371,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,

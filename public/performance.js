@@ -117,9 +117,44 @@
     };
   }
 
+  function createRollingFrameStats(options) {
+    options = options || {};
+    var maxSamples = Math.max(1, Math.floor(Number(options.maxSamples) || 120));
+    var samples = [];
+    function percentile(sorted, ratio) {
+      if (!sorted.length) return 0;
+      return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))];
+    }
+    function record(value) {
+      value = Number(value);
+      if (!Number.isFinite(value) || value < 0 || value > 60000) return false;
+      samples.push(value);
+      if (samples.length > maxSamples) samples.splice(0, samples.length - maxSamples);
+      return true;
+    }
+    function snapshot() {
+      var sorted = samples.slice().sort(function(a, b) { return a - b; });
+      var total = samples.reduce(function(sum, value) { return sum + value; }, 0);
+      return {
+        count: samples.length,
+        averageMs: samples.length ? total / samples.length : 0,
+        p50Ms: percentile(sorted, 0.50),
+        p95Ms: percentile(sorted, 0.95),
+        p99Ms: percentile(sorted, 0.99),
+        maxMs: sorted.length ? sorted[sorted.length - 1] : 0,
+      };
+    }
+    return {
+      clear: function() { samples.length = 0; },
+      record: record,
+      snapshot: snapshot,
+    };
+  }
+
   return {
     createFrameCoalescer: createFrameCoalescer,
     createLyricLineFinder: createLyricLineFinder,
     createMeasuredRectCache: createMeasuredRectCache,
+    createRollingFrameStats: createRollingFrameStats,
   };
 });

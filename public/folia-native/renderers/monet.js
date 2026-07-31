@@ -5,11 +5,15 @@
  */
 (function(root, factory) {
   var state = root && root.MineradioNativeLyricMonetState;
-  if (typeof module === 'object' && module.exports) state = require('../monet-state');
-  var api = factory(state || {});
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
+  if (typeof module === 'object' && module.exports) {
+    state = require('../monet-state');
+    cachePolicy = require('../cache-policy');
+  }
+  var api = factory(state || {}, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricMonet = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, cachePolicy) {
   'use strict';
 
   function clamp(value, min, max, fallback) {
@@ -49,6 +53,25 @@
     var canvasWidth = 1;
     var canvasHeight = 1;
     var released = false;
+    var resourcePolicy = null;
+
+    function trimOffsetCache() {
+      if (typeof cachePolicy.trimMapToPolicy === 'function') {
+        return cachePolicy.trimMapToPolicy(offsetCache, resourcePolicy, {
+          maxCount: 24,
+          maxBytes: 24 * 4096,
+          bytesPerEntry: 4096,
+        });
+      }
+      while (offsetCache.size > 24) offsetCache.delete(offsetCache.keys().next().value);
+      return null;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      trimOffsetCache();
+      return true;
+    }
 
     function clearRoot() {
       if (!root) return;
@@ -180,7 +203,7 @@
         return measureContext ? measureContext.measureText(text).width : Array.from(text).length * fontSize * 0.62;
       });
       offsetCache.set(key, offsets);
-      while (offsetCache.size > 24) offsetCache.delete(offsetCache.keys().next().value);
+      trimOffsetCache();
       return offsets;
     }
 
@@ -315,6 +338,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,

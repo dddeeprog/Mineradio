@@ -6,6 +6,7 @@ const MAIN_CHANNELS = new Set([
   'desktop-window-toggle-fullscreen',
   'desktop-window-exit-fullscreen-windowed',
   'desktop-window-get-state',
+  'mineradio-system-resource-get-state',
   'desktop-window-close',
   'mineradio-hotkeys-configure-global',
   'mineradio-tray-get-settings',

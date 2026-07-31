@@ -33,12 +33,47 @@
     var layoutMs = 0;
     var switchToken = 0;
     var transitionLayers = [];
+    var resourcePolicy = null;
     var scheduleTimeout = typeof options.setTimeout === 'function' ? options.setTimeout : setTimeout;
     var cancelTimeout = typeof options.clearTimeout === 'function' ? options.clearTimeout : clearTimeout;
     var transitionMaxPixels = Math.max(65536, Number(options.transitionMaxPixels) || 1920 * 1080);
 
     function call(renderer, method, value) {
       if (renderer && typeof renderer[method] === 'function') return renderer[method](value);
+    }
+
+    function cloneResourcePolicy(value) {
+      if (!value || typeof value !== 'object') return null;
+      var policy = {};
+      if (value.qualityTier != null) policy.qualityTier = String(value.qualityTier);
+      if (value.targetFps != null && isFinite(Number(value.targetFps))) policy.targetFps = Math.max(0, Number(value.targetFps));
+      if (value.cacheBudget && typeof value.cacheBudget === 'object') {
+        policy.cacheBudget = {
+          maxCount: Math.max(0, Math.floor(Number(value.cacheBudget.maxCount) || 0)),
+          maxBytes: Math.max(0, Math.floor(Number(value.cacheBudget.maxBytes) || 0)),
+        };
+      }
+      if (value.textureCacheBudget && typeof value.textureCacheBudget === 'object') {
+        policy.textureCacheBudget = {
+          maxCount: Math.max(0, Math.floor(Number(value.textureCacheBudget.maxCount) || 0)),
+          maxBytes: Math.max(0, Math.floor(Number(value.textureCacheBudget.maxBytes) || 0)),
+        };
+      }
+      return policy;
+    }
+
+    function applyResourcePolicy() {
+      if (!active || !resourcePolicy) return false;
+      call(active, 'setResourcePolicy', resourcePolicy);
+      return true;
+    }
+
+    function setResourcePolicy(nextPolicy) {
+      resourcePolicy = cloneResourcePolicy(nextPolicy);
+      try { return applyResourcePolicy(); } catch (error) {
+        if (options.onError) options.onError(error, { phase: 'resource-policy', mode: activeMode });
+        return false;
+      }
     }
 
     function destroyActive() {
@@ -187,11 +222,12 @@
         destroyActive();
         active = renderer;
         activeMode = mode;
-        released = false;
         try {
           call(active, 'mount', { root: root, mode: mode, runtime: api });
           if (document) call(active, 'setDocument', document);
           if (viewport) call(active, 'resize', viewport);
+          applyResourcePolicy();
+          if (released) call(active, 'release', 'runtime-released');
           attachTransition(transition, previousMode);
           transition = null;
           layoutMs = clock() - started;
@@ -254,6 +290,7 @@
       if (typeof active.resume === 'function') active.resume();
       if (document) call(active, 'setDocument', document);
       if (viewport) call(active, 'resize', viewport);
+      applyResourcePolicy();
       return true;
     }
 
@@ -264,6 +301,7 @@
       clearTransitions();
       destroyActive();
       document = null;
+      resourcePolicy = null;
       frameTimes.length = 0;
     }
 
@@ -287,6 +325,7 @@
         averageFrameMs: frameTimes.length ? total / frameTimes.length : 0,
         p95FrameMs: percentile(frameTimes, 0.95),
         layoutMs: layoutMs,
+        resourcePolicy: cloneResourcePolicy(resourcePolicy),
       });
     }
 
@@ -295,6 +334,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,

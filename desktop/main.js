@@ -24,6 +24,7 @@ const {
 } = require('./spotify-pkce');
 const { assertAllowedIpcSender } = require('./ipc-auth');
 const { WallpaperRuntime } = require('./wallpaper-runtime');
+const { createSystemMemoryState } = require('./system-memory-state');
 const {
   createLocalAssetsManager,
   localFilePathFromProxyUrl,
@@ -61,6 +62,9 @@ let desktopLyricsMousePollerBuffer = '';
 let desktopLyricsHotBounds = null;
 let desktopLyricsLastMiddleAt = 0;
 let wallpaperRuntime = null;
+let systemMemoryPollTimer = null;
+let systemResourceMonitoringStarted = false;
+const systemMemoryState = createSystemMemoryState({ recoveryHoldMs: 15000 });
 let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
@@ -226,6 +230,48 @@ function credentialRuntimeUnavailable() {
 function sendWindowState(win) {
   if (!win || win.isDestroyed()) return;
   win.webContents.send('desktop-window-state', getWindowState(win));
+  sendSystemResourceState(win);
+}
+
+function safeSystemMemoryInfo() {
+  try {
+    return process.getSystemMemoryInfo();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function sendSystemResourceState(win = mainWindow) {
+  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return false;
+  win.webContents.send('mineradio-system-resource-state', systemMemoryState.snapshot());
+  return true;
+}
+
+function sampleSystemResourceState(patch = {}, broadcast = true) {
+  const sample = { ...patch };
+  const memoryInfo = safeSystemMemoryInfo();
+  if (memoryInfo) sample.memoryInfo = memoryInfo;
+  if (!Object.prototype.hasOwnProperty.call(sample, 'onBattery')) {
+    try { sample.onBattery = powerMonitor.isOnBatteryPower(); } catch (_error) {}
+  }
+  const snapshot = systemMemoryState.sample(sample, Date.now());
+  if (broadcast) sendSystemResourceState();
+  return snapshot;
+}
+
+function startSystemResourceMonitoring() {
+  if (systemResourceMonitoringStarted) return systemMemoryState.snapshot();
+  systemResourceMonitoringStarted = true;
+  const initial = sampleSystemResourceState({}, false);
+  systemMemoryPollTimer = setInterval(() => sampleSystemResourceState(), 15000);
+  if (systemMemoryPollTimer && typeof systemMemoryPollTimer.unref === 'function') systemMemoryPollTimer.unref();
+  return initial;
+}
+
+function stopSystemResourceMonitoring() {
+  if (systemMemoryPollTimer) clearInterval(systemMemoryPollTimer);
+  systemMemoryPollTimer = null;
+  systemResourceMonitoringStarted = false;
 }
 
 function sendGlobalHotkeyAction(action) {
@@ -1463,6 +1509,10 @@ handleIpc('desktop-window-get-state', (event) => {
   return getWindowState(getSenderWindow(event));
 });
 
+handleIpc('mineradio-system-resource-get-state', () => {
+  return sampleSystemResourceState({}, false);
+});
+
 handleIpc('desktop-window-close', (event) => {
   getSenderWindow(event)?.close();
 });
@@ -1960,6 +2010,15 @@ if (!gotSingleInstanceLock) {
     powerMonitor.on('unlock-screen', () => positionWallpaperWindow('unlock-screen').catch(() => {}));
     powerMonitor.on('suspend', () => positionWallpaperWindow('suspend').catch(() => {}));
     powerMonitor.on('resume', () => positionWallpaperWindow('resume').catch(() => {}));
+    powerMonitor.on('lock-screen', () => sampleSystemResourceState({ locked: true }));
+    powerMonitor.on('unlock-screen', () => sampleSystemResourceState({ locked: false }));
+    powerMonitor.on('suspend', () => sampleSystemResourceState({ suspended: true }));
+    powerMonitor.on('resume', () => sampleSystemResourceState({ suspended: false }));
+    powerMonitor.on('on-battery', () => sampleSystemResourceState({ onBattery: true }));
+    powerMonitor.on('on-ac', () => sampleSystemResourceState({ onBattery: false }));
+    powerMonitor.on('thermal-state-change', (details) => sampleSystemResourceState({ thermalState: details && details.state }));
+    powerMonitor.on('speed-limit-change', (details) => sampleSystemResourceState({ speedLimit: details && details.limit }));
+    startSystemResourceMonitoring();
     await createWindow();
   });
 
@@ -1975,6 +2034,7 @@ if (!gotSingleInstanceLock) {
   app.on('before-quit', () => {
     appQuitting = true;
     unregisterMineradioGlobalHotkeys();
+    stopSystemResourceMonitoring();
     closeOverlayWindows();
     if (wallpaperRuntime) wallpaperRuntime.dispose().catch(() => {});
     if (localServer && localServer.close) localServer.close();

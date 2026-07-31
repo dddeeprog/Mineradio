@@ -1735,6 +1735,206 @@ test('Sonic Topography coexists with all eight Folia modes', async ({ page }) =>
   expect(pageErrors).toEqual([]);
 });
 
+test('resource governor round-trips every Folia mode and owned desktop feature', async ({ page }) => {
+  test.setTimeout(300000);
+  const pageErrors = await preparePage(page, { width: 1366, height: 768 });
+
+  for (const mode of modes) {
+    await renderModeFast(page, mode, 'balanced', 80);
+    await page.evaluate(() => window.__renderSonicTopographyFixture(true));
+    const result = await page.evaluate(() => {
+      const previous = {
+        releaseGovernedResource,
+        restoreGovernedResource,
+        scheduleNextTrackPreload,
+        syncCuefieldAutoMixRuntime,
+        desktopRuntimeState: Object.assign({}, desktopRuntimeState),
+        systemResourceState: Object.assign({}, systemResourceState),
+        performanceBackground: fx.performanceBackground,
+        performanceQuality: fx.performanceQuality,
+        cuefieldAutoMixIntensity: fx.cuefieldAutoMixIntensity,
+        wallpaperMode: fx.wallpaperMode,
+        fullDesktopMode: fx.fullDesktopMode,
+        wallpaperFrameRate: fx.wallpaperFrameRate,
+        playQueue: playQueue.slice(),
+        currentIdx,
+        playMode,
+      };
+      const trace = [];
+      releaseGovernedResource = function(name, reason) {
+        trace.push(`release:${name}`);
+        return previous.releaseGovernedResource(name, reason);
+      };
+      restoreGovernedResource = function(name, reason) {
+        trace.push(`restore:${name}`);
+        return previous.restoreGovernedResource(name, reason);
+      };
+      scheduleNextTrackPreload = function(reason) {
+        trace.push(`schedule:${reason}`);
+      };
+      syncCuefieldAutoMixRuntime = function(reason) {
+        trace.push(`automix:${reason}`);
+        return cuefieldAutoMixRuntime;
+      };
+
+      try {
+        fx.performanceBackground = 'auto';
+        fx.performanceQuality = 'high';
+        fx.cuefieldAutoMixIntensity = 'balanced';
+        fx.wallpaperMode = true;
+        fx.fullDesktopMode = true;
+        fx.wallpaperFrameRate = 60;
+        playQueue = [
+          { id: 'governor-a', name: 'Governor A', artist: 'Mineradio', cover: '' },
+          { id: 'governor-b', name: 'Governor B', artist: 'Mineradio', cover: '' },
+        ];
+        currentIdx = 0;
+        playMode = 'loop';
+        playing = true;
+        nextTrackPreloadState.pending = true;
+        nextTrackPreloadState.prepared = null;
+        nextTrackPreloadState.switching = false;
+        nextTrackPreloadState.owner = 'normal';
+        systemResourceState = normalizeSystemResourceSnapshot({
+          pressure: 'normal',
+          totalMB: 16384,
+          freeMB: 8192,
+          availableRatio: 0.5,
+          speedLimit: 100,
+        });
+        desktopRuntimeState.minimized = false;
+        desktopRuntimeState.visible = true;
+        desktopRuntimeState.focused = true;
+        resourceGovernor = MineradioResourceGovernor.createResourceGovernor({ recoveryHoldMs: 0 });
+        window.__mineradioResourceGovernor = resourceGovernor;
+        resourceGovernorDecision = null;
+        resourceGovernorLastCacheProfile = '';
+        resourceGovernorLastWallpaperFps = 0;
+
+        const active = syncResourceGovernor('visual-active', 100);
+        desktopRuntimeState.minimized = true;
+        const released = syncResourceGovernor('visual-background', 200);
+        const releasedNative = nativeLyricRuntime.snapshot();
+        const releasedSonic = sonicTopographyRuntime.snapshot();
+        const releasedWallpaper = wallpaperPayload();
+
+        desktopRuntimeState.minimized = false;
+        const restored = syncResourceGovernor('visual-foreground', 300);
+        const restoredAgain = syncResourceGovernor('visual-foreground-repeat', 400);
+        const restoredNative = nativeLyricRuntime.snapshot();
+        const restoredSonic = sonicTopographyRuntime.snapshot();
+        const restoredWallpaper = wallpaperPayload();
+
+        function shelfState(nextMode) {
+          shelfManager.setMode(nextMode);
+          shelfManager.rebuild(false);
+          for (let index = 0; index < 24; index += 1) shelfManager.update(1 / 60);
+          const cards = shelfManager.getCards();
+          const center = shelfManager.getCardAt(shelfManager.getCenterIdx());
+          return {
+            mode: shelfManager.getMode(),
+            cards: cards.length,
+            centerPickable: !!(center && center.mesh && center.mesh.visible !== false),
+          };
+        }
+
+        return {
+          active: { mode: active.mode, targetFps: active.targetFps, wallpaperFps: active.wallpaperFps },
+          released: {
+            mode: released.mode,
+            releaseSet: released.releaseSet.slice(),
+            desiredReleased: released.desiredReleased.slice(),
+            targetFps: released.targetFps,
+            nativeReleased: releasedNative.released,
+            sonicReleased: releasedSonic.released,
+            wallpaper: releasedWallpaper,
+          },
+          restored: {
+            mode: restored.mode,
+            restoreSet: restored.restoreSet.slice(),
+            repeatedReleaseSet: restoredAgain.releaseSet.slice(),
+            repeatedRestoreSet: restoredAgain.restoreSet.slice(),
+            nativeMode: restoredNative.mode,
+            nativeRenderers: restoredNative.activeRenderers,
+            nativeReleased: restoredNative.released,
+            sonicReleased: restoredSonic.released,
+            wallpaper: restoredWallpaper,
+          },
+          shelves: [shelfState('stage'), shelfState('side')],
+          trace: trace.slice(),
+        };
+      } finally {
+        releaseGovernedResource = previous.releaseGovernedResource;
+        restoreGovernedResource = previous.restoreGovernedResource;
+        scheduleNextTrackPreload = previous.scheduleNextTrackPreload;
+        syncCuefieldAutoMixRuntime = previous.syncCuefieldAutoMixRuntime;
+        desktopRuntimeState = Object.assign(desktopRuntimeState, previous.desktopRuntimeState);
+        systemResourceState = previous.systemResourceState;
+        fx.performanceBackground = previous.performanceBackground;
+        fx.performanceQuality = previous.performanceQuality;
+        fx.cuefieldAutoMixIntensity = previous.cuefieldAutoMixIntensity;
+        fx.wallpaperMode = previous.wallpaperMode;
+        fx.fullDesktopMode = previous.fullDesktopMode;
+        fx.wallpaperFrameRate = previous.wallpaperFrameRate;
+        playQueue = previous.playQueue;
+        currentIdx = previous.currentIdx;
+        playMode = previous.playMode;
+      }
+    });
+
+    expect(result.active).toEqual({ mode: 'active', targetFps: 0, wallpaperFps: 60 });
+    expect(result.released).toMatchObject({
+      mode: 'released',
+      releaseSet: ['autoMix', 'standbyMedia', 'sonicTopography', 'nativeLyrics'],
+      desiredReleased: ['autoMix', 'standbyMedia', 'sonicTopography', 'nativeLyrics'],
+      targetFps: 1,
+      nativeReleased: true,
+      sonicReleased: true,
+      wallpaper: { enabled: true, fullDesktop: true, frameRate: 12 },
+    });
+    expect(result.restored).toMatchObject({
+      mode: 'active',
+      restoreSet: ['nativeLyrics', 'sonicTopography', 'standbyMedia', 'autoMix'],
+      repeatedReleaseSet: [],
+      repeatedRestoreSet: [],
+      nativeMode: mode,
+      nativeRenderers: 1,
+      nativeReleased: false,
+      sonicReleased: false,
+      wallpaper: { enabled: true, fullDesktop: true, frameRate: 60 },
+    });
+    expect(result.shelves).toEqual([
+      { mode: 'stage', cards: 2, centerPickable: true },
+      { mode: 'side', cards: 2, centerPickable: true },
+    ]);
+    expect(result.trace.slice(0, 4)).toEqual([
+      'release:autoMix',
+      'release:standbyMedia',
+      'release:sonicTopography',
+      'release:nativeLyrics',
+    ]);
+    expect(result.trace).toContain('schedule:resource-visual-foreground');
+
+    const constrainedCache = await page.evaluate(() => {
+      nativeLyricRuntime.setResourcePolicy({
+        qualityTier: 'eco',
+        targetFps: 30,
+        cacheBudget: { maxCount: 2, maxBytes: 16 * 1024 * 1024 },
+      });
+      const fixture = window.__foliaNativeFixture;
+      fixture.lines.forEach(line => {
+        window.__renderFoliaNativeFrame(line.t + Math.min(0.4, line.duration * 0.25));
+      });
+      return nativeLyricRuntime.snapshot();
+    });
+    expect(constrainedCache.resourcePolicy.cacheBudget).toEqual({ maxCount: 2, maxBytes: 16 * 1024 * 1024 });
+    expect(constrainedCache.cacheEntries, `${mode} constrained cache entries`).toBeLessThanOrEqual(2);
+    expect(constrainedCache.cacheBytes, `${mode} constrained cache bytes`).toBeLessThanOrEqual(16 * 1024 * 1024);
+  }
+
+  expect(pageErrors).toEqual([]);
+});
+
 for (const viewport of [
   { name: 'mobile', width: 390, height: 844 },
   { name: 'desktop', width: 1920, height: 1080 },

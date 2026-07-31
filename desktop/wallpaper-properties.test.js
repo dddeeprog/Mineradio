@@ -50,6 +50,12 @@ test('wallpaper state accepts only bounded presentation fields and safe cover so
   }).cover, 'https://images.example.test/cover.jpg');
 });
 
+test('runtime pressure may lower wallpaper FPS below the user-facing tiers', () => {
+  assert.equal(normalizeWallpaperState(DEFAULT_WALLPAPER_STATE, { frameRate: 12 }).frameRate, 12);
+  assert.equal(normalizeWallpaperState(DEFAULT_WALLPAPER_STATE, { frameRate: 1 }).frameRate, 1);
+  assert.equal(normalizeWallpaperState(DEFAULT_WALLPAPER_STATE, { frameRate: 24 }).frameRate, 24);
+});
+
 test('Wallpaper Engine property patches use an exact allowlist and never accept a path or URL', () => {
   const patch = normalizeWallpaperPropertyPatch({
     preset: { value: 3 },

@@ -59,6 +59,9 @@
     function clamp(value, min, max, fallback){ return Math.max(min, Math.min(max, finite(value, fallback))); }
     function normalizeFrameRate(value){
       value = finite(value, 30);
+      if (value <= 0) return 30;
+      if (value <= 1) return 1;
+      if (value <= 12) return 12;
       return value <= 26 ? 24 : value <= 45 ? 30 : 60;
     }
     function hexToRgb(hex, fallback){

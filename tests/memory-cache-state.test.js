@@ -2,12 +2,16 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  cacheApproxBytes,
   cacheCount,
+  estimateValueBytes,
   listRenderSlice,
   listRenderWindow,
   queueRenderWindow,
   trimMapCache,
+  trimMapCacheToBudget,
   trimObjectCache,
+  trimObjectCacheToBudget,
 } = require('../public/memory-cache-state');
 
 test('trimObjectCache drops oldest non-protected records and calls disposer', () => {
@@ -127,4 +131,58 @@ test('listRenderSlice returns a bounded slice with original indices', () => {
       { item: 'd', index: 3 },
     ],
   });
+});
+
+test('approximate cache bytes handles cycles buffers and typed arrays safely', () => {
+  const cyclic = { title: 'abcd', bytes: new Uint8Array(16) };
+  cyclic.self = cyclic;
+
+  assert.equal(estimateValueBytes(cyclic) >= 24, true);
+  assert.equal(cacheApproxBytes(new Map([['one', cyclic], ['two', new ArrayBuffer(32)]])) >= 56, true);
+});
+
+test('object cache trimming satisfies count and byte budgets while preserving protected records', () => {
+  const disposed = [];
+  const cache = {
+    a: { bytes: 40 },
+    b: { bytes: 70 },
+    c: { bytes: 50 },
+    d: { bytes: 20 },
+  };
+  const result = trimObjectCacheToBudget(cache, {
+    maxCount: 3,
+    maxBytes: 100,
+    protectedKeys: ['b'],
+    sizeOf: record => record.bytes,
+    dispose: (_record, key) => disposed.push(key),
+  });
+
+  assert.deepEqual(Object.keys(cache), ['b', 'd']);
+  assert.deepEqual(disposed, ['a', 'c']);
+  assert.deepEqual(result, {
+    beforeCount: 4,
+    afterCount: 2,
+    beforeBytes: 180,
+    afterBytes: 90,
+    droppedCount: 2,
+    droppedBytes: 90,
+  });
+});
+
+test('map cache trimming uses the same count and byte contract', () => {
+  const cache = new Map([
+    ['a', { bytes: 80 }],
+    ['b', { bytes: 35 }],
+    ['c', { bytes: 30 }],
+  ]);
+  const result = trimMapCacheToBudget(cache, {
+    maxCount: 2,
+    maxBytes: 70,
+    sizeOf: record => record.bytes,
+  });
+
+  assert.deepEqual(Array.from(cache.keys()), ['b', 'c']);
+  assert.equal(result.afterCount, 2);
+  assert.equal(result.afterBytes, 65);
+  assert.equal(result.droppedCount, 1);
 });

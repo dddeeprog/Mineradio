@@ -53,6 +53,9 @@ function clamp(value, min, max, fallback) {
 
 function normalizeWallpaperFrameRate(value) {
   const number = finite(value, 30);
+  if (number <= 0) return 30;
+  if (number <= 1) return 1;
+  if (number <= 12) return 12;
   if (number <= 26) return 24;
   if (number <= 45) return 30;
   return 60;

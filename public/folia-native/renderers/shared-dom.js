@@ -5,11 +5,15 @@
  */
 (function(root, factory) {
   var state = root && root.MineradioNativeLyricDomState;
-  if (typeof module === 'object' && module.exports) state = require('../dom-state');
-  var api = factory(state || {});
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
+  if (typeof module === 'object' && module.exports) {
+    state = require('../dom-state');
+    cachePolicy = require('../cache-policy');
+  }
+  var api = factory(state || {}, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricSharedDom = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, cachePolicy) {
   'use strict';
 
   function clamp(value, min, max, fallback) {
@@ -52,6 +56,25 @@
     var measureCanvas = null;
     var measureContext = null;
     var released = false;
+    var resourcePolicy = null;
+
+    function trimModelCache() {
+      if (typeof cachePolicy.trimMapToPolicy === 'function') {
+        return cachePolicy.trimMapToPolicy(modelCache, resourcePolicy, {
+          maxCount: 24,
+          maxBytes: 24 * 6144,
+          bytesPerEntry: 6144,
+        });
+      }
+      while (modelCache.size > 24) modelCache.delete(modelCache.keys().next().value);
+      return null;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      trimModelCache();
+      return true;
+    }
 
     function timerHost() {
       return ownerDocument && ownerDocument.defaultView || (typeof globalThis !== 'undefined' ? globalThis : null);
@@ -140,7 +163,7 @@
         }));
       }
       modelCache.set(key, model);
-      while (modelCache.size > 24) modelCache.delete(modelCache.keys().next().value);
+      trimModelCache();
       return model;
     }
 
@@ -462,6 +485,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,

@@ -25,6 +25,11 @@
       resize: function(viewport) {
         if (typeof options.resize === 'function') options.resize(viewport);
       },
+      setResourcePolicy: function(policy) {
+        if (typeof options.setResourcePolicy !== 'function') return false;
+        options.setResourcePolicy(policy || {});
+        return true;
+      },
       release: function(reason) {
         released = true;
         if (typeof options.setVisible === 'function') options.setVisible(false);

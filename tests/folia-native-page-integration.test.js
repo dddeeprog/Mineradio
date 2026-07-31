@@ -359,7 +359,7 @@ test('Classic parallax reads only direct gesture rotation and zeros every constr
 });
 
 test('Three lyric host resumes before renderer replay and is destroyed after the runtime', () => {
-  assert.match(html, /function resumeVisualReleaseBudget[\s\S]*?nativeThreeLyricHost\.resume\(\)[\s\S]*?nativeLyricRuntime\.resume\(\)/);
+  assert.match(html, /function restoreGovernedResource\([\s\S]*?name === 'nativeLyrics'[\s\S]*?nativeThreeLyricHost\.resume\(\)[\s\S]*?nativeLyricRuntime\.resume\(\)/);
   assert.match(html, /function destroyNativeLyricRuntime\(/);
   assert.match(html, /nativeLyricRuntime\.destroy\(\)[\s\S]*?nativeThreeLyricHost\.destroy\(\)/);
   assert.match(html, /window\.addEventListener\('pagehide', destroyNativeLyricRuntime\)/);

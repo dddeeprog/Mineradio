@@ -10,6 +10,7 @@
   var adaptive = root && root.MineradioNativeLyricAdaptiveThree;
   var fallback = root && root.MineradioNativeLyricClassic;
   var sparks = root && root.MineradioNativeLyricThreeSparkField;
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
   if (typeof module === 'object' && module.exports) {
     state = require('../classic-three-state');
     motion = require('../classic-three-motion');
@@ -17,11 +18,12 @@
     adaptive = require('./adaptive-three');
     fallback = require('./classic');
     sparks = require('../three/spark-field');
+    cachePolicy = require('../cache-policy');
   }
-  var api = factory(state || {}, motion || {}, performance || {}, adaptive || {}, fallback || {}, sparks || {});
+  var api = factory(state || {}, motion || {}, performance || {}, adaptive || {}, fallback || {}, sparks || {}, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricClassicThree = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, motion, performanceApi, adaptiveApi, fallbackApi, sparkApi) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, motion, performanceApi, adaptiveApi, fallbackApi, sparkApi, cachePolicy) {
   'use strict';
 
   function finite(value, fallback) {
@@ -147,6 +149,7 @@
     var lastRenderedLineKey = null;
     var lastRenderedRecord = null;
     var lastFrame = null;
+    var resourcePolicy = null;
 
     function releaseRecord(record) {
       if (!record || record.released) return;
@@ -158,6 +161,37 @@
     function clearModelCache() {
       modelCache.forEach(releaseRecord);
       modelCache.clear();
+    }
+
+    function trimResourceCaches() {
+      var result = null;
+      if (typeof cachePolicy.trimMapToPolicy === 'function') {
+        result = cachePolicy.trimMapToPolicy(modelCache, resourcePolicy, {
+          maxCount: 3,
+          maxBytes: 3 * 65536,
+          bytesPerEntry: 65536,
+          dispose: releaseRecord,
+        });
+      } else {
+        while (modelCache.size > 3) {
+          var oldestKey = modelCache.keys().next().value;
+          var oldest = modelCache.get(oldestKey);
+          modelCache.delete(oldestKey);
+          releaseRecord(oldest);
+        }
+      }
+      var atlas = typeof host.getAtlas === 'function' ? host.getAtlas() : null;
+      if (atlas && typeof atlas.trim === 'function' && typeof cachePolicy.resolveCacheBudget === 'function') {
+        var budgetLimit = cachePolicy.resolveCacheBudget(resourcePolicy, { maxCount: 3, maxBytes: 32 * 1024 * 1024 });
+        atlas.trim({ maxBytes: Math.max(0, budgetLimit.maxBytes - modelCache.size * 65536) });
+      }
+      return result;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      trimResourceCaches();
+      return true;
     }
 
     function batchSnapshot(batch) {
@@ -514,12 +548,7 @@
         released: false,
       };
       modelCache.set(recordKey, record);
-      while (modelCache.size > 3) {
-        var oldestKey = modelCache.keys().next().value;
-        var oldest = modelCache.get(oldestKey);
-        modelCache.delete(oldestKey);
-        releaseRecord(oldest);
-      }
+      trimResourceCaches();
       return record;
     }
 
@@ -879,6 +908,8 @@
         mode: 'classic',
         backend: 'three',
         released: released,
+        cacheEntries: modelCache.size,
+        cacheBytes: modelCache.size * 65536 + (Number(hostSnapshot.atlasBytes) || 0),
       });
     }
 
@@ -897,6 +928,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       captureTransition: captureTransition,
       release: release,
       resume: resume,

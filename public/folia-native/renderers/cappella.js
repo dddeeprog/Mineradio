@@ -5,11 +5,15 @@
  */
 (function(root, factory) {
   var state = root && root.MineradioNativeLyricCappellaState;
-  if (typeof module === 'object' && module.exports) state = require('../cappella-state');
-  var api = factory(state);
+  var cachePolicy = root && root.MineradioNativeLyricCachePolicy;
+  if (typeof module === 'object' && module.exports) {
+    state = require('../cappella-state');
+    cachePolicy = require('../cache-policy');
+  }
+  var api = factory(state, cachePolicy || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MineradioNativeLyricCappella = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(state) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(state, cachePolicy) {
   'use strict';
 
   function clamp(value, min, max, fallback) {
@@ -39,6 +43,25 @@
     var assetChangeBound = false;
     var layoutSignature = '';
     var layoutAnimation = null;
+    var resourcePolicy = null;
+
+    function trimMetricsCache() {
+      if (typeof cachePolicy.trimMapToPolicy === 'function') {
+        return cachePolicy.trimMapToPolicy(metricsCache, resourcePolicy, {
+          maxCount: 32,
+          maxBytes: 32 * 4096,
+          bytesPerEntry: 4096,
+        });
+      }
+      while (metricsCache.size > 32) metricsCache.delete(metricsCache.keys().next().value);
+      return null;
+    }
+
+    function setResourcePolicy(policy) {
+      resourcePolicy = policy || null;
+      trimMetricsCache();
+      return true;
+    }
 
     function rebuildModel(config) {
       var cappella = config && config.modes && config.modes.cappella || {};
@@ -232,7 +255,7 @@
         measureText: function(text) { return measureContext ? measureContext.measureText(text || ' ').width : Array.from(text || ' ').length * fontSize; },
       });
       metricsCache.set(key, metrics);
-      while (metricsCache.size > 32) metricsCache.delete(metricsCache.keys().next().value);
+      trimMetricsCache();
       return metrics;
     }
 
@@ -366,6 +389,7 @@
       setDocument: setDocument,
       update: update,
       resize: resize,
+      setResourcePolicy: setResourcePolicy,
       release: release,
       resume: resume,
       destroy: destroy,
