@@ -4,11 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { createReleaseFeatureFlags } = require('../server/platform/feature-flags');
 
 const repoRoot = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
 const runtime = fs.readFileSync(path.join(repoRoot, 'public', 'cuefield-runtime.js'), 'utf8');
-const server = fs.readFileSync(path.join(repoRoot, 'server.js'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 const notice = fs.readFileSync(path.join(repoRoot, 'NOTICE.md'), 'utf8');
 const vendorManifest = fs.readFileSync(path.join(repoRoot, 'docs', 'VENDOR_MANIFEST.md'), 'utf8');
@@ -70,7 +70,8 @@ test('Cuefield runtime and controls honor the central feature snapshot', () => {
   assert.match(html, /snapshot\.features\.cuefield\s*===\s*true/);
   assert.match(html, /if \(!cuefieldFeatureEnabled\) return/);
   assert.match(html, /aria-disabled/);
-  assert.match(server, /cuefield:\s*true/);
+  assert.equal(createReleaseFeatureFlags().snapshot().cuefield, true);
+  assert.equal(createReleaseFeatureFlags({ cuefield: false }).snapshot().cuefield, false);
 });
 
 test('syntax checks and attribution cover every adapted Cuefield file', () => {
