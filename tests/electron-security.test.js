@@ -150,6 +150,25 @@ test('desktop login runtime uses the generic guarded window and PKCE without sec
   assert.doesNotMatch(main, /SPOTIFY_CLIENT_SECRET|client_secret|client_credentials/i);
 });
 
+test('wallpaper IPC remains main-only and the overlay has no arbitrary path or URL command', () => {
+  const projectRoot = path.join(__dirname, '..');
+  const ipcAuth = fs.readFileSync(path.join(projectRoot, 'desktop', 'ipc-auth.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(projectRoot, 'desktop', 'preload.js'), 'utf8');
+  const overlayPreload = fs.readFileSync(path.join(projectRoot, 'desktop', 'overlay-preload.js'), 'utf8');
+  const properties = fs.readFileSync(path.join(projectRoot, 'desktop', 'wallpaper-properties.js'), 'utf8');
+
+  for (const channel of [
+    'mineradio-wallpaper-set-enabled',
+    'mineradio-wallpaper-update',
+    'mineradio-wallpaper-get-status',
+  ]) {
+    assert.match(ipcAuth, new RegExp(channel));
+  }
+  assert.match(preload, /getWallpaperStatus/);
+  assert.doesNotMatch(overlayPreload, /openPath|openExternal|exec|spawn|filePath|targetUrl/);
+  assert.doesNotMatch(properties, /shell\.open|execFile|spawn\(|readFile|writeFile/);
+});
+
 test('in-process server uses the credential session and one account-scoped runtime', () => {
   const serverSource = fs.readFileSync(
     path.join(__dirname, '..', 'server.js'),
