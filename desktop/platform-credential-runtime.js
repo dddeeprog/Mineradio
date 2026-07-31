@@ -62,11 +62,27 @@ async function createPlatformCredentialRuntime(options = {}) {
   });
   await migrationJournal.resumeFiles();
 
-  const credentialStore = createCredentialStore({
+  const credentialStoreOptions = {
     ...(options.credentialStoreOptions || {}),
     filePath: paths.credentials,
     safeStorage: options.safeStorage,
-  });
+  };
+  let credentialStorageRecovery = '';
+  let credentialStore;
+  try {
+    credentialStore = createCredentialStore(credentialStoreOptions);
+  } catch (error) {
+    const code = error && error.code;
+    if (code !== 'CREDENTIAL_STORE_CORRUPT'
+      && code !== 'CREDENTIAL_STORE_READ_FAILED') {
+      throw error;
+    }
+    credentialStorageRecovery = code;
+    credentialStore = createCredentialStore({
+      ...credentialStoreOptions,
+      safeStorage: null,
+    });
+  }
   const storeStatus = credentialStore.snapshot();
   const session = createCredentialSession({
     mode: storeStatus.mode,
@@ -111,6 +127,10 @@ async function createPlatformCredentialRuntime(options = {}) {
     status() {
       return {
         credential: session.diagnostics(),
+        credentialStorage: {
+          degraded: credentialStorageRecovery !== '',
+          reason: credentialStorageRecovery,
+        },
         migration: migrationJournal.status(),
       };
     },

@@ -139,6 +139,56 @@ test('publishes memory-only downgrade without touching credential storage files'
   assert.deepEqual(diskAccess, []);
 });
 
+test('keeps a corrupt encrypted credential file untouched and starts a memory-only session', async () => {
+  const diskAccess = [];
+  const host = createCredentialSessionHost();
+  let runtime = null;
+  let startupError = null;
+
+  try {
+    runtime = await createPlatformCredentialRuntime({
+      paths: stablePaths(),
+      sourceRoots: [],
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        decryptString() {
+          throw new Error('corrupt ciphertext');
+        },
+      },
+      credentialSessionHost: host,
+      createManifest: () => Object.freeze([]),
+      createMigrationJournal: () => ({
+        async resumeFiles() {},
+        async resumeCredentialImports() {},
+        status: () => ({ schema: 'migration', pending: 0 }),
+      }),
+      credentialStoreOptions: {
+        readFile() {
+          diskAccess.push('read');
+          return Buffer.from('corrupt-encrypted-data');
+        },
+        writeFileAtomic() {
+          diskAccess.push('write');
+        },
+        removeFile() {
+          diskAccess.push('remove');
+        },
+      },
+    });
+  } catch (error) {
+    startupError = error;
+  }
+
+  assert.equal(startupError, null);
+  assert.equal(host.get(), runtime.session);
+  assert.equal(runtime.status().credential.mode, 'memory-only');
+  assert.deepEqual(runtime.status().credentialStorage, {
+    degraded: true,
+    reason: 'CREDENTIAL_STORE_CORRUPT',
+  });
+  assert.deepEqual(diskAccess, ['read']);
+});
+
 test('package check validates the platform credential runtime module', () => {
   const packageJson = require('../package.json');
   assert.match(

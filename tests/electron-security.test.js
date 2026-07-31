@@ -85,6 +85,7 @@ test('desktop credentials initialize after ready and before the local server', (
 
   assert.match(main, /\bsafeStorage\b/);
   assert.match(main, /require\('\.\/platform-credential-runtime'\)/);
+  assert.match(main, /platformCredentialRuntimePromise = null;\s*throw error;/);
   assert.notEqual(initializeAt, -1);
   assert.notEqual(createWindowAt, -1);
   assert.equal(initializeAt < createWindowAt, true);

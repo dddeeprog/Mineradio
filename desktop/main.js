@@ -212,14 +212,20 @@ function waitForServer(server) {
 
 function initializePlatformCredentialRuntime() {
   if (!platformCredentialRuntimePromise) {
-    platformCredentialRuntimePromise = createPlatformCredentialRuntime({
+    const pendingRuntime = createPlatformCredentialRuntime({
       paths: APP_PATHS,
       sourceRoots: LEGACY_APP_DATA_ROOTS,
       safeStorage,
-    }).then((runtime) => {
-      platformCredentialRuntime = runtime;
-      return runtime;
     });
+    platformCredentialRuntimePromise = pendingRuntime
+      .then((runtime) => {
+        platformCredentialRuntime = runtime;
+        return runtime;
+      })
+      .catch((error) => {
+        platformCredentialRuntimePromise = null;
+        throw error;
+      });
   }
   return platformCredentialRuntimePromise;
 }
