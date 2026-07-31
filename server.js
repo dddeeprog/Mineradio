@@ -3020,9 +3020,16 @@ const platformSearchAdapters = {
   }),
   spotify: createSpotifySearchAdapter({
     requestJson,
-    getCredential: () => providerCredential('spotify'),
-    persistCredential: credential => (
-      credentialSession.replace('spotify', credential)
+    getCredential: () => {
+      const snapshot = credentialSession.readWithRevision('spotify');
+      return snapshot
+        ? { ...snapshot.credential, sessionRevision: snapshot.revision }
+        : {};
+    },
+    persistCredential: (credential, previous) => credentialSession.replaceIfRevision(
+      'spotify',
+      previous && previous.sessionRevision,
+      credential,
     ),
   }),
 };

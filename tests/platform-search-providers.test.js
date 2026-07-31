@@ -308,6 +308,45 @@ test('Spotify adapter refreshes expired PKCE credentials and persists the rotati
   assert.equal(persisted[0].refreshToken, 'refresh-value');
 });
 
+test('Spotify adapter rejects a refreshed credential when its conditional write is stale', async () => {
+  const calls = [];
+  const adapter = createSpotifySearchAdapter({
+    now: () => 100_000,
+    getCredential() {
+      return {
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-value',
+        expiresAt: 99_000,
+        clientId: 'public-client',
+        scope: 'user-read-private',
+        sessionRevision: 7,
+      };
+    },
+    async persistCredential(nextCredential, previousCredential) {
+      assert.equal(nextCredential.accessToken, 'refreshed-access');
+      assert.equal(previousCredential.sessionRevision, 7);
+      return { replaced: false, revision: 8 };
+    },
+    async requestJson(url) {
+      calls.push(url);
+      if (url.endsWith('/api/token')) {
+        return {
+          access_token: 'refreshed-access',
+          expires_in: 1800,
+          token_type: 'Bearer',
+        };
+      }
+      return { tracks: { total: 0, next: null, items: [] } };
+    },
+  });
+
+  await assert.rejects(
+    adapter.search({ query: 'stale', limit: 5, offset: 0 }),
+    error => error.code === 'AUTH_REQUIRED',
+  );
+  assert.deepEqual(calls, ['https://accounts.spotify.com/api/token']);
+});
+
 test('Spotify adapter rejects a refresh response that expands the minimal scope', async () => {
   const persisted = [];
   const adapter = createSpotifySearchAdapter({

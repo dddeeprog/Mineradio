@@ -236,6 +236,40 @@ test('concurrent replacements commit in invocation order', async () => {
   assert.equal(session.diagnostics().revision, 3);
 });
 
+test('conditional replacement refuses a credential revision cleared while refresh was pending', async () => {
+  const persisted = [];
+  const session = createCredentialSession({
+    async persistCredential(_provider, credential) {
+      persisted.push(credential.accessToken);
+      return { persisted: true, mode: 'memory-only' };
+    },
+  });
+  session.hydrate({
+    spotify: {
+      accessToken: 'expired-access',
+      refreshToken: 'refresh-token',
+    },
+  });
+
+  assert.equal(typeof session.readWithRevision, 'function');
+  assert.equal(typeof session.replaceIfRevision, 'function');
+  const snapshot = session.readWithRevision('spotify');
+  await session.clear('spotify');
+  const result = await session.replaceIfRevision(
+    'spotify',
+    snapshot.revision,
+    { accessToken: 'stale-refreshed-access' },
+  );
+
+  assert.deepEqual(result, {
+    provider: 'spotify',
+    replaced: false,
+    revision: 2,
+  });
+  assert.equal(session.read('spotify'), null);
+  assert.deepEqual(persisted, []);
+});
+
 test('clear persists deletion before removing memory and can roll back', async () => {
   let fail = true;
   const calls = [];

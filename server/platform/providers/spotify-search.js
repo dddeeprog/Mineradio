@@ -147,7 +147,8 @@ function createSpotifySearchAdapter(options) {
       }, body))
       .then(payload => refreshedCredential(payload, credential, now))
       .then(async nextCredential => {
-        await persistCredential(nextCredential);
+        const result = await persistCredential(nextCredential, credential);
+        if (result && result.replaced === false) throw spotifyAuthError();
         return nextCredential;
       })
       .catch(() => {

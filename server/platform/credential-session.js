@@ -229,53 +229,90 @@ function createCredentialSession(options = {}) {
     return record ? cloneCredential(record.credential) : null;
   }
 
+  function readWithRevision(provider) {
+    requireProvider(provider);
+    requireReady();
+    const record = records.get(provider);
+    if (!record) return null;
+    return {
+      credential: cloneCredential(record.credential),
+      revision: record.revision,
+    };
+  }
+
+  async function commitReplacement(provider, credentialCopy, migrationId) {
+    const nextRevision = revision + 1;
+    const persistenceMetadata = { revision: nextRevision };
+    if (migrationId) persistenceMetadata.migrationId = migrationId;
+    let persistence;
+    try {
+      persistence = await persistCredential(
+        provider,
+        cloneCredential(credentialCopy),
+        Object.freeze(persistenceMetadata),
+      );
+    } catch (_error) {
+      throw sessionError(
+        'CREDENTIAL_SESSION_PERSIST_FAILED',
+        'Credential could not be persisted',
+      );
+    }
+    const persisted = persistence && persistence.persisted === true;
+    const resultMode = persistence && SESSION_MODES.has(persistence.mode)
+      ? persistence.mode
+      : mode;
+    const accountId = publicAccountId(credentialCopy);
+    records.set(provider, {
+      credential: credentialCopy,
+      accountId,
+      revision: nextRevision,
+    });
+    revision = nextRevision;
+    publish({
+      type: 'replaced',
+      provider,
+      hasCredential: true,
+      accountId,
+      revision,
+    });
+    return {
+      provider,
+      persisted,
+      mode: resultMode,
+      revision,
+    };
+  }
+
   async function replace(provider, credential, options) {
     requireProvider(provider);
     requireReady();
     const migrationId = readMigrationId(options);
     const credentialCopy = cloneCredential(credential);
 
-    return enqueue(async () => {
-      const nextRevision = revision + 1;
-      const persistenceMetadata = { revision: nextRevision };
-      if (migrationId) persistenceMetadata.migrationId = migrationId;
-      let persistence;
-      try {
-        persistence = await persistCredential(
+    return enqueue(() => commitReplacement(provider, credentialCopy, migrationId));
+  }
+
+  async function replaceIfRevision(provider, expectedRevision, credential) {
+    requireProvider(provider);
+    requireReady();
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new TypeError('Expected credential revision is invalid');
+    }
+    const credentialCopy = cloneCredential(credential);
+
+    return enqueue(() => {
+      const current = records.get(provider);
+      if (!current || current.revision !== expectedRevision) {
+        return {
           provider,
-          cloneCredential(credentialCopy),
-          Object.freeze(persistenceMetadata),
-        );
-      } catch (_error) {
-        throw sessionError(
-          'CREDENTIAL_SESSION_PERSIST_FAILED',
-          'Credential could not be persisted',
-        );
+          replaced: false,
+          revision,
+        };
       }
-      const persisted = persistence && persistence.persisted === true;
-      const resultMode = persistence && SESSION_MODES.has(persistence.mode)
-        ? persistence.mode
-        : mode;
-      const accountId = publicAccountId(credentialCopy);
-      records.set(provider, {
-        credential: credentialCopy,
-        accountId,
-        revision: nextRevision,
-      });
-      revision = nextRevision;
-      publish({
-        type: 'replaced',
-        provider,
-        hasCredential: true,
-        accountId,
-        revision,
-      });
-      return {
-        provider,
-        persisted,
-        mode: resultMode,
-        revision,
-      };
+      return commitReplacement(provider, credentialCopy).then(result => ({
+        ...result,
+        replaced: true,
+      }));
     });
   }
 
@@ -366,8 +403,10 @@ function createCredentialSession(options = {}) {
   return Object.freeze({
     hydrate,
     replace,
+    replaceIfRevision,
     clear,
     read,
+    readWithRevision,
     subscribe,
     diagnostics,
   });
