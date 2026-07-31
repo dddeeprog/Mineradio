@@ -102,6 +102,12 @@ test('after-pack generates installer manifests only after executable resources a
   touch(path.join(appOutDir, 'Mineradio.exe'));
   touch(path.join(buildResourcesDir, 'icon.ico'));
   const events = [];
+  const dependencyProof = {
+    schemaVersion: 1,
+    packageLockSha256: 'C'.repeat(64),
+    nodeModulesSha256: 'D'.repeat(64),
+    packages: [],
+  };
 
   const result = await afterPack({
     electronPlatformName: 'win32',
@@ -127,6 +133,12 @@ test('after-pack generates installer manifests only after executable resources a
       assert.equal(executable, rceditPath);
       events.push('rcedit');
     },
+    createProductionDependencyProof(options) {
+      events.push('dependencies');
+      assert.equal(options.appDir, path.join(appOutDir, 'resources', 'app'));
+      assert.equal(options.packageLockPath, path.join(projectDir, 'package-lock.json'));
+      return dependencyProof;
+    },
     gitRunner(command, args) {
       assert.equal(command, 'git');
       if (args.join(' ') === 'rev-parse --verify HEAD^{commit}') return `${COMMIT}\n`;
@@ -145,6 +157,7 @@ test('after-pack generates installer manifests only after executable resources a
       assert.equal(options.commit, COMMIT);
       assert.equal(options.buildId, 'fixture-build');
       assert.equal(options.createdAt, '2026-07-29T00:00:00.000Z');
+      assert.deepEqual(options.dependencies, dependencyProof);
       assert.equal(
         options.jsonPath,
         path.join(buildResourcesDir, '.generated', 'installer-manifest.json'),
@@ -157,7 +170,7 @@ test('after-pack generates installer manifests only after executable resources a
     },
   });
 
-  assert.deepEqual(events, ['rcedit', 'manifest']);
+  assert.deepEqual(events, ['rcedit', 'dependencies', 'manifest']);
   assert.equal(result.manifest.manifestSha256, 'A'.repeat(64));
 });
 
@@ -194,6 +207,14 @@ test('after-pack derives beta channel from electron-builder extra metadata', asy
     execFileSync(executable, args) {
       assert.equal(args[args.indexOf('ProductName') + 1], 'Mineradio Beta');
       assert.equal(args[args.indexOf('FileDescription') + 1], 'Mineradio Beta');
+    },
+    createProductionDependencyProof() {
+      return {
+        schemaVersion: 1,
+        packageLockSha256: 'C'.repeat(64),
+        nodeModulesSha256: 'D'.repeat(64),
+        packages: [],
+      };
     },
     gitRunner(command, args) {
       if (args.join(' ') === 'rev-parse --verify HEAD^{commit}') return `${COMMIT}\n`;

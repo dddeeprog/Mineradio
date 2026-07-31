@@ -45,6 +45,12 @@ function options(appOutDir) {
     commit: 'd61cc2e',
     buildId: 'fixture-build',
     createdAt: '2026-07-29T00:00:00.000Z',
+    dependencies: {
+      schemaVersion: 1,
+      packageLockSha256: 'A'.repeat(64),
+      nodeModulesSha256: 'B'.repeat(64),
+      packages: [],
+    },
   };
 }
 
@@ -59,6 +65,7 @@ test('generates a complete deterministic manifest from the packaged app director
   assert.equal(first.appId, 'com.mineradio.desktop');
   assert.equal(first.channel, 'stable');
   assert.equal(first.createdAt, '2026-07-29T00:00:00.000Z');
+  assert.deepEqual(first.dependencies, options(appOutDir).dependencies);
   assert.match(first.manifestSha256, /^[A-F0-9]{64}$/);
   assert.deepEqual(
     first.files.map((entry) => entry.path),

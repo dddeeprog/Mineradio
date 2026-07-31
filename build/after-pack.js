@@ -9,7 +9,10 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { generateInstallerManifest } = require('./generate-installer-manifest.js');
-const { resolveSourceIdentity } = require('./source-identity.js');
+const {
+  createProductionDependencyProof,
+  resolveSourceIdentity,
+} = require('./source-identity.js');
 
 function projectRceditCandidates(projectDir) {
   return [
@@ -135,6 +138,8 @@ async function afterPack(context, dependencies) {
   var deps = dependencies || {};
   var commandRunner = deps.execFileSync || execFileSync;
   var manifestGenerator = deps.generateInstallerManifest || generateInstallerManifest;
+  var dependencyProofResolver = deps.createProductionDependencyProof
+    || createProductionDependencyProof;
 
   const appName = context.packager.appInfo.productFilename || 'Mineradio';
   const exePath = path.join(context.appOutDir, `${appName}.exe`);
@@ -166,6 +171,10 @@ async function afterPack(context, dependencies) {
     gitRunner: deps.gitRunner,
     now: deps.now,
   });
+  const dependencyProof = dependencyProofResolver({
+    appDir: path.join(context.appOutDir, 'resources', 'app'),
+    packageLockPath: path.join(context.packager.projectDir, 'package-lock.json'),
+  });
   const generatedDir = path.join(
     context.packager.info.buildResourcesDir,
     '.generated',
@@ -176,6 +185,7 @@ async function afterPack(context, dependencies) {
     appId: context.packager.appInfo.id,
     version,
     ...identity,
+    dependencies: dependencyProof,
     jsonPath: path.join(generatedDir, 'installer-manifest.json'),
     nsisPath: path.join(generatedDir, 'installer-files.nsh'),
   });

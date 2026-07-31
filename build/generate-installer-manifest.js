@@ -129,6 +129,21 @@ function requireMetadata(value, label) {
   return value.trim();
 }
 
+function snapshotDependencyProof(value) {
+  if (
+    !value
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || value.schemaVersion !== 1
+    || !Array.isArray(value.packages)
+    || !/^[A-F0-9]{64}$/.test(String(value.packageLockSha256 || ''))
+    || !/^[A-F0-9]{64}$/.test(String(value.nodeModulesSha256 || ''))
+  ) {
+    throw new TypeError('Production dependency proof is missing or malformed.');
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
 function manifestDigestPayload(manifest) {
   const copy = { ...manifest };
   delete copy.manifestSha256;
@@ -181,6 +196,7 @@ function createInstallerManifest(options) {
     commit: requireMetadata(input.commit, 'Commit'),
     buildId: requireMetadata(input.buildId, 'Build ID'),
     createdAt: requireMetadata(input.createdAt, 'Created at'),
+    dependencies: snapshotDependencyProof(input.dependencies),
     files: Array.from(fileMap.values())
       .sort((left, right) => compareEntries(left.path, right.path)),
     directories: Array.from(directoryMap.values()).sort(compareEntries),

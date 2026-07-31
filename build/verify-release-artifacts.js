@@ -2,7 +2,10 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { resolveSourceIdentity } = require('./source-identity.js');
+const {
+  createProductionDependencyProof,
+  resolveSourceIdentity,
+} = require('./source-identity.js');
 
 const ATTESTATION_SUFFIX = '.mineradio-attestation.json';
 const RELEASE_MATERIALS = Object.freeze([
@@ -623,6 +626,17 @@ function assertBuildIdentity(manifest, releaseConfig, identity) {
   }
 }
 
+function assertDependencyProof(actual, expected, label) {
+  if (!isRecord(actual) || !isRecord(expected)) {
+    throw new Error(`${label} is missing or malformed.`);
+  }
+  assertEqual(
+    JSON.stringify(actual),
+    JSON.stringify(expected),
+    label,
+  );
+}
+
 function locatePackagedApp(distDir) {
   const preferred = path.join(distDir, 'win-unpacked');
   if (fs.existsSync(preferred) && fs.statSync(preferred).isDirectory()) return preferred;
@@ -763,6 +777,13 @@ function loadBuildContext(repoDir, distDir, options) {
     ...(options || {}),
     channel: manifest.channel,
   });
+  const appOutDir = options && options.appOutDir
+    ? options.appOutDir
+    : locatePackagedApp(distDir);
+  const dependencies = createProductionDependencyProof({
+    appDir: path.join(appOutDir, 'resources', 'app'),
+    packageLockPath: path.join(repoDir, 'package-lock.json'),
+  });
   const identity = resolveExpectedBuildIdentity({
     buildFiles: releaseConfig.buildFiles,
     channel: manifest.channel,
@@ -772,9 +793,11 @@ function loadBuildContext(repoDir, distDir, options) {
     version: releaseConfig.version,
   });
   assertBuildIdentity(manifest, releaseConfig, identity);
-  const appOutDir = options && options.appOutDir
-    ? options.appOutDir
-    : locatePackagedApp(distDir);
+  assertDependencyProof(
+    manifest.dependencies,
+    dependencies,
+    'Installer manifest production dependency proof',
+  );
   const releaseIdentity = readPackagedReleaseIdentity(appOutDir, {
     appId: releaseConfig.appId,
     channel: identity.channel,
@@ -789,6 +812,7 @@ function loadBuildContext(repoDir, distDir, options) {
   const materials = collectReleaseMaterials(repoDir, appOutDir, manifest);
   return {
     appOutDir,
+    dependencies,
     identity,
     manifest,
     manifestPath,
@@ -1073,6 +1097,7 @@ function createArtifactAttestations(buildResult, options) {
         sha256: context.manifest.manifestSha256,
         fileSha256: manifestFileSha256,
       },
+      dependencies: context.dependencies,
       materials: context.materials,
       generatedAt,
     };
@@ -1270,6 +1295,11 @@ function assertAttestation(
     JSON.stringify(attestation.materials),
     JSON.stringify(context.materials),
     'Attestation release materials',
+  );
+  assertDependencyProof(
+    attestation.dependencies,
+    context.dependencies,
+    'Attestation production dependency proof',
   );
   requireIsoTimestamp(attestation.generatedAt, 'Attestation generatedAt');
 }

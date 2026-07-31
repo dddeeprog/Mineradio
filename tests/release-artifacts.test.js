@@ -7,6 +7,7 @@ const test = require('node:test');
 const { Platform } = require('electron-builder');
 
 const artifactVerifier = require('../build/verify-release-artifacts.js');
+const sourceIdentity = require('../build/source-identity.js');
 const windowsTest = process.platform === 'win32' ? test : test.skip;
 
 function makeTempDir() {
@@ -139,6 +140,18 @@ function buildFixture(options = {}) {
     },
   };
   writeJson(path.join(repoDir, 'package.json'), packageMetadata);
+  writeJson(path.join(repoDir, 'package-lock.json'), {
+    name: 'mineradio',
+    version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': {
+        name: 'mineradio',
+        version,
+      },
+    },
+  });
   writeFile(
     path.join(repoDir, 'docs', `RELEASE_NOTES_v${version}.md`),
     options.releaseNotes === undefined
@@ -170,6 +183,10 @@ function buildFixture(options = {}) {
     source: 'package',
   });
 
+  const dependencies = sourceIdentity.createProductionDependencyProof({
+    appDir: path.join(appOutDir, 'resources', 'app'),
+    packageLockPath: path.join(repoDir, 'package-lock.json'),
+  });
   const manifest = {
     schemaVersion: 1,
     productName,
@@ -179,6 +196,7 @@ function buildFixture(options = {}) {
     commit,
     buildId,
     createdAt,
+    dependencies,
     files: manifestFiles,
     directories: ['resources', 'resources\\app', 'resources\\app\\docs'],
   };
@@ -205,6 +223,78 @@ function buildFixture(options = {}) {
     repoDir,
     version,
   };
+}
+
+function addProductionDependencyProofFixture(fixture) {
+  const packagePaths = [
+    path.join(fixture.repoDir, 'package.json'),
+    path.join(fixture.appOutDir, 'resources', 'app', 'package.json'),
+  ];
+  for (const packagePath of packagePaths) {
+    const metadata = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    metadata.dependencies = { alpha: '1.0.0' };
+    writeJson(packagePath, metadata);
+  }
+
+  const alphaIntegrity = `sha512-${crypto.createHash('sha512')
+    .update('alpha-1.0.0')
+    .digest('base64')}`;
+  writeJson(path.join(fixture.repoDir, 'package-lock.json'), {
+    name: 'mineradio',
+    version: fixture.version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': {
+        name: 'mineradio',
+        version: fixture.version,
+        dependencies: { alpha: '1.0.0' },
+      },
+      'node_modules/alpha': {
+        version: '1.0.0',
+        integrity: alphaIntegrity,
+      },
+    },
+  });
+  const alphaDir = path.join(
+    fixture.appOutDir,
+    'resources',
+    'app',
+    'node_modules',
+    'alpha',
+  );
+  writeJson(path.join(alphaDir, 'package.json'), { name: 'alpha', version: '1.0.0' });
+  writeFile(path.join(alphaDir, 'index.js'), "module.exports = 'alpha';\n");
+
+  const packagedPackagePath = packagePaths[1];
+  const packagedPackageContents = fs.readFileSync(packagedPackagePath);
+  const packageManifestEntry = fixture.manifest.files.find(
+    (entry) => entry.path === 'resources\\app\\package.json',
+  );
+  packageManifestEntry.size = packagedPackageContents.length;
+  packageManifestEntry.sha256 = sha256(packagedPackageContents);
+  for (const fileName of ['package.json', 'index.js']) {
+    const filePath = path.join(alphaDir, fileName);
+    const contents = fs.readFileSync(filePath);
+    fixture.manifest.files.push({
+      path: `resources\\app\\node_modules\\alpha\\${fileName}`,
+      size: contents.length,
+      sha256: sha256(contents),
+      source: 'package',
+    });
+  }
+  fixture.manifest.directories.push(
+    'resources\\app\\node_modules',
+    'resources\\app\\node_modules\\alpha',
+  );
+  const proof = sourceIdentity.createProductionDependencyProof({
+    appDir: path.join(fixture.appOutDir, 'resources', 'app'),
+    packageLockPath: path.join(fixture.repoDir, 'package-lock.json'),
+  });
+  fixture.manifest.dependencies = proof;
+  fixture.manifest.manifestSha256 = manifestDigest(fixture.manifest);
+  writeJson(fixture.manifestPath, fixture.manifest);
+  return proof;
 }
 
 function fakeGit(commit = COMMIT, ignoredPaths = []) {
@@ -607,6 +697,37 @@ test('afterAllArtifactBuild writes an atomic attestation bound to the installer 
   assert.equal(
     fs.readdirSync(fixture.distDir).filter((name) => name.endsWith('.tmp')).length,
     0,
+  );
+});
+
+test('artifact attestation binds the packaged production dependency proof', async () => {
+  const fixture = buildFixture();
+  const expectedProof = addProductionDependencyProofFixture(fixture);
+  await attest(fixture);
+
+  const attestation = JSON.parse(fs.readFileSync(
+    `${fixture.installerPath}.mineradio-attestation.json`,
+    'utf8',
+  ));
+  assert.deepEqual(attestation.dependencies, expectedProof);
+});
+
+test('artifact attestation rejects a packaged dependency outside package-lock', async () => {
+  const fixture = buildFixture();
+  addProductionDependencyProofFixture(fixture);
+  const rogueDir = path.join(
+    fixture.appOutDir,
+    'resources',
+    'app',
+    'node_modules',
+    'rogue',
+  );
+  writeJson(path.join(rogueDir, 'package.json'), { name: 'rogue', version: '6.6.6' });
+  writeFile(path.join(rogueDir, 'index.js'), "module.exports = 'rogue';\n");
+
+  await assert.rejects(
+    () => attest(fixture),
+    /extra|rogue|package-lock|production dependency/i,
   );
 });
 
