@@ -17,6 +17,7 @@ function resolveCachedChromium() {
 }
 
 const executablePath = resolveCachedChromium();
+const runtimeRoot = path.join(__dirname, 'output', 'folia-native-playwright-runtime');
 
 module.exports = defineConfig({
   testDir: './tests/visual',
@@ -37,6 +38,13 @@ module.exports = defineConfig({
     url: 'http://127.0.0.1:3177',
     reuseExistingServer: true,
     timeout: 120000,
-    env: Object.assign({}, process.env, { PORT: '3177', HOST: '127.0.0.1' }),
+    env: Object.assign({}, process.env, {
+      PORT: '3177',
+      HOST: '127.0.0.1',
+      MINERADIO_LISTEN_SYNC_FILE: path.join(runtimeRoot, 'listen-sync-journal.json'),
+      MINERADIO_LISTEN_BINDING_SECRET_FILE: path.join(runtimeRoot, 'listen-sync.binding-secret'),
+      MINERADIO_UPDATE_DIR: path.join(runtimeRoot, 'updates'),
+      MINERADIO_BEAT_CACHE_DIR: path.join(runtimeRoot, 'beatmap'),
+    }),
   },
 });
