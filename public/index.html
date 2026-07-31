@@ -15,6 +15,7 @@
 <script src="actions.js"></script>
 <script src="performance.js"></script>
 <script src="resource-governor.js"></script>
+<script src="runtime-feature-state.js"></script>
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="content-list-controller.js"></script>
@@ -1152,6 +1153,14 @@ try {
 'use strict';
 
 var paletteHelpers = window.MineradioPaletteHelpers || {};
+var runtimeFeatureStateApi = window.MineradioRuntimeFeatureState || {};
+var runtimeFeatureState = typeof runtimeFeatureStateApi.createRuntimeFeatureState === 'function'
+  ? runtimeFeatureStateApi.createRuntimeFeatureState()
+  : null;
+
+function runtimeFeatureEnabled(name) {
+  return !!(runtimeFeatureState && runtimeFeatureState.isEnabled(name));
+}
 
 // ============================================================
 //  Global State
@@ -2289,14 +2298,31 @@ var systemResourceState = {
   revision: 0,
   updatedAt: 0
 };
-var resourceGovernor = resourceGovernorTools && typeof resourceGovernorTools.createResourceGovernor === 'function'
-  ? resourceGovernorTools.createResourceGovernor({ recoveryHoldMs:5000, maxFrameSamples:120 })
-  : null;
+var resourceGovernor = null;
 var resourceGovernorDecision = null;
 var resourceGovernorApplying = false;
 var resourceGovernorLastCacheProfile = '';
 var resourceGovernorLastWallpaperFps = 0;
 window.__mineradioResourceGovernor = resourceGovernor;
+function ensureResourceGovernor() {
+  if (!runtimeFeatureEnabled('resourceGovernor')) return null;
+  if (resourceGovernor) return resourceGovernor;
+  if (!resourceGovernorTools || typeof resourceGovernorTools.createResourceGovernor !== 'function') return null;
+  resourceGovernor = resourceGovernorTools.createResourceGovernor({ recoveryHoldMs:5000, maxFrameSamples:120 });
+  window.__mineradioResourceGovernor = resourceGovernor;
+  return resourceGovernor;
+}
+function disableResourceGovernor(reason) {
+  var released = resourceGovernorDecision && resourceGovernorDecision.desiredReleased || [];
+  released.slice().reverse().forEach(function(name) {
+    restoreGovernedResource(name, reason || 'feature-disabled');
+  });
+  resourceGovernor = null;
+  resourceGovernorDecision = null;
+  resourceGovernorLastCacheProfile = '';
+  resourceGovernorLastWallpaperFps = 0;
+  window.__mineradioResourceGovernor = null;
+}
 function normalizeSystemResourceSnapshot(value) {
   value = value || {};
   var pressure = /^(normal|moderate|critical)$/.test(String(value.pressure || '')) ? String(value.pressure) : 'normal';
@@ -2456,9 +2482,10 @@ function applyResourceGovernorDecision(decision, previous, reason) {
   return decision;
 }
 function syncResourceGovernor(reason, now) {
-  if (!resourceGovernor || typeof resourceGovernor.update !== 'function') return resourceGovernorDecision;
+  var governor = ensureResourceGovernor();
+  if (!governor || typeof governor.update !== 'function') return resourceGovernorDecision;
   var previous = resourceGovernorDecision;
-  resourceGovernorDecision = resourceGovernor.update(resourceGovernorInput(reason, now));
+  resourceGovernorDecision = governor.update(resourceGovernorInput(reason, now));
   return applyResourceGovernorDecision(resourceGovernorDecision, previous, reason);
 }
 function updateSystemResourceState(value) {
@@ -20043,7 +20070,14 @@ function createNativeThreeLyricHost() {
   }
   return nativeThreeLyricHost;
 }
+function disableSonicTopographyRuntime() {
+  if (sonicTopographyRuntime && typeof sonicTopographyRuntime.destroy === 'function') {
+    sonicTopographyRuntime.destroy();
+  }
+  sonicTopographyRuntime = null;
+}
 function initSonicTopographyRuntime() {
+  if (!runtimeFeatureEnabled('sonicTopography')) return false;
   if (sonicTopographyRuntime || sonicTopographyFailed) return !!sonicTopographyRuntime;
   var api = window.MineradioSonicTopographyRenderer || {};
   if (typeof api.createSonicTopographyRenderer !== 'function' || !scene || !renderer) return false;
@@ -20080,6 +20114,7 @@ function governedNativeLyricQuality(configured) {
   return configured;
 }
 function updateSonicTopographyRuntime(dt) {
+  if (!runtimeFeatureEnabled('sonicTopography')) return false;
   if (sonicTopographyFailed || isGovernedResourceReleased('sonicTopography')) return false;
   if (!sonicTopographyRuntime && !initSonicTopographyRuntime()) return false;
   var palette = stageLyrics && stageLyrics.palette || {};
@@ -22617,7 +22652,11 @@ function playbackSourceMatchStateApi() {
 function playbackCapabilityCandidates(song) {
   var helper = playbackTransactionStateApi();
   if (!helper || typeof helper.playbackProviderCandidates !== 'function') return [];
-  return helper.playbackProviderCandidates(song, platformLoginCapabilitySnapshot || {});
+  var candidates = helper.playbackProviderCandidates(song, platformLoginCapabilitySnapshot || {});
+  if (runtimeFeatureEnabled('enhancedPlayback')) return candidates;
+  return candidates.filter(function(candidate) {
+    return candidate && candidate.resolutionMode === 'catalog';
+  }).slice(0, 1);
 }
 function playbackSearchUrl(provider, query) {
   if (provider === 'qq') {
@@ -23307,6 +23346,7 @@ function releasePreparedPlayback(prepared) {
   }
 }
 function ensureGaplessPlaybackCoordinator() {
+  if (!runtimeFeatureEnabled('enhancedPlayback')) return null;
   var helper = window.MineradioGaplessPlaybackState || null;
   if (
     gaplessPlaybackCoordinator
@@ -23711,6 +23751,7 @@ function crossfadePlaybackMedia(outgoing, incoming, opts, prepared, attempt) {
   var policy = playbackCrossfadePolicy(opts, prepared);
   var enabled = !!(
     opts
+    && runtimeFeatureEnabled('enhancedPlayback')
     && opts.gaplessHandoff
     && helper
     && typeof helper.shouldUseCrossfade === 'function'
@@ -27706,6 +27747,24 @@ function applyRuntimeFeatureFlags(snapshot) {
   cuefieldFeatureEnabled = enabled;
   if (!cuefieldFeatureEnabled) cancelCuefieldAutoMix('feature-disabled');
   else updateCuefieldAutoMixControls();
+  var browserFeatures = runtimeFeatureState
+    ? runtimeFeatureState.apply(snapshot)
+    : {
+        enhancedPlayback:false,
+        sonicTopography:false,
+        resourceGovernor:false,
+      };
+  if (!browserFeatures.enhancedPlayback) {
+    cancelNextTrackPreload('feature-disabled');
+    if (gaplessPlaybackCoordinator && typeof gaplessPlaybackCoordinator.cancel === 'function') {
+      gaplessPlaybackCoordinator.cancel('feature-disabled');
+    }
+    gaplessPlaybackCoordinator = null;
+  }
+  if (browserFeatures.sonicTopography) initSonicTopographyRuntime();
+  else disableSonicTopographyRuntime();
+  if (browserFeatures.resourceGovernor) syncResourceGovernor('feature-enabled');
+  else disableResourceGovernor('feature-disabled');
   return cuefieldFeatureEnabled;
 }
 function setPerformanceBackgroundMode(mode, silent) {

@@ -8,6 +8,12 @@ const {
 const capabilities = {
   schema: 1,
   generatedAt: 1,
+  features: {
+    enhancedPlayback: true,
+    sonicTopography: true,
+    resourceGovernor: true,
+    cuefield: true,
+  },
   providers: [
     {
       provider: 'netease',
@@ -27,6 +33,76 @@ const capabilities = {
     },
   ],
 };
+
+test('disabled browser runtime flags keep optional work dormant and preserve base playback', async ({ page }) => {
+  await page.route('**/api/platform/capabilities*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ...capabilities,
+      features: {
+        enhancedPlayback: false,
+        sonicTopography: false,
+        resourceGovernor: false,
+        cuefield: false,
+      },
+    }),
+  }));
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    window.platformLoginCapabilitySnapshot
+    && window.platformLoginCapabilitySnapshot.features
+    && window.platformLoginCapabilitySnapshot.features.enhancedPlayback === false
+  ));
+
+  await page.evaluate(() => {
+    document.body.classList.remove('splash-active');
+    window.__runtimeFeatureProbe = {
+      sonicFrames: 0,
+      governorFrames: 0,
+    };
+    if (window.sonicTopographyRuntime) {
+      const updateSonic = window.sonicTopographyRuntime.update;
+      window.sonicTopographyRuntime.update = function(...args) {
+        window.__runtimeFeatureProbe.sonicFrames += 1;
+        return updateSonic.apply(this, args);
+      };
+    }
+    if (window.resourceGovernor) {
+      const recordFrame = window.resourceGovernor.recordFrame;
+      window.resourceGovernor.recordFrame = function(...args) {
+        window.__runtimeFeatureProbe.governorFrames += 1;
+        return recordFrame.apply(this, args);
+      };
+    }
+  });
+  await page.waitForTimeout(180);
+
+  const state = await page.evaluate(() => ({
+    sonicCreated: !!window.sonicTopographyRuntime,
+    resourceGovernorCreated: !!window.resourceGovernor,
+    sonicFrames: window.__runtimeFeatureProbe.sonicFrames,
+    governorFrames: window.__runtimeFeatureProbe.governorFrames,
+    playbackCandidates: window.playbackCapabilityCandidates({
+      provider: 'netease',
+      source: 'netease',
+      id: 'catalog-song',
+      name: 'Signal',
+      artist: 'Artist A',
+    }).map(candidate => `${candidate.playbackProvider}:${candidate.resolutionMode}`),
+    basePlaybackReady: !!window.ensurePlaybackTransactionManager(),
+  }));
+
+  expect(state).toEqual({
+    sonicCreated: false,
+    resourceGovernorCreated: false,
+    sonicFrames: 0,
+    governorFrames: 0,
+    playbackCandidates: ['netease:catalog'],
+    basePlaybackReady: true,
+  });
+});
 
 test('all-source failure retains the active playback surface', async ({ page }) => {
   const pageErrors = [];

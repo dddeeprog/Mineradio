@@ -90,7 +90,7 @@ const {
 const {
   createBaselineImplementationRegistry,
 } = require('./server/platform/implementation-registry');
-const { createFeatureFlags } = require('./server/platform/feature-flags');
+const { createReleaseFeatureFlags } = require('./server/platform/feature-flags');
 const { createListenJournal } = require('./server/platform/listen-journal');
 const {
   createListenReporter,
@@ -158,10 +158,7 @@ const updateDownloadJobs = new Map();
 const implementationRegistry = createBaselineImplementationRegistry();
 implementationRegistry.register('netease', 'recentPlayReport');
 implementationRegistry.register('netease', 'listenDurationReport');
-const platformFeatureFlags = createFeatureFlags({
-  listenReporting: true,
-  cuefield: true,
-});
+const platformFeatureFlags = createReleaseFeatureFlags();
 
 function applySystemCertificateAuthorities() {
   try {

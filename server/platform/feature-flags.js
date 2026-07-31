@@ -24,6 +24,15 @@ const DEFAULT_FEATURE_FLAG_VALUES = Object.freeze({
   resourceGovernor: false,
 });
 
+const RELEASE_FEATURE_FLAG_VALUES = Object.freeze({
+  ...DEFAULT_FEATURE_FLAG_VALUES,
+  enhancedPlayback: true,
+  listenReporting: true,
+  cuefield: true,
+  sonicTopography: true,
+  resourceGovernor: true,
+});
+
 const featureFlagIdentities = new WeakSet();
 
 function isPlainConfiguration(value) {
@@ -89,6 +98,13 @@ function createFeatureFlags(overrides) {
   return flags;
 }
 
+function createReleaseFeatureFlags(overrides) {
+  return createFeatureFlags({
+    ...RELEASE_FEATURE_FLAG_VALUES,
+    ...readOverrides(overrides),
+  });
+}
+
 function isFeatureFlags(value) {
   return (
     (typeof value === 'object' || typeof value === 'function')
@@ -100,6 +116,8 @@ function isFeatureFlags(value) {
 module.exports = {
   DEFAULT_FEATURE_FLAG_VALUES,
   FEATURE_FLAG_KEYS,
+  RELEASE_FEATURE_FLAG_VALUES,
   createFeatureFlags,
+  createReleaseFeatureFlags,
   isFeatureFlags,
 };
