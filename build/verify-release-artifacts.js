@@ -8,6 +8,23 @@ const {
 } = require('./source-identity.js');
 
 const ATTESTATION_SUFFIX = '.mineradio-attestation.json';
+const VENDOR_MANIFEST_PATH = 'docs/VENDOR_MANIFEST.md';
+const MUSIC_TEMPO_VENDOR_REQUIREMENTS = Object.freeze(new Map([
+  ['public/vendor/music-tempo.min.js', Object.freeze({
+    library: 'music-tempo',
+    version: '1.0.3',
+    upstream: 'https://github.com/killercrush/music-tempo',
+    license: 'MIT',
+    sha256: '2927859A8E81E8874A95DC7AF3A2A06FEDD306826F774B7378E26AD5FA9CBD76',
+  })],
+  ['public/vendor/music-tempo.LICENCE', Object.freeze({
+    library: 'music-tempo license text',
+    version: '1.0.3',
+    upstream: 'https://github.com/killercrush/music-tempo',
+    license: 'MIT',
+    sha256: '12B4E069F64AE9A2660C1F5FE788E548487EC8385960BDA0A0BFE177C95348CF',
+  })],
+]));
 const RELEASE_MATERIALS = Object.freeze([
   Object.freeze({ sourcePath: 'LICENSE', packagedPath: 'resources/app/LICENSE' }),
   Object.freeze({ sourcePath: 'NOTICE.md', packagedPath: 'resources/app/NOTICE.md' }),
@@ -38,6 +55,7 @@ const TEXT_FILE_LIMITS = Object.freeze({
   attestation: 2 * 1024 * 1024,
   releaseNotes: 1 * 1024 * 1024,
   packageJson: 1 * 1024 * 1024,
+  vendorManifest: 1 * 1024 * 1024,
 });
 const SYSTEM_SECURITY_MODULE_IMPORT = [
   "$securityModule = Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'",
@@ -783,6 +801,132 @@ function collectReleaseMaterials(repoDir, appOutDir, manifest) {
   });
 }
 
+function unwrapVendorManifestCell(value) {
+  const normalized = String(value || '').trim();
+  return normalized.startsWith('`') && normalized.endsWith('`')
+    ? normalized.slice(1, -1).trim()
+    : normalized;
+}
+
+function parseVendorManifest(contents) {
+  const entries = [];
+  const seen = new Set();
+  for (const line of String(contents || '').split(/\r?\n/)) {
+    if (!line.trim().startsWith('|') || !line.includes('`public/vendor/')) continue;
+    const cells = line.trim().split('|').slice(1, -1).map(cell => cell.trim());
+    if (cells.length !== 6) {
+      throw new Error('Vendor Manifest contains a malformed vendor table row.');
+    }
+    const sourcePath = unwrapVendorManifestCell(cells[0]);
+    if (!/^public\/vendor\/[0-9A-Za-z@._+-]+$/.test(sourcePath)) {
+      throw new Error(`Vendor Manifest path is invalid: ${sourcePath}.`);
+    }
+    if (seen.has(sourcePath)) {
+      throw new Error(`Vendor Manifest contains a duplicate entry: ${sourcePath}.`);
+    }
+    seen.add(sourcePath);
+    const entry = {
+      sourcePath,
+      library: unwrapVendorManifestCell(cells[1]),
+      version: unwrapVendorManifestCell(cells[2]),
+      upstream: unwrapVendorManifestCell(cells[3]),
+      license: unwrapVendorManifestCell(cells[4]),
+      sha256: unwrapVendorManifestCell(cells[5]).toUpperCase(),
+    };
+    for (const field of ['library', 'version', 'upstream', 'license']) {
+      if (!entry[field]) {
+        throw new Error(`Vendor Manifest ${sourcePath} ${field} is missing.`);
+      }
+    }
+    if (!/^[A-F0-9]{64}$/.test(entry.sha256)) {
+      throw new Error(`Vendor Manifest ${sourcePath} SHA256 is malformed.`);
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function collectVendorManifestMaterials(repoDir, appOutDir, manifest, options) {
+  const manifestPath = path.join(repoDir, ...VENDOR_MANIFEST_PATH.split('/'));
+  const entries = parseVendorManifest(readBoundedTextFile(
+    manifestPath,
+    'Vendor Manifest',
+    { maxBytes: resolveReadLimit(options, 'vendorManifest') },
+  ));
+  const entryMap = new Map(entries.map(entry => [entry.sourcePath, entry]));
+
+  for (const [sourcePath, expected] of MUSIC_TEMPO_VENDOR_REQUIREMENTS) {
+    const entry = entryMap.get(sourcePath);
+    if (!entry) throw new Error(`Vendor Manifest is missing required ${sourcePath} entry.`);
+    for (const field of ['library', 'version', 'license', 'sha256']) {
+      assertEqual(entry[field], expected[field], `${sourcePath} ${field}`);
+    }
+    if (!entry.upstream.includes(expected.upstream)) {
+      throw new Error(`${sourcePath} upstream source mismatch.`);
+    }
+  }
+
+  const vendorDir = path.join(repoDir, 'public', 'vendor');
+  if (!fs.existsSync(vendorDir) || !fs.statSync(vendorDir).isDirectory()) {
+    throw new Error('Vendored browser file directory is missing.');
+  }
+  const sourcePaths = fs.readdirSync(vendorDir, { withFileTypes: true }).map((entry) => {
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error(`Vendored browser entry must be a regular file: ${entry.name}.`);
+    }
+    return `public/vendor/${entry.name}`;
+  }).sort();
+  const declaredPaths = entries.map(entry => entry.sourcePath).sort();
+  if (JSON.stringify(sourcePaths) !== JSON.stringify(declaredPaths)) {
+    throw new Error('Vendor Manifest entries do not exactly cover public/vendor files.');
+  }
+
+  if (!isRecord(manifest) || !Array.isArray(manifest.files)) {
+    throw new Error('Installer manifest files are missing or malformed.');
+  }
+  const manifestFiles = new Map(
+    manifest.files.map(entry => [normalizeInstallPath(entry && entry.path), entry]),
+  );
+  return entries.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, 'en'))
+    .map((entry) => {
+      const sourceFile = path.join(repoDir, ...entry.sourcePath.split('/'));
+      const packagedPath = `resources/app/${entry.sourcePath}`;
+      const packagedFile = path.join(appOutDir, ...packagedPath.split('/'));
+      if (!fs.existsSync(sourceFile) || !fs.statSync(sourceFile).isFile()) {
+        throw new Error(`Vendor source file is missing: ${entry.sourcePath}.`);
+      }
+      const sourceSha256 = sha256File(sourceFile);
+      assertEqual(sourceSha256, entry.sha256, `${entry.sourcePath} declared SHA256`);
+      if (!fs.existsSync(packagedFile) || !fs.statSync(packagedFile).isFile()) {
+        throw new Error(`Packaged vendor file is missing: ${packagedPath}.`);
+      }
+      const packagedSha256 = sha256File(packagedFile);
+      assertEqual(packagedSha256, sourceSha256, `${entry.sourcePath} packaged SHA256`);
+      const packagedStat = fs.statSync(packagedFile);
+      const manifestEntry = manifestFiles.get(normalizeInstallPath(packagedPath));
+      if (!isRecord(manifestEntry)) {
+        throw new Error(`Installer manifest is missing vendor file ${packagedPath}.`);
+      }
+      assertEqual(manifestEntry.source, 'package', `${entry.sourcePath} manifest source`);
+      assertEqual(manifestEntry.size, packagedStat.size, `${entry.sourcePath} manifest size`);
+      assertEqual(
+        String(manifestEntry.sha256 || '').toUpperCase(),
+        sourceSha256,
+        `${entry.sourcePath} installer manifest SHA256`,
+      );
+      return {
+        sourcePath: entry.sourcePath,
+        packagedPath,
+        library: entry.library,
+        version: entry.version,
+        upstream: entry.upstream,
+        license: entry.license,
+        size: packagedStat.size,
+        sha256: sourceSha256,
+      };
+    });
+}
+
 function serializeJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -843,6 +987,12 @@ function loadBuildContext(repoDir, distDir, options) {
     manifest,
   });
   const materials = collectReleaseMaterials(repoDir, appOutDir, manifest);
+  const vendorMaterials = collectVendorManifestMaterials(
+    repoDir,
+    appOutDir,
+    manifest,
+    options,
+  );
   return {
     appOutDir,
     dependencies,
@@ -850,6 +1000,7 @@ function loadBuildContext(repoDir, distDir, options) {
     manifest,
     manifestPath,
     materials,
+    vendorMaterials,
     releaseConfig,
     releaseIdentity,
   };
@@ -1132,6 +1283,7 @@ function createArtifactAttestations(buildResult, options) {
       },
       dependencies: context.dependencies,
       materials: context.materials,
+      vendorMaterials: context.vendorMaterials,
       generatedAt,
     };
     const sidecarPath = attestationPathFor(installerPath);
@@ -1329,6 +1481,11 @@ function assertAttestation(
     JSON.stringify(context.materials),
     'Attestation release materials',
   );
+  assertEqual(
+    JSON.stringify(attestation.vendorMaterials),
+    JSON.stringify(context.vendorMaterials),
+    'Attestation vendor materials',
+  );
   assertDependencyProof(
     attestation.dependencies,
     context.dependencies,
@@ -1524,6 +1681,7 @@ Object.assign(afterAllArtifactBuild, {
   buildArtifactVerificationCommand,
   buildWindowsMetadataCommand,
   collectReleaseMaterials,
+  collectVendorManifestMaterials,
   createArtifactAttestations,
   findSetupInstallers,
   inspectBuildTargets,

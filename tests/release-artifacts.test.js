@@ -26,6 +26,23 @@ const CREATED_AT = '2026-07-29T08:00:00.000Z';
 const GENERATED_AT = '2026-07-29T08:05:00.000Z';
 const CANONICAL_OWNER = 'English-worse';
 const CANONICAL_REPO = 'Mineradio';
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const MUSIC_TEMPO_VENDOR = [
+  {
+    sourcePath: 'public/vendor/music-tempo.min.js',
+    library: 'music-tempo',
+    version: '1.0.3',
+    upstream: 'https://github.com/killercrush/music-tempo',
+    license: 'MIT',
+  },
+  {
+    sourcePath: 'public/vendor/music-tempo.LICENCE',
+    library: 'music-tempo license text',
+    version: '1.0.3',
+    upstream: 'https://github.com/killercrush/music-tempo',
+    license: 'MIT',
+  },
+];
 const MATERIALS = [
   ['LICENSE', 'resources/app/LICENSE'],
   ['NOTICE.md', 'resources/app/NOTICE.md'],
@@ -245,7 +262,7 @@ function buildFixture(options = {}) {
   const artifactTime = new Date(options.artifactMtime || '2026-07-29T08:04:00.000Z');
   fs.utimesSync(installerPath, artifactTime, artifactTime);
 
-  return {
+  const fixture = {
     appOutDir,
     appId,
     buildId,
@@ -260,8 +277,82 @@ function buildFixture(options = {}) {
     productFilename,
     productName,
     repoDir,
+    vendorEntries: [],
     version,
   };
+  const pretextLicensePath = 'public/vendor/pretext-0.0.7.LICENSE';
+  fixture.vendorEntries.push({
+    sourcePath: pretextLicensePath,
+    library: '@chenglou/pretext license text',
+    version: '0.0.7',
+    upstream: 'https://github.com/chenglou/pretext',
+    license: 'MIT',
+    sha256: sha256(fs.readFileSync(path.join(repoDir, pretextLicensePath))),
+  });
+  addMusicTempoVendorFixture(fixture);
+  return fixture;
+}
+
+function writeFixtureVendorManifest(fixture, entries) {
+  const contents = [
+    '# Vendor Manifest',
+    '',
+    '本文件记录 `public/vendor/` 下随仓库分发的浏览器端第三方文件。',
+    '',
+    '| 本地文件 | 库 | 版本 | 上游来源 | 许可证 | SHA256 |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...entries.map(entry => (
+      `| \`${entry.sourcePath}\` | ${entry.library} | ${entry.version} | `
+      + `\`${entry.upstream}\` | ${entry.license} | `
+      + `\`${entry.sha256}\` |`
+    )),
+    '',
+  ].join('\n');
+  const sourcePath = path.join(fixture.repoDir, 'docs', 'VENDOR_MANIFEST.md');
+  const packagedPath = path.join(
+    fixture.appOutDir,
+    'resources',
+    'app',
+    'docs',
+    'VENDOR_MANIFEST.md',
+  );
+  writeFile(sourcePath, contents);
+  writeFile(packagedPath, contents);
+  const manifestEntry = fixture.manifest.files.find(
+    entry => entry.path === 'resources\\app\\docs\\VENDOR_MANIFEST.md',
+  );
+  manifestEntry.size = Buffer.byteLength(contents);
+  manifestEntry.sha256 = sha256(contents);
+  fixture.manifest.manifestSha256 = manifestDigest(fixture.manifest);
+  writeJson(fixture.manifestPath, fixture.manifest);
+}
+
+function addMusicTempoVendorFixture(fixture) {
+  const entries = [...fixture.vendorEntries, ...MUSIC_TEMPO_VENDOR.map(metadata => {
+    const contents = fs.readFileSync(path.join(PROJECT_ROOT, metadata.sourcePath));
+    const packagedPath = path.join(
+      fixture.appOutDir,
+      'resources',
+      'app',
+      ...metadata.sourcePath.split('/'),
+    );
+    writeFile(path.join(fixture.repoDir, metadata.sourcePath), contents);
+    writeFile(packagedPath, contents);
+    const entry = {
+      ...metadata,
+      sha256: sha256(contents),
+    };
+    fixture.manifest.files.push({
+      path: `resources\\app\\${metadata.sourcePath.replace(/\//g, '\\')}`,
+      size: contents.length,
+      sha256: entry.sha256,
+      source: 'package',
+    });
+    return entry;
+  })];
+  fixture.vendorEntries = entries;
+  writeFixtureVendorManifest(fixture, entries);
+  return entries;
 }
 
 function addProductionDependencyProofFixture(fixture) {
@@ -987,6 +1078,53 @@ test('verification rejects missing or changed release materials', async (t) => {
   });
 });
 
+test('verification rejects incomplete or drifting music-tempo vendor proof', async (t) => {
+  await t.test('missing Vendor Manifest entry', async () => {
+    const fixture = buildFixture();
+    const entries = fixture.vendorEntries;
+    writeFixtureVendorManifest(
+      fixture,
+      entries.filter(entry => entry.sourcePath !== 'public/vendor/music-tempo.LICENCE'),
+    );
+    await assert.rejects(async () => {
+      await attest(fixture);
+      verify(fixture);
+    }, /music-tempo|vendor manifest|entry/i);
+  });
+
+  await t.test('missing packaged license', async () => {
+    const fixture = buildFixture();
+    const licensePath = 'public/vendor/music-tempo.LICENCE';
+    fs.rmSync(path.join(fixture.repoDir, licensePath));
+    fs.rmSync(path.join(
+      fixture.appOutDir,
+      'resources',
+      'app',
+      ...licensePath.split('/'),
+    ));
+    fixture.manifest.files = fixture.manifest.files.filter(
+      entry => entry.path !== 'resources\\app\\public\\vendor\\music-tempo.LICENCE',
+    );
+    fixture.manifest.manifestSha256 = manifestDigest(fixture.manifest);
+    writeJson(fixture.manifestPath, fixture.manifest);
+    await assert.rejects(async () => {
+      await attest(fixture);
+      verify(fixture);
+    }, /music-tempo|license|licence|vendor/i);
+  });
+
+  await t.test('declared SHA256 drift', async () => {
+    const fixture = buildFixture();
+    const entries = fixture.vendorEntries;
+    entries.find(entry => entry.sourcePath === 'public/vendor/music-tempo.min.js').sha256 = 'A'.repeat(64);
+    writeFixtureVendorManifest(fixture, entries);
+    await assert.rejects(async () => {
+      await attest(fixture);
+      verify(fixture);
+    }, /music-tempo|sha256|hash|vendor/i);
+  });
+});
+
 test('release verifier covers Folia and Pretext source acquisition materials', () => {
   assert.deepEqual(
     artifactVerifier.RELEASE_MATERIALS.map(material => material.sourcePath),
@@ -1242,6 +1380,7 @@ test('structured release inputs use bounded regular-file reads', async (t) => {
       attestation: 2 * 1024 * 1024,
       releaseNotes: 1 * 1024 * 1024,
       packageJson: 1 * 1024 * 1024,
+      vendorManifest: 1 * 1024 * 1024,
     });
   });
 
@@ -1250,6 +1389,7 @@ test('structured release inputs use bounded regular-file reads', async (t) => {
     'installerManifest',
     'attestation',
     'releaseNotes',
+    'vendorManifest',
   ]) {
     await t.test(`rejects ${limitName} before reading beyond its configured limit`, async () => {
       const fixture = buildFixture();
