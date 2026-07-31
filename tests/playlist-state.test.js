@@ -5,6 +5,7 @@ const {
   findPlaylistShelfFocus,
   normalizePlaylistId,
   normalizePlaylistDetailResult,
+  resolvePlaylistSubscriptionButton,
   resolvePlaylistSubscriptionMutation,
 } = require('../public/playlist-state');
 
@@ -125,5 +126,78 @@ test('rolls playlist subscription state back after rejected feedback', () => {
     ok: false,
     value: false,
     errorCode: 'PLAYLIST_SUBSCRIBE_INVALID_RESPONSE',
+  });
+});
+
+function subscriptionButton(playlistValue, access) {
+  assert.equal(typeof resolvePlaylistSubscriptionButton, 'function');
+  return resolvePlaylistSubscriptionButton(playlistValue, access);
+}
+
+test('shows subscribe for an unowned unsubscribed Netease playlist', () => {
+  assert.deepEqual(subscriptionButton({
+    provider: 'netease',
+    owned: false,
+    subscribed: false,
+  }, {
+    visible: true,
+    enabled: true,
+    loginRequired: false,
+  }), {
+    visible: true,
+    enabled: true,
+    subscribed: false,
+    label: '订阅歌单',
+  });
+});
+
+test('shows unsubscribe for a subscribed Netease playlist', () => {
+  assert.deepEqual(subscriptionButton({
+    provider: 'netease',
+    owned: false,
+    subscribed: true,
+  }, {
+    visible: true,
+    enabled: true,
+    loginRequired: false,
+  }), {
+    visible: true,
+    enabled: true,
+    subscribed: true,
+    label: '取消订阅',
+  });
+});
+
+test('hides subscription control for an owned Netease playlist', () => {
+  assert.deepEqual(subscriptionButton({
+    provider: 'netease',
+    owned: true,
+    subscribed: false,
+  }, {
+    visible: true,
+    enabled: true,
+    loginRequired: false,
+  }), {
+    visible: false,
+    enabled: false,
+    subscribed: false,
+    label: '',
+  });
+});
+
+test('hides and disables subscription control without write capability', () => {
+  assert.deepEqual(subscriptionButton({
+    provider: 'netease',
+    owned: false,
+    subscribed: false,
+  }, {
+    visible: false,
+    enabled: false,
+    loginRequired: false,
+  }), {
+    visible: false,
+    enabled: false,
+    subscribed: false,
+    label: '',
   });
 });

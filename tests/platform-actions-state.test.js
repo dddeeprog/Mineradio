@@ -100,6 +100,8 @@ test('page wires capability-driven album, playlist, and comment actions', () => 
   assert.match(html, /\/api\/album\/detail\?id=/);
   assert.match(html, /\/api\/album\/collect/);
   assert.match(html, /\/api\/playlist\/subscribe/);
+  assert.match(html, /resolvePlaylistSubscriptionButton/);
+  assert.doesNotMatch(html, /!pl\.subscribed\s*&&\s*!pl\.__subscriptionTouched/);
   assert.match(html, /\/api\/song\/comments\/like/);
   assert.match(html, /submitDetailComment/);
   assert.match(css, /\.detail-comment-composer/);

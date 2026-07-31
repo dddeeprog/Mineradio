@@ -87,6 +87,30 @@
     return { ok: true, tracks: result.tracks, errorCode: '' };
   }
 
+  function resolvePlaylistSubscriptionButton(playlist, access) {
+    var hidden = {
+      visible: false,
+      enabled: false,
+      subscribed: false,
+      label: '',
+    };
+    if (!playlist || typeof playlist !== 'object'
+      || playlist.provider !== 'netease'
+      || playlist.owned === true
+      || !access || access.visible !== true) {
+      return hidden;
+    }
+    var subscribed = playlist.subscribed === true;
+    return {
+      visible: true,
+      enabled: access.enabled === true,
+      subscribed: subscribed,
+      label: access.loginRequired === true
+        ? '登录后管理'
+        : (subscribed ? '取消订阅' : '订阅歌单'),
+    };
+  }
+
   function resolvePlaylistSubscriptionMutation(previous, optimistic, result) {
     if (result && typeof result === 'object' && !result.error && result.success === true) {
       return { ok: true, value: !!optimistic, errorCode: '' };
@@ -107,6 +131,7 @@
     findPlaylistShelfFocus: findPlaylistShelfFocus,
     normalizePlaylistId: normalizePlaylistId,
     normalizePlaylistDetailResult: normalizePlaylistDetailResult,
+    resolvePlaylistSubscriptionButton: resolvePlaylistSubscriptionButton,
     resolvePlaylistSubscriptionMutation: resolvePlaylistSubscriptionMutation,
   };
 });

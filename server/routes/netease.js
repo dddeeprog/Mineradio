@@ -249,6 +249,7 @@ function createNeteaseRoutes(deps) {
         playCount: pl.playCount || 0,
         creator: (pl.creator && pl.creator.nickname) || '',
         subscribed: !!pl.subscribed,
+        owned: pl.subscribed !== true,
         specialType: pl.specialType || 0,
       }));
       sendJSON(res, { loggedIn: true, userId: info.userId, playlists: list });

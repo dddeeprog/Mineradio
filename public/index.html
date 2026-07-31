@@ -25289,16 +25289,20 @@ function playlistSubscriptionKey(id) {
   return 'playlist:' + String(id || '');
 }
 function renderPlaylistSubscriptionButton(pl, provider) {
-  if (provider !== 'netease' || !pl || (!pl.subscribed && !pl.__subscriptionTouched)) return '';
+  if (provider !== 'netease' || !pl) return '';
   var access = platformActionAccess('netease', 'playlistSubscribe');
-  if (!access.visible) return '';
+  var helper = window.MineradioPlaylistState || {};
+  var control = typeof helper.resolvePlaylistSubscriptionButton === 'function'
+    ? helper.resolvePlaylistSubscriptionButton(pl, access)
+    : { visible: false };
+  if (!control.visible) return '';
   var key = playlistSubscriptionKey(pl.id);
   if (platformActionStore && !platformActionBusy(key)) {
     platformActionStore.set(key, pl.subscribed === true);
   }
   var subscribed = platformActionValue(key, pl.subscribed === true);
   return '<button class="fx-mini-btn ghost pl-detail-subscribe' + (subscribed ? ' on' : '') + (platformActionBusy(key) ? ' busy' : '') + '" type="button" data-pl-subscribe="1">' +
-    (access.loginRequired ? '登录后管理' : (subscribed ? '取消订阅' : '订阅歌单')) +
+    control.label +
   '</button>';
 }
 async function togglePlaylistPanelSubscription() {
@@ -25310,7 +25314,6 @@ async function togglePlaylistPanelSubscription() {
   var token = platformActionStore && platformActionStore.begin(key, next);
   if (platformActionStore && !token) return;
   pl.subscribed = next;
-  pl.__subscriptionTouched = true;
   renderPlaylistPanelDetailState();
   try {
     var result = await apiJson('/api/playlist/subscribe', {

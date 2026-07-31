@@ -688,7 +688,16 @@ test('netease route module dispatches core music endpoints', async () => {
     login_qr_create() { return Promise.resolve({ body: { data: { qrurl: 'qr' } } }); },
     login_qr_check() { return Promise.resolve({ body: { code: 801 } }); },
     logout() { return Promise.resolve({}); },
-    user_playlist() { return Promise.resolve({ body: { playlist: [] } }); },
+    user_playlist() {
+      return Promise.resolve({
+        body: {
+          playlist: [
+            { id: 51, name: '本人歌单', subscribed: false },
+            { id: 52, name: '收藏歌单', subscribed: true },
+          ],
+        },
+      });
+    },
     requireLogin() {
       if (!loginAllowed) {
         writes.push({
@@ -814,6 +823,15 @@ test('netease route module dispatches core music endpoints', async () => {
   assert.equal(writes[11].status, 401);
   assert.equal(writes[11].payload.error, 'LOGIN_REQUIRED');
   assert.equal(calls.length, callCountBeforeLoggedOutWrite);
+  assert.equal(await routes.handleRoute('/api/user/playlists', { method: 'GET' }, {}, new URL('http://localhost/api/user/playlists')), true);
+  assert.deepEqual(writes.at(-1).payload.playlists.map(item => ({
+    id: item.id,
+    subscribed: item.subscribed,
+    owned: item.owned,
+  })), [
+    { id: 51, subscribed: false, owned: true },
+    { id: 52, subscribed: true, owned: false },
+  ]);
   neteaseLoginVerified = false;
   assert.equal(await routes.handleRoute('/api/login/cookie', { method: 'POST', body: { cookie: 'MUSIC_U=rejected' } }, {}, new URL('http://localhost/api/login/cookie')), true);
   assert.equal(writes.at(-1).payload.loggedIn, false);
