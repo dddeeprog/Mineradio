@@ -318,7 +318,7 @@ test('owned upgrades retain the verified install directory across installer page
   assertOrdered(preferred, [
     'StrCmp "$MineradioOwnedUpgrade" "1" MineradioUsePreferredInstallDirDone',
     '${GetParameters} $R0',
-    'StrCpy $INSTDIR "D:\\Mineradio"',
+    'StrCpy $INSTDIR "D:\\${PRODUCT_NAME}"',
     'MineradioUsePreferredInstallDirDone:',
   ]);
 });
