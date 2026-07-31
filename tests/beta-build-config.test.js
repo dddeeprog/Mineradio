@@ -106,6 +106,38 @@ test('beta metadata drives a separate runtime data root and application identity
   assert.deepEqual(betaCalls[0], ['setName', 'Mineradio Beta']);
 });
 
+test('runtime updater resolves GitHub endpoints from the packaged update channel', () => {
+  const helperPath = path.join(repoRoot, 'server', 'update-channel.js');
+  const updateChannel = fs.existsSync(helperPath) ? require(helperPath) : {};
+
+  assert.equal(typeof updateChannel.createGithubUpdatePlan, 'function');
+
+  const stable = updateChannel.createGithubUpdatePlan({
+    owner: 'English-worse',
+    repo: 'Mineradio',
+    channel: 'latest',
+  });
+  const beta = updateChannel.createGithubUpdatePlan({
+    owner: 'English-worse',
+    repo: 'Mineradio',
+    channel: 'beta',
+  });
+
+  assert.deepEqual(stable, {
+    channel: 'latest',
+    manifestName: 'latest.yml',
+    releaseApiUrl: 'https://api.github.com/repos/English-worse/Mineradio/releases/latest',
+    fallbackManifestUrl:
+      'https://github.com/English-worse/Mineradio/releases/latest/download/latest.yml',
+  });
+  assert.deepEqual(beta, {
+    channel: 'beta',
+    manifestName: 'beta.yml',
+    releaseApiUrl: 'https://api.github.com/repos/English-worse/Mineradio/releases?per_page=20',
+    fallbackManifestUrl: '',
+  });
+});
+
 test('stable and beta release commands run complete non-publishing gates', () => {
   const scripts = readJson('package.json').scripts;
 

@@ -67,6 +67,11 @@ const {
   resolveBindHost,
 } = require('./server/security');
 const updateTools = require('./server/update');
+const {
+  createGithubUpdatePlan,
+  normalizeUpdateChannel,
+  selectGithubRelease,
+} = require('./server/update-channel');
 const cookieTools = require('./server/cookies');
 const proxyTools = require('./server/proxy');
 const weatherTools = require('./server/weather');
@@ -290,6 +295,7 @@ function parseGitHubRepository(input) {
 }
 function readUpdateConfig(pkg) {
   const local = (pkg && pkg.mineradio && pkg.mineradio.update) || {};
+  const build = (pkg && pkg.mineradioBuild) || {};
   const repoHint = process.env.MINERADIO_UPDATE_REPOSITORY
     || process.env.GITHUB_REPOSITORY
     || local.repository
@@ -303,6 +309,9 @@ function readUpdateConfig(pkg) {
     provider: local.provider || 'github',
     owner,
     repo,
+    channel: normalizeUpdateChannel(
+      process.env.MINERADIO_UPDATE_CHANNEL || local.channel || build.updateChannel,
+    ),
     configured: !!(owner && repo),
     preview: local.preview !== false,
     preferMirrors: local.preferMirrors !== false,
@@ -719,19 +728,20 @@ function parseLatestYmlUpdateInfo(text, reason) {
 }
 async function fetchLatestYmlUpdateInfo(reason) {
   if (!UPDATE_CONFIG.configured || UPDATE_CONFIG.provider !== 'github') throw updateError('UPDATE_REPOSITORY_NOT_CONFIGURED');
-  const latestYmlUrl = `https://github.com/${encodeURIComponent(UPDATE_CONFIG.owner)}/${encodeURIComponent(UPDATE_CONFIG.repo)}/releases/latest/download/latest.yml`;
-  const candidates = uniqueDownloadCandidates(latestYmlUrl);
+  const updatePlan = createGithubUpdatePlan(UPDATE_CONFIG);
+  if (!updatePlan.fallbackManifestUrl) throw updateError('UPDATE_CHANNEL_MANIFEST_UNAVAILABLE');
+  const candidates = uniqueDownloadCandidates(updatePlan.fallbackManifestUrl);
   const result = await fetchTextFromCandidates(candidates, 6500);
   return parseLatestYmlUpdateInfo(result.text, reason);
 }
 async function fetchLatestUpdateInfo() {
   if (UPDATE_CONFIG.manifest) return fetchManifestUpdateInfo(UPDATE_CONFIG.manifest);
   if (!UPDATE_CONFIG.configured || UPDATE_CONFIG.provider !== 'github') return localUpdateFallback();
-  const apiUrl = `https://api.github.com/repos/${encodeURIComponent(UPDATE_CONFIG.owner)}/${encodeURIComponent(UPDATE_CONFIG.repo)}/releases/latest`;
+  const updatePlan = createGithubUpdatePlan(UPDATE_CONFIG);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8500);
   try {
-    const resp = await fetch(apiUrl, {
+    const resp = await fetch(updatePlan.releaseApiUrl, {
       signal: controller.signal,
       headers: {
         'User-Agent': `Mineradio/${APP_VERSION}`,
@@ -742,7 +752,8 @@ async function fetchLatestUpdateInfo() {
       try { return await fetchLatestYmlUpdateInfo('GitHub Releases ' + resp.status); }
       catch (_) { return localUpdateFallback('GitHub Releases ' + resp.status, { configured: true }); }
     }
-    const data = await resp.json();
+    const data = selectGithubRelease(await resp.json(), updatePlan.channel);
+    if (!data) return localUpdateFallback('UPDATE_CHANNEL_RELEASE_NOT_FOUND', { configured: true });
     const latestVersion = normalizeVersion(data.tag_name || data.name || APP_VERSION) || APP_VERSION;
     const asset = pickReleaseAsset(data.assets);
     const patch = pickPatchAsset(data.assets, APP_VERSION, latestVersion);
@@ -2975,6 +2986,7 @@ function appVersionPayload() {
       configured: UPDATE_CONFIG.configured,
       owner: UPDATE_CONFIG.owner,
       repo: UPDATE_CONFIG.repo,
+      channel: UPDATE_CONFIG.channel,
       preview: UPDATE_CONFIG.preview,
       manifestOverride: !!UPDATE_CONFIG.manifest,
     },
