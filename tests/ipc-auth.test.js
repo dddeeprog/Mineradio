@@ -33,6 +33,25 @@ test('desktop shell ipc channels are main-window only', () => {
   }
 });
 
+test('platform credentials and local library ipc channels are main-window only', () => {
+  for (const channel of [
+    'platform-music-open-login',
+    'platform-music-clear-login',
+    'mineradio-credential-set',
+    'mineradio-credential-clear',
+    'mineradio-credential-status',
+    'mineradio-local-music-choose-folder',
+    'mineradio-local-music-scan-folder',
+    'mineradio-local-music-refresh-entries',
+    'mineradio-local-file-read-range',
+    'mineradio-local-file-read-data-url',
+  ]) {
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/', 34567), true);
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/desktop-lyrics.html', 34567), false);
+    assert.equal(isAllowedIpcSender(channel, 'https://example.com/', 34567), false);
+  }
+});
+
 test('overlay ipc channels reject main and remote senders', () => {
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/desktop-lyrics.html', 34567), true);
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/', 34567), false);
