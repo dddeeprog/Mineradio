@@ -780,6 +780,64 @@ test('does not expose encoded media paths as command cover art', async () => {
   }
 });
 
+test('repeats_the_last_coherent_heartbeat_while_a_track_transition_is_pending', () => {
+  const states = [];
+  const heartbeats = [];
+  let heartbeatTick = null;
+  const audio = {
+    currentTime: 30,
+    duration: 180,
+    ended: false,
+    paused: false,
+    playbackRate: 1,
+  };
+  const player = {
+    audio,
+    bridgeTransitionPending: false,
+    currentIdx: 0,
+    lyricsLines: [{ t: 0, text: '旧曲歌词' }],
+    playQueue: [
+      { artist: 'Old Artist', duration: 180, id: 1, name: 'Old Song', source: 'netease' },
+      { artist: 'New Artist', duration: 200, id: 2, name: 'New Song', source: 'netease' },
+    ],
+    trackSwitchToken: 1,
+  };
+  const runtime = createEislandBridgeRuntime({
+    clearIntervalFn() {},
+    getPlayer: () => player,
+    publishHeartbeat: (snapshot) => heartbeats.push(snapshot),
+    publishState: (snapshot) => states.push(snapshot),
+    setIntervalFn(callback) {
+      heartbeatTick = callback;
+      return {};
+    },
+  });
+
+  assert.equal(runtime.start(), true);
+  assert.equal(states.length, 1);
+
+  player.bridgeTransitionPending = true;
+  player.currentIdx = 1;
+  player.lyricsLines = [];
+  audio.paused = true;
+  heartbeatTick();
+  heartbeatTick();
+
+  assert.equal(heartbeats.length, 2);
+  assert.deepEqual(heartbeats[0], states[0]);
+  assert.deepEqual(heartbeats[1], states[0]);
+
+  player.bridgeTransitionPending = false;
+  player.trackSwitchToken = 2;
+  audio.currentTime = 0;
+  audio.duration = 200;
+  audio.paused = false;
+  heartbeatTick();
+
+  assert.equal(heartbeats.length, 3);
+  assert.equal(heartbeats[2].track.title, 'New Song');
+});
+
 test('runs a real runtime command through PlayerBridge to the public HTTP DTO', async () => {
   const { createEislandBridgeServer } = loadBridgeServer();
   const trace = [];

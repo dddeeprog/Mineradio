@@ -1128,6 +1128,7 @@ var loginStatusChecked = false, loginStatusCheckFailed = false;
 var qrPollTimer = null, qrKey = null;
 var volumeTween = null, trackSwitchToken = 0;
 var eislandBridgeTransitionGate = null;
+var eislandBridgeLyricsLifecycle = null;
 function getEislandBridgeTransitionGate() {
   if (
     !eislandBridgeTransitionGate
@@ -1144,9 +1145,46 @@ function getEislandBridgeTransitionState() {
     ? gate.getState()
     : { failed: false, pending: false, token: null };
 }
+function getEislandBridgeLyricsLifecycle() {
+  if (
+    !eislandBridgeLyricsLifecycle
+    && window.MineradioEislandBridgeRuntime
+    && typeof window.MineradioEislandBridgeRuntime.createEislandBridgeLyricsLifecycle === 'function'
+  ) {
+    eislandBridgeLyricsLifecycle = window.MineradioEislandBridgeRuntime.createEislandBridgeLyricsLifecycle();
+  }
+  return eislandBridgeLyricsLifecycle;
+}
+function getEislandBridgeLyricsLifecycleState() {
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  return lifecycle && typeof lifecycle.getState === 'function'
+    ? lifecycle.getState()
+    : { status: 'unavailable', token: null };
+}
+function beginEislandBridgeLyricsLifecycle(token) {
+  if (Number(token) !== Number(trackSwitchToken)) return false;
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  var began = !!(lifecycle && typeof lifecycle.begin === 'function' && lifecycle.begin(token));
+  if (began) publishEislandBridgePlayerEvent('lyricsloading');
+  return began;
+}
+function completeEislandBridgeLyricsLifecycle(token, hasLyrics) {
+  if (Number(token) !== Number(trackSwitchToken)) return false;
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  var completed = !!(lifecycle && typeof lifecycle.complete === 'function' && lifecycle.complete(token, hasLyrics));
+  if (completed) publishEislandBridgePlayerEvent('lyrics');
+  return completed;
+}
+function hasEislandBridgeRealLyrics(lines) {
+  return Array.isArray(lines) && lines.some(function(line){
+    return line && !line.fallback && String(line.text || '').trim() && !isNoLyricText(line.text);
+  });
+}
 function beginEislandBridgeTrackTransition(token) {
   var gate = getEislandBridgeTransitionGate();
-  return !!(gate && typeof gate.begin === 'function' && gate.begin(token));
+  var began = !!(gate && typeof gate.begin === 'function' && gate.begin(token));
+  if (began) beginEislandBridgeLyricsLifecycle(token);
+  return began;
 }
 function settleEislandBridgeTrackTransition(token, succeeded) {
   var gate = getEislandBridgeTransitionGate();
@@ -18248,7 +18286,9 @@ function applyCustomLyricState(song, silent) {
   refreshNativeLyricDocument('custom-lyrics-state');
   updateCustomLyricControls();
   if (emptyHomeActive) renderHomeWeatherHero(true);
-  publishEislandBridgePlayerEvent('lyrics');
+  if (!completeEislandBridgeLyricsLifecycle(trackSwitchToken, hasEislandBridgeRealLyrics(lyricsLines))) {
+    publishEislandBridgePlayerEvent('lyrics');
+  }
   return true;
 }
 function preferredLyricSourceForSong(song) {
@@ -21366,6 +21406,7 @@ async function playQueueAt(idx, opts) {
         var localLyricSource = localLyricState.lines.length ? localLyricState.timingSource : 'fallback';
         setOriginalLyricsState(localLyricLines, localLyricState.hasNativeKaraoke, localLyricSource);
         applyPreferredLyricsForCurrent(true);
+        completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
       });
       safePlaybackStep('local-cover', function(){
         var localCover = getCustomCoverForSong(song);
@@ -21566,6 +21607,7 @@ async function playQueueAt(idx, opts) {
         var podcastLyricLines = withLyricFallback([]);
         setOriginalLyricsState(podcastLyricLines, false, 'fallback');
         applyPreferredLyricsForCurrent(true);
+        completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
       });
     } else {
       fetchLyric(song, token);
@@ -21998,6 +22040,7 @@ function clearPlayerControlFocusState(reason) {
 //  歌词
 // ============================================================
 async function fetchLyric(songOrId, token) {
+  beginEislandBridgeLyricsLifecycle(token);
   try {
     var song = (songOrId && typeof songOrId === 'object') ? songOrId : null;
     var provider = songProviderKey(song);
@@ -22021,6 +22064,7 @@ async function fetchLyric(songOrId, token) {
     setOriginalLyricsState(lines, hasNativeKaraoke, timingSource);
     resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
+    completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
     if (emptyHomeActive) renderHomeWeatherHero(true);
   } catch (e) {
     if (token !== trackSwitchToken) return;
@@ -22028,6 +22072,7 @@ async function fetchLyric(songOrId, token) {
     setOriginalLyricsState(fallbackLines, false, 'fallback');
     resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
+    completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
     if (emptyHomeActive) renderHomeWeatherHero(true);
   }
 }
@@ -23482,6 +23527,7 @@ async function handleFiles(files) {
     var localLyricSource = localLyricState.lines.length ? localLyricState.timingSource : 'fallback';
     setOriginalLyricsState(localLyricLines, localLyricState.hasNativeKaraoke, localLyricSource);
     applyPreferredLyricsForCurrent(true);
+    completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
     document.getElementById('trial-banner').classList.remove('show');
     audio.load();
     playAudio().then(function(ok){
@@ -30083,6 +30129,7 @@ function getEislandBridgePlayer() {
     bridgeTransitionPending: !!transition.pending,
     currentIdx: currentIdx,
     currentLocalSong: currentLocalSong,
+    lyricsLifecycle: getEislandBridgeLyricsLifecycleState(),
     lyricsLines: lyricsLines,
     playQueue: playQueue,
     trackSwitchToken: trackSwitchToken,

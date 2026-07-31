@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  createEislandBridgeLyricsLifecycle,
   createEislandBridgeTransitionGate,
   createEislandBridgeRuntime,
 } = require('../public/eisland-bridge-runtime');
@@ -393,6 +394,60 @@ test('projects_complete_state_and_full_lyrics_without_fake_track', () => {
   });
 });
 
+test('keeps_lyrics_lifecycle_bound_to_the_current_track_token', () => {
+  const lifecycle = createEislandBridgeLyricsLifecycle();
+
+  assert.equal(lifecycle.begin(7), true);
+  assert.deepEqual(lifecycle.getState(), { status: 'loading', token: 7 });
+  assert.equal(lifecycle.complete(6, true), false);
+  assert.deepEqual(lifecycle.getState(), { status: 'loading', token: 7 });
+  assert.equal(lifecycle.complete(7, true), true);
+  assert.deepEqual(lifecycle.getState(), { status: 'ready', token: 7 });
+
+  assert.equal(lifecycle.begin(8), true);
+  assert.equal(lifecycle.complete(8, false), true);
+  assert.deepEqual(lifecycle.getState(), { status: 'unavailable', token: 8 });
+});
+
+test('projects_loading_until_the_current_track_lyrics_lifecycle_is_resolved', () => {
+  const player = {
+    audio: { currentTime: 0, duration: 180, playbackRate: 1, paused: false, ended: false },
+    currentIdx: 1,
+    lyricsLifecycle: { status: 'ready', token: 10 },
+    lyricsLines: [{ t: 0, text: '上一首的歌词' }],
+    playQueue: [
+      { id: 10, name: '上一首', artist: '歌手', duration: 180_000 },
+      { id: 11, name: '当前曲', artist: '歌手', duration: 180_000 },
+    ],
+    trackSwitchToken: 11,
+  };
+  const runtime = createEislandBridgeRuntime({ getPlayer: () => player });
+
+  assert.deepEqual(runtime.createSnapshot().lyrics, {
+    trackId: 'netease:11',
+    status: 'loading',
+    lines: [],
+  });
+
+  player.lyricsLifecycle = { status: 'loading', token: 11 };
+  assert.equal(runtime.createSnapshot().lyrics.status, 'loading');
+
+  player.lyricsLines = [{ t: 0, text: '当前曲歌词' }];
+  player.lyricsLifecycle = { status: 'ready', token: 11 };
+  assert.deepEqual(runtime.createSnapshot().lyrics, {
+    trackId: 'netease:11',
+    status: 'ready',
+    lines: [{ startMs: 0, text: '当前曲歌词' }],
+  });
+
+  player.lyricsLifecycle = { status: 'unavailable', token: 11 };
+  assert.deepEqual(runtime.createSnapshot().lyrics, {
+    trackId: 'netease:11',
+    status: 'unavailable',
+    lines: [],
+  });
+});
+
 test('exposes only safe HTTPS cover image URLs', () => {
   const coverFor = (cover) => createEislandBridgeRuntime({
     getPlayer: () => ({
@@ -543,7 +598,7 @@ test('uses source-specific seconds and milliseconds for long playback data', asy
   const seekSnapshot = await seekPending;
   assert.equal(seekSnapshot.state.playback.positionMs, 1_799_999);
 });
-test('suppresses transition snapshots through concurrent completion and safe failure', () => {
+test('suppresses transition state snapshots while retaining the last coherent heartbeat', () => {
   const gate = createEislandBridgeTransitionGate();
   const heartbeats = [];
   const intervals = [];
@@ -583,7 +638,8 @@ test('suppresses transition snapshots through concurrent completion and safe fai
   assert.equal(runtime.publishPlayerEvent('pause'), false);
   intervals[0].callback();
   assert.equal(states.length, 1);
-  assert.equal(heartbeats.length, 0);
+  assert.equal(heartbeats.length, 1);
+  assert.deepEqual(heartbeats[0], states[0]);
 
   assert.equal(gate.begin(11), true);
   assert.equal(gate.complete(10), false);
@@ -615,7 +671,8 @@ test('suppresses transition snapshots through concurrent completion and safe fai
   assert.deepEqual(ready.lyrics.lines, [{ startMs: 0, text: '新歌词' }]);
 
   intervals[0].callback();
-  assert.equal(heartbeats.length, 1);
+  assert.equal(heartbeats.length, 2);
+  assert.deepEqual(heartbeats[1], ready);
   assert.equal(runtime.stop(), true);
 });
 
@@ -636,6 +693,7 @@ test('wires_web_player_to_restricted_eisland_runtime', () => {
   assert.match(playerAdapter, /playQueue/);
   assert.match(playerAdapter, /currentIdx/);
   assert.match(playerAdapter, /lyricsLines/);
+  assert.match(playerAdapter, /lyricsLifecycle/);
   assert.match(playerAdapter, /bridgeTransitionFailed/);
   assert.match(playerAdapter, /bridgeTransitionPending/);
   assert.doesNotMatch(playerAdapter, /currentDesktopSongMeta|currentDesktopLyricSnapshot/);
@@ -652,9 +710,16 @@ test('wires_web_player_to_restricted_eisland_runtime', () => {
   const playQueueAt = html.match(/async function playQueueAt\(idx, opts\) \{[\s\S]*?\n\}\nasync function attemptAudioPlay/)?.[0] || '';
   assert.match(playQueueAt, /if \(idx < 0 \|\| idx >= playQueue\.length\) return false;/);
   assert.match(playQueueAt, /beginEislandBridgeTrackTransition\(trackSwitchToken\);/);
+  assert.match(playQueueAt, /fetchLyric\(song, token\);/);
+  assert.doesNotMatch(playQueueAt, /await fetchLyric\(song, token\);/);
   assert.match(playQueueAt, /return finishTrackSwitch\(true\);/);
   assert.match(playQueueAt, /return finishTrackSwitch\(false\);/);
   assert.match(html, /function recoverEislandBridgeTrackTransition\(token\) \{/);
+  assert.match(html, /function beginEislandBridgeLyricsLifecycle\(token\) \{/);
+  assert.match(html, /function completeEislandBridgeLyricsLifecycle\(token, hasLyrics\) \{/);
+  const fetchLyric = html.match(/async function fetchLyric\(songOrId, token\) \{[\s\S]*?\n\}\nfunction currentLyricFallbackText/)?.[0] || '';
+  assert.match(fetchLyric, /beginEislandBridgeLyricsLifecycle\(token\);/);
+  assert.equal((fetchLyric.match(/completeEislandBridgeLyricsLifecycle\(token, hasEislandBridgeRealLyrics\(lyricsLines\)\);/g) || []).length, 2);
   assert.equal((html.match(/audio\._mineradioBridgeTrackToken = token;/g) || []).length, 3);
   const localImport = html.match(/async function handleFiles\(files\) \{[\s\S]*?\n\}\nvar dropOv/)?.[0] || '';
   assert.match(localImport, /beginEislandBridgeTrackTransition\(trackSwitchToken\);/);

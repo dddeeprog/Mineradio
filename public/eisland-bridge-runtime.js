@@ -55,6 +55,35 @@
     };
   }
 
+  function createEislandBridgeLyricsLifecycle() {
+    let activeToken = null;
+    let status = 'unavailable';
+
+    function normalizeToken(value) {
+      const token = Number(value);
+      return Number.isSafeInteger(token) && token >= 0 ? token : null;
+    }
+
+    return {
+      begin(token) {
+        const normalized = normalizeToken(token);
+        if (normalized === null) return false;
+        activeToken = normalized;
+        status = 'loading';
+        return true;
+      },
+      complete(token, hasLyrics) {
+        const normalized = normalizeToken(token);
+        if (normalized === null || normalized !== activeToken) return false;
+        status = hasLyrics ? 'ready' : 'unavailable';
+        return true;
+      },
+      getState() {
+        return { status, token: activeToken };
+      },
+    };
+  }
+
 
   function finiteNumber(value, fallback = 0) {
     const number = Number(value);
@@ -202,6 +231,22 @@
     if (!track) {
       return { trackId: null, status: 'unavailable', lines: [] };
     }
+    const lifecycle = player?.lyricsLifecycle;
+    if (lifecycle && typeof lifecycle === 'object') {
+      const lifecycleToken = Number(lifecycle.token);
+      const trackToken = Number(player?.trackSwitchToken);
+      if (
+        !Number.isSafeInteger(lifecycleToken)
+        || !Number.isSafeInteger(trackToken)
+        || lifecycleToken !== trackToken
+        || lifecycle.status === 'loading'
+      ) {
+        return { trackId: track.id, status: 'loading', lines: [] };
+      }
+      if (lifecycle.status === 'unavailable') {
+        return { trackId: track.id, status: 'unavailable', lines: [] };
+      }
+    }
     const sourceLines = Array.isArray(player?.lyricsLines) ? player.lyricsLines : [];
     const visibleLines = sourceLines.filter((line) => line && !line.fallback && safeText(line.text));
     const lines = visibleLines.map((line, index) => {
@@ -282,6 +327,7 @@
     const timeoutMs = Math.max(1, Math.trunc(finiteNumber(commandTimeoutMs, 1_500)));
     let heartbeatTimer = null;
     let lastTimeUpdateAtMs = Number.NEGATIVE_INFINITY;
+    let lastPublishedSnapshot = null;
 
     function hasMismatchedBridgeAudioToken(player) {
       const audio = player?.audio && typeof player.audio === 'object' ? player.audio : null;
@@ -314,17 +360,27 @@
         || (!player.bridgeTransitionFailed && hasMismatchedBridgeAudioToken(player))
       ) return null;
       const snapshot = createSnapshot(player);
+      lastPublishedSnapshot = snapshot;
       const taggedAttempt = receiptField(commandAttempt);
-      if (taggedAttempt) snapshot.commandAttempt = taggedAttempt;
-      sender(snapshot);
-      return snapshot;
+      const outgoingSnapshot = taggedAttempt
+        ? { ...snapshot, commandAttempt: taggedAttempt }
+        : snapshot;
+      sender(outgoingSnapshot);
+      return outgoingSnapshot;
+    }
+
+    function publishStableHeartbeat() {
+      const snapshot = publishWith(sendHeartbeat);
+      if (snapshot || !lastPublishedSnapshot) return snapshot;
+      sendHeartbeat(lastPublishedSnapshot);
+      return lastPublishedSnapshot;
     }
 
     function start() {
       if (heartbeatTimer !== null) return false;
       publishWith(sendState);
       heartbeatTimer = setIntervalFn(() => {
-        if (heartbeatTimer !== null) publishWith(sendHeartbeat);
+        if (heartbeatTimer !== null) publishStableHeartbeat();
       }, 1_000);
       return true;
     }
@@ -624,6 +680,7 @@
   }
 
   return {
+    createEislandBridgeLyricsLifecycle,
     createEislandBridgeRuntime,
     createEislandBridgeTransitionGate,
   };
