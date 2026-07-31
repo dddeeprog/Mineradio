@@ -78,7 +78,7 @@ const weatherTools = require('./server/weather');
 const neteaseMusic = require('./server/music/netease');
 const qqMusic = require('./server/music/qq');
 const {
-  createAccountFingerprint,
+  createAccountCacheBinding,
   createAccountScopedCache,
 } = require('./server/platform/account-cache');
 const { createAccountContext } = require('./server/platform/account-context');
@@ -247,16 +247,26 @@ function getQQCookie() {
   return typeof value === 'string' ? value : '';
 }
 
-function invalidateNeteaseAccountCache(info) {
-  const accountId = info && (info.userId || info.accountId);
-  const credential = getUserCookie();
-  if (!accountId || !credential) return 0;
-  const scope = createAccountFingerprint({
+function neteaseAccountCache(info, cookieSnapshot) {
+  const accountId = info && (info.userId ?? info.accountId);
+  const credential = typeof cookieSnapshot === 'string'
+    ? cookieSnapshot
+    : getUserCookie();
+  if (!info || info.loggedIn !== true || accountId == null || accountId === '' || !credential) {
+    return null;
+  }
+  return createAccountCacheBinding({
+    cache: accountScopedCache,
     provider: 'netease',
     accountId,
     credential,
   });
-  return accountScopedCache.clearScope(scope);
+}
+
+function invalidateNeteaseAccountCache(info, change) {
+  const cache = neteaseAccountCache(info);
+  if (!cache || !change || typeof change !== 'object') return false;
+  return cache.delete(change.namespace, change.key);
 }
 
 // ---------- 工具 ----------
@@ -2625,9 +2635,22 @@ async function fetchMyPodcastItems(key, info, limit, offset) {
 //   返回 { url, trial, level, br }
 //   trial=true 表示这是试听片段 (freeTrialInfo 非空)
 async function handleSongUrl(id, loginInfo, qualityPreference) {
-  console.log('[SongUrl] id:', id, 'logged-in:', !!getUserCookie());
+  const cookie = getUserCookie();
+  console.log('[SongUrl] id:', id, 'logged-in:', !!cookie);
   const requestedQuality = normalizeQualityPreference(qualityPreference);
   const svipReady = hasNeteaseSvip(loginInfo);
+  const sourceCache = neteaseAccountCache(loginInfo, cookie);
+  const sourceKey = `song:${String(id)}:${requestedQuality}:${svipReady ? 'svip' : 'standard'}`;
+  const cachedSource = sourceCache && sourceCache.get('source', sourceKey);
+  if (cachedSource !== undefined) return cachedSource;
+
+  function rememberSource(result) {
+    if (sourceCache && result && result.url) {
+      sourceCache.set('source', sourceKey, result, 60 * 1000);
+    }
+    return result;
+  }
+
   const qualities = qualityCandidatesFrom(requestedQuality, NETEASE_QUALITY_CANDIDATES)
     .filter(q => !q.svip || svipReady);
 
@@ -2640,9 +2663,9 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       // 优先用 v1 接口 (支持更高音质 level 字段)
       let result;
       try {
-        result = await song_url_v1({ id, level: q.level, cookie: getUserCookie() });
+        result = await song_url_v1({ id, level: q.level, cookie });
       } catch (e) {
-        result = await song_url({ id, br: q.br, cookie: getUserCookie() });
+        result = await song_url({ id, br: q.br, cookie });
       }
       const d = result.body && result.body.data && result.body.data[0];
       if (d) lastData = d;
@@ -2650,7 +2673,7 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       const freeTrial = d && d.freeTrialInfo;
       console.log('[SongUrl]', q.level, '->', url ? 'OK' : 'no url', freeTrial ? '(TRIAL)' : '');
       if (url && !freeTrial) {
-        return { url, trial: false, playable: true, level: q.level, quality: q.label, br: d.br, requestedQuality };
+        return rememberSource({ url, trial: false, playable: true, level: q.level, quality: q.label, br: d.br, requestedQuality });
       }
       if (url && freeTrial && !trialFallback) {
         trialFallback = {
@@ -2670,7 +2693,7 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       console.log('[SongUrl]', q.level, 'failed:', err.message);
     }
   }
-  if (trialFallback) return trialFallback;
+  if (trialFallback) return rememberSource(trialFallback);
   const restriction = classifyNeteasePlaybackRestriction(lastData, loginInfo);
   return {
     url: null,
@@ -2775,6 +2798,25 @@ function normalizeLoginInfo(profile, account, extra) {
     ...vip,
   };
 }
+
+function applyNeteaseMembershipCache(info, cookie) {
+  const membershipCache = neteaseAccountCache(info, cookie);
+  if (!membershipCache) return info;
+  const key = 'profile';
+  const cached = membershipCache.get('membership', key);
+  if (cached && typeof cached === 'object') {
+    return { ...info, ...cached };
+  }
+  membershipCache.set('membership', key, {
+    vipType: info.vipType,
+    vipLevel: info.vipLevel,
+    isVip: info.isVip,
+    isSvip: info.isSvip,
+    vipLabel: info.vipLabel,
+  });
+  return info;
+}
+
 async function getLoginInfo(cookieSnapshot) {
   const cookie = typeof cookieSnapshot === 'string'
     ? cookieSnapshot
@@ -2787,7 +2829,7 @@ async function getLoginInfo(cookieSnapshot) {
     const body = st.body || {};
     const data = body.data || body;
     const info = normalizeLoginInfo(data.profile || body.profile, data.account || body.account, data);
-    if (info.loggedIn) return info;
+    if (info.loggedIn) return applyNeteaseMembershipCache(info, cookie);
   } catch (e) {
     console.warn('[Login] login_status failed:', e.message);
   }
@@ -2796,7 +2838,7 @@ async function getLoginInfo(cookieSnapshot) {
     const acc = await user_account({ cookie, timestamp: Date.now() });
     const body = acc.body || {};
     const info = normalizeLoginInfo(body.profile, body.account, body);
-    if (info.loggedIn) return info;
+    if (info.loggedIn) return applyNeteaseMembershipCache(info, cookie);
     return { loggedIn: false, hasCookie: !!cookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   } catch (e) {
     console.warn('[Login] account check failed:', e.message);
@@ -3030,7 +3072,7 @@ const runPlatformSearch = createSearchAggregator({
   providers: platformSearchAdapters,
   timeoutMs: 8000,
 });
-const neteaseLibrary = createNeteaseLibraryAdapter({
+const neteaseLibraryAdapter = createNeteaseLibraryAdapter({
   album,
   albumDetailDynamic: album_detail_dynamic,
   albumSub: album_sub,
@@ -3039,6 +3081,28 @@ const neteaseLibrary = createNeteaseLibraryAdapter({
   // In NeteaseCloudMusicApi v4 `comment` writes; `comment_new` reads.
   commentCreate: comment,
   mapSongRecord,
+});
+const neteaseLibrary = Object.freeze({
+  ...neteaseLibraryAdapter,
+  async getAlbumDetail(input = {}) {
+    const result = await neteaseLibraryAdapter.getAlbumDetail(input);
+    const info = await getLoginInfo(input.cookie);
+    const collectionCache = neteaseAccountCache(info, input.cookie);
+    if (!collectionCache || !result.album) return result;
+
+    const key = `album:${result.album.id}`;
+    const cached = collectionCache.get('collection', key);
+    if (cached && typeof cached.collected === 'boolean') {
+      return {
+        ...result,
+        album: { ...result.album, collected: cached.collected },
+      };
+    }
+    collectionCache.set('collection', key, {
+      collected: result.album.collected === true,
+    });
+    return result;
+  },
 });
 const platformSearchRoutes = createPlatformSearchRoutes({
   sendJSON,

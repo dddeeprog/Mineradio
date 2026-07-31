@@ -214,8 +214,41 @@ function createAccountScopedCache(options) {
   };
 }
 
+function createAccountCacheBinding(options) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('account cache binding options must be an object');
+  }
+
+  const cache = options.cache;
+  if (!cache || typeof cache !== 'object') {
+    throw new TypeError('cache must be an account-scoped cache');
+  }
+  for (const method of ['get', 'set', 'delete', 'clearScope']) {
+    if (typeof cache[method] !== 'function') {
+      throw new TypeError(`cache.${method} must be a function`);
+    }
+  }
+
+  const scope = createAccountFingerprint(options);
+  return Object.freeze({
+    get(namespace, key) {
+      return cache.get(scope, namespace, key);
+    },
+    set(namespace, key, value, ttlMs) {
+      return cache.set(scope, namespace, key, value, ttlMs);
+    },
+    delete(namespace, key) {
+      return cache.delete(scope, namespace, key);
+    },
+    clear() {
+      return cache.clearScope(scope);
+    },
+  });
+}
+
 module.exports = {
   CACHE_NAMESPACES,
+  createAccountCacheBinding,
   createAccountFingerprint,
   createAccountScopedCache,
 };

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
 const {
+  createAccountCacheBinding,
   createAccountFingerprint,
   createAccountScopedCache,
 } = require('../server/platform/account-cache');
@@ -158,6 +159,56 @@ test('scope clearing and deletion do not affect other accounts', () => {
   assert.equal(cache.get('scope-b', 'collection', 'album:1'), false);
   assert.equal(cache.clear(), 1);
   assert.equal(cache.snapshot().entries, 0);
+});
+
+function bindAccount(cache, accountId, credential) {
+  assert.equal(typeof createAccountCacheBinding, 'function');
+  return createAccountCacheBinding({
+    cache,
+    provider: 'netease',
+    accountId,
+    credential,
+  });
+}
+
+test('production cache bindings isolate collection membership and source across A B A', () => {
+  const cache = createAccountScopedCache();
+  const accountA = bindAccount(cache, 'account-a', 'credential-a');
+  const accountB = bindAccount(cache, 'account-b', 'credential-b');
+  const values = {
+    collection: { collected: true },
+    membership: { vipLevel: 'svip' },
+    source: { url: 'https://audio.test/account-a' },
+  };
+
+  for (const [namespace, value] of Object.entries(values)) {
+    accountA.set(namespace, 'shared-key', value);
+    assert.equal(accountB.get(namespace, 'shared-key'), undefined);
+  }
+
+  const accountARestored = bindAccount(cache, 'account-a', 'credential-a');
+  for (const [namespace, value] of Object.entries(values)) {
+    assert.deepEqual(accountARestored.get(namespace, 'shared-key'), value);
+  }
+});
+
+test('production cache binding delete and clear stay inside the bound account', () => {
+  const cache = createAccountScopedCache();
+  const accountA = bindAccount(cache, 'account-a', 'credential-a');
+  const accountB = bindAccount(cache, 'account-b', 'credential-b');
+  for (const namespace of ['collection', 'membership', 'source']) {
+    accountA.set(namespace, 'shared-key', `a-${namespace}`);
+    accountB.set(namespace, 'shared-key', `b-${namespace}`);
+  }
+
+  assert.equal(accountA.delete('collection', 'shared-key'), true);
+  assert.equal(accountA.get('collection', 'shared-key'), undefined);
+  assert.equal(accountB.get('collection', 'shared-key'), 'b-collection');
+  assert.equal(accountA.clear(), 2);
+  assert.equal(accountA.get('membership', 'shared-key'), undefined);
+  assert.equal(accountA.get('source', 'shared-key'), undefined);
+  assert.equal(accountB.get('membership', 'shared-key'), 'b-membership');
+  assert.equal(accountB.get('source', 'shared-key'), 'b-source');
 });
 
 test('cache snapshots expose counts only', () => {

@@ -178,11 +178,17 @@ test('in-process server uses the credential session and one account-scoped runti
 
   assert.match(serverSource, /processCredentialSessionHost/);
   assert.match(serverSource, /createCredentialSession/);
+  assert.match(serverSource, /createAccountCacheBinding/);
   assert.match(serverSource, /createAccountScopedCache/);
   assert.match(serverSource, /createAccountContext/);
   assert.match(serverSource, /createAccountLifecycle/);
   assert.match(serverSource, /loginCredential/);
   assert.match(serverSource, /logoutCredential/);
+  for (const namespace of ['collection', 'membership', 'source']) {
+    assert.match(serverSource, new RegExp(`\\.get\\(['"]${namespace}['"]`));
+    assert.match(serverSource, new RegExp(`\\.set\\(['"]${namespace}['"]`));
+  }
+  assert.match(serverSource, /\.delete\(change\.namespace,\s*change\.key\)/);
   assert.doesNotMatch(
     serverSource,
     /COOKIE_FILE|QQ_COOKIE_FILE|['"]\.cookie['"]|['"]\.qq-cookie['"]|D:\\\\MineradioCache/,
