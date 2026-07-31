@@ -955,9 +955,20 @@ function verifyReportingBinding(secret, provider, binding) {
   return crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'));
 }
 
-function accountScope(account) {
+function sessionAccountScope(reportingBinding, sessionId) {
+  reportingBinding = cleanString(reportingBinding, 97, REPORTING_BINDING_PATTERN);
+  sessionId = cleanString(sessionId, 128, /^[A-Za-z0-9._:-]+$/);
+  if (!reportingBinding || !sessionId) return 'anonymous';
+  return crypto
+    .createHash('sha256')
+    .update(`listen-scope\u0000${reportingBinding.slice(0, 32)}\u0000${sessionId}`, 'utf8')
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function accountScope(account, sessionId) {
   if (!account.loggedIn || !account.reportingBinding) return 'anonymous';
-  return account.reportingBinding.slice(0, 32);
+  return sessionAccountScope(account.reportingBinding, sessionId);
 }
 
 function reportingCapability(registry, provider) {
@@ -1004,7 +1015,6 @@ function normalizedEventDigest(event) {
     completion: event.completion,
     playedAt: event.playedAt,
     context: event.context,
-    reportingBinding: event.reportingBinding,
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
 }
@@ -1274,6 +1284,8 @@ function createListenReporter(options) {
   function journalEntry(event, scope, status) {
     const now = integer(clock(), 0, Number.MAX_SAFE_INTEGER) || 0;
     const completeness = status === 'unsupported' ? 'unsupported' : 'partial';
+    const storedEvent = { ...event, completeness };
+    delete storedEvent.reportingBinding;
     return {
       key: `${event.playbackProvider}:${scope}:${event.sessionId}`,
       provider: event.playbackProvider,
@@ -1286,7 +1298,7 @@ function createListenReporter(options) {
       createdAt: now,
       updatedAt: now,
       eventDigest: normalizedEventDigest(event),
-      event: { ...event, completeness },
+      event: storedEvent,
     };
   }
 
@@ -1373,8 +1385,7 @@ function createListenReporter(options) {
     const token = claim.token;
     const claimedEntry = claim.entry;
     if (
-      entry.accountScope !== accountScope(account)
-      || entry.event.reportingBinding !== account.reportingBinding
+      entry.accountScope !== accountScope(account, entry.sessionId)
     ) {
       const changed = await journal.releaseClaimFailure(
         entry.key,
@@ -1452,8 +1463,7 @@ function createListenReporter(options) {
     }
     const pending = await journal.put(journalEntry(event, scope, 'pending'));
     if (
-      event.reportingBinding !== account.reportingBinding
-      || scope !== accountScope(account)
+      scope !== accountScope(account, event.sessionId)
     ) {
       const failed = await journal.markFailure(pending.key, 'ACCOUNT_CHANGED');
       schedule();
@@ -1491,9 +1501,7 @@ function createListenReporter(options) {
     ) {
       throw reportError('REPORTING_BINDING_INVALID', 422);
     }
-    const scope = event.reportingBinding
-      ? event.reportingBinding.slice(0, 32)
-      : 'anonymous';
+    const scope = sessionAccountScope(event.reportingBinding, event.sessionId);
     const key = `${event.playbackProvider}:${scope}:${event.sessionId}`;
     const digest = normalizedEventDigest(event);
     const current = inflight.get(key);
@@ -1514,10 +1522,9 @@ function createListenReporter(options) {
 
   async function flushEntry(entry) {
     const account = await accountFor(entry.provider);
-    const currentScope = accountScope(account);
+    const currentScope = accountScope(account, entry.sessionId);
     if (
       currentScope !== entry.accountScope
-      || entry.event.reportingBinding !== account.reportingBinding
     ) {
       await journal.markFailure(entry.key, 'ACCOUNT_CHANGED');
       return;

@@ -75,9 +75,23 @@ function eventDigest(event) {
     completion: event.completion,
     playedAt: event.playedAt,
     context: event.context,
-    reportingBinding: event.reportingBinding,
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+}
+
+function sessionAccountScope(reportingBinding, sessionId) {
+  reportingBinding = boundedString(
+    reportingBinding,
+    97,
+    /^[a-f0-9]{32}\.[a-f0-9]{64}$/,
+  );
+  sessionId = boundedString(sessionId, 128, /^[A-Za-z0-9._:-]+$/);
+  if (!reportingBinding || !sessionId) return '';
+  return crypto
+    .createHash('sha256')
+    .update(`listen-scope\u0000${reportingBinding.slice(0, 32)}\u0000${sessionId}`, 'utf8')
+    .digest('hex')
+    .slice(0, 32);
 }
 
 function normalizeContext(value) {
@@ -188,28 +202,30 @@ function normalizeEvent(value) {
     },
     playedAt,
     context: normalizeContext(value.context),
-    reportingBinding: boundedString(
-      value.reportingBinding,
-      97,
-      /^[a-f0-9]{32}\.[a-f0-9]{64}$/,
-    ),
   };
 }
 
 function normalizeEntry(value, fallbackKey) {
   if (!isRecord(value)) return null;
   const provider = boundedString(value.provider, 16);
-  const accountScope = boundedString(value.accountScope, 64, /^[a-z0-9_-]+$/i);
   const sessionId = boundedString(value.sessionId, 128, /^[A-Za-z0-9._:-]+$/);
-  const key = boundedString(
-    value.key,
-    240,
-    /^[A-Za-z0-9._:-]+$/,
-  ) || (
-    provider && accountScope && sessionId
-      ? `${provider}:${accountScope}:${sessionId}`
-      : boundedString(fallbackKey, 240, /^[A-Za-z0-9._:-]+$/)
+  const migratedScope = sessionAccountScope(
+    value.event && value.event.reportingBinding,
+    sessionId,
   );
+  const accountScope = migratedScope
+    || boundedString(value.accountScope, 64, /^[a-z0-9_-]+$/i);
+  const key = migratedScope
+    ? `${provider}:${accountScope}:${sessionId}`
+    : (boundedString(
+      value.key,
+      240,
+      /^[A-Za-z0-9._:-]+$/,
+    ) || (
+      provider && accountScope && sessionId
+        ? `${provider}:${accountScope}:${sessionId}`
+        : boundedString(fallbackKey, 240, /^[A-Za-z0-9._:-]+$/)
+    ));
   const status = boundedString(value.status, 16);
   const attempts = boundedInteger(value.attempts, 0, 1_000_000);
   const nextAttemptAt = boundedInteger(value.nextAttemptAt, 0, 9_007_199_254_740_991);
@@ -259,8 +275,10 @@ function normalizeEntry(value, fallbackKey) {
     lastErrorCode: ERROR_CODES.has(value.lastErrorCode) ? value.lastErrorCode : '',
     createdAt,
     updatedAt,
-    eventDigest: boundedString(value.eventDigest, 64, /^[a-f0-9]{64}$/)
-      || eventDigest(event),
+    eventDigest: migratedScope
+      ? eventDigest(event)
+      : (boundedString(value.eventDigest, 64, /^[a-f0-9]{64}$/)
+        || eventDigest(event)),
     ...(status === 'claimed' ? {
       claimToken,
       claimOwner,

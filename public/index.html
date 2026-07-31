@@ -1368,7 +1368,12 @@ var listenSessionStateMachine = window.MineradioListenSessionState
   ? window.MineradioListenSessionState.createListenSessionState()
   : null;
 var listenReportTransport = window.MineradioListenSessionState
-  ? window.MineradioListenSessionState.createListenTransport()
+  ? window.MineradioListenSessionState.createListenTransport({
+    getReportingBinding: function(provider) {
+      var binding = listenReportingBinding(provider);
+      return binding ? binding.reportingBinding : '';
+    },
+  })
   : null;
 var listenStatsPlaybackCommitHolds = Object.create(null);
 var listenStatsPlaybackCommitHoldSerial = 0;

@@ -581,13 +581,50 @@ test('transport retries offline and non-2xx delivery without concurrent duplicat
     storage.getItem('mineradio-listen-report-outbox-v1'),
     /SECRET_SENTINEL_OUTBOX/,
   );
+  assert.doesNotMatch(
+    storage.getItem('mineradio-listen-report-outbox-v1'),
+    new RegExp(REPORTING_BINDING),
+  );
 
-  online = true;
-  assertSubmitted(await transport.retry('offline-session'));
-  assert.equal(calls, 2);
-  assertSubmitted(transport.status('offline-session'));
-  assert.equal(storage.getItem('mineradio-listen-report-outbox-v1'), null);
   transport.destroy();
+  online = true;
+  const switchedBinding = `${'c'.repeat(32)}.${'d'.repeat(64)}`;
+  const switched = createListenTransport({
+    autoRetry: false,
+    storage,
+    getReportingBinding: () => switchedBinding,
+    fetch: async () => {
+      calls += 1;
+      throw new Error('account B must not receive account A outbox work');
+    },
+  });
+  assert.equal(switched.status('offline-session'), 'pending');
+  assert.equal(await switched.retry('offline-session'), false);
+  assert.equal(calls, 1);
+  assert.equal(switched.status('offline-session'), 'pending');
+  switched.destroy();
+
+  const restarted = createListenTransport({
+    autoRetry: false,
+    storage,
+    getReportingBinding: () => REPORTING_BINDING,
+    fetch: async (_url, options) => {
+      calls += 1;
+      assert.equal(JSON.parse(options.body).reportingBinding, REPORTING_BINDING);
+      return {
+        ok: true,
+        async json() {
+          return { accepted: true, localRecorded: true, status: 'submitted' };
+        },
+      };
+    },
+  });
+  assert.equal(restarted.status('offline-session'), 'pending');
+  assertSubmitted(await restarted.retry('offline-session'));
+  assert.equal(calls, 2);
+  assertSubmitted(restarted.status('offline-session'));
+  assert.equal(storage.getItem('mineradio-listen-report-outbox-v1'), null);
+  restarted.destroy();
 });
 
 test('transport keeps capacity and server failures pending, then accepts one successful retry', async () => {
@@ -1951,6 +1988,7 @@ test('resolved storage read failures gate delivery until pending is durable', as
         baseRetryMs: 100,
         clock: () => now,
         storage,
+        getReportingBinding: () => REPORTING_BINDING,
         fetch: async () => {
           fetchCalls += 1;
           return {

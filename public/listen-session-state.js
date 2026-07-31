@@ -1487,6 +1487,9 @@
   function createListenTransport(options) {
     options = isRecord(options) ? options : {};
     var fetchImpl = options.fetch || (root && root.fetch);
+    var getReportingBinding = typeof safeValue(options, 'getReportingBinding') === 'function'
+      ? safeValue(options, 'getReportingBinding')
+      : null;
     var navigatorApi = safeValue(root, 'navigator');
     var sendBeacon = safeValue(options, 'sendBeacon') || (
       navigatorApi && safeValue(navigatorApi, 'sendBeacon')
@@ -1617,7 +1620,43 @@
       } catch (_) {}
     }
 
-    function reportPayload(event) {
+    function sessionAccountProof(reportingBinding, sessionId) {
+      reportingBinding = cleanString(
+        reportingBinding,
+        97,
+        /^[a-f0-9]{32}\.[a-f0-9]{64}$/
+      );
+      sessionId = cleanString(sessionId, 128, /^[A-Za-z0-9._:-]+$/);
+      if (!reportingBinding || !sessionId) return '';
+      return sha256Hex(
+        'listen-scope\u0000'
+        + reportingBinding.slice(0, 32)
+        + '\u0000'
+        + sessionId
+      ).slice(0, 32);
+    }
+
+    function persistentEvent(event) {
+      if (!isRecord(event)) return event;
+      var copy = JSON.parse(JSON.stringify(event));
+      delete copy.reportingBinding;
+      return copy;
+    }
+
+    function currentReportingBinding(provider, fallback) {
+      if (getReportingBinding) {
+        try {
+          var current = getReportingBinding(provider);
+          if (isRecord(current)) current = current.reportingBinding;
+          return cleanString(current, 97, /^[a-f0-9]{32}\.[a-f0-9]{64}$/);
+        } catch (_) {
+          return '';
+        }
+      }
+      return cleanString(fallback, 97, /^[a-f0-9]{32}\.[a-f0-9]{64}$/);
+    }
+
+    function reportPayload(event, fallbackBinding, allowMissingBinding) {
       var sessionId = cleanString(
         event && event.sessionId,
         128,
@@ -1635,12 +1674,15 @@
         : cleanSourceIds(event && event.sourceIds);
       var body;
       try {
-        var reportingBinding = cleanString(
-          event.reportingBinding,
-          97,
-          /^[a-f0-9]{32}\.[a-f0-9]{64}$/
+        var reportingBinding = currentReportingBinding(
+          playbackProvider,
+          fallbackBinding || event.reportingBinding
         );
-        if (playbackProvider === 'netease' && !reportingBinding) {
+        if (
+          playbackProvider === 'netease'
+          && !reportingBinding
+          && allowMissingBinding !== true
+        ) {
           return {
             sessionId: sessionId,
             error: 'REPORTING_BINDING_REQUIRED',
@@ -2120,7 +2162,8 @@
 
     function outboxEntry(record) {
       var entry = {
-        event: record.event,
+        event: persistentEvent(record.event),
+        accountProof: cleanString(record.accountProof, 32, /^[a-f0-9]{32}$/),
         attempts: record.attempts,
         nextAttemptAt: record.nextAttemptAt,
         createdAt: record.createdAt,
@@ -2743,13 +2786,23 @@
             .concat(shardState.entries);
           durableEntries.forEach(function(item) {
             if (!isRecord(item)) return;
-            var payload = reportPayload(item.event);
-            if (!payload) return;
+            var legacyBinding = cleanString(
+              item.event && item.event.reportingBinding,
+              97,
+              /^[a-f0-9]{32}\.[a-f0-9]{64}$/
+            );
+            var payload = reportPayload(item.event, legacyBinding, true);
+            if (!payload || payload.error) return;
+            var accountProof = cleanString(
+              item.accountProof,
+              32,
+              /^[a-f0-9]{32}$/
+            ) || sessionAccountProof(legacyBinding, payload.sessionId);
             if (payloadAcknowledged(payload)) return;
             var local = records[payload.sessionId];
             if (local && local.state === 'sent') return;
             merged[payload.sessionId] = {
-              event: payload.event,
+              event: persistentEvent(payload.event),
               attempts: boundedInteger(item.attempts, 0, 1000),
               nextAttemptAt: boundedInteger(item.nextAttemptAt, 0, Number.MAX_SAFE_INTEGER),
               createdAt: boundedInteger(item.createdAt, 0, Number.MAX_SAFE_INTEGER),
@@ -2759,6 +2812,7 @@
                 /^(pending|inflight|queued|ack-pending)$/
               ) || 'pending',
               lastErrorCode: cleanString(item.lastErrorCode, 32, /^[A-Z0-9_]+$/),
+              accountProof: accountProof,
               ackAttempts: boundedInteger(item.ackAttempts, 0, 1000),
               ackDigest: cleanString(item.ackDigest, 64, /^[a-f0-9]{64}$/),
               confirmedAt: boundedInteger(
@@ -2879,19 +2933,32 @@
       var restored = Object.create(null);
       (parsed && parsed.entries || []).concat(readShardEntries()).forEach(function(item) {
         if (!isRecord(item)) return;
-        var payload = reportPayload(item.event);
+        var legacyBinding = cleanString(
+          item.event && item.event.reportingBinding,
+          97,
+          /^[a-f0-9]{32}\.[a-f0-9]{64}$/
+        );
+        var payload = reportPayload(item.event, legacyBinding, true);
         if (
           !payload
+          || payload.error
           || payloadAcknowledged(payload)
           || restored[payload.sessionId]
         ) return;
+        var accountProof = cleanString(
+          item.accountProof,
+          32,
+          /^[a-f0-9]{32}$/
+        ) || sessionAccountProof(legacyBinding, payload.sessionId);
         var ackDigest = cleanString(item.ackDigest, 64, /^[a-f0-9]{64}$/);
         var acknowledgementPending = item.state === 'ack-pending'
           && ackDigest === sha256Hex(payload.body);
         restored[payload.sessionId] = {
           sessionId: payload.sessionId,
-          event: payload.event,
+          event: persistentEvent(payload.event),
           body: payload.body,
+          reportingBinding: legacyBinding,
+          accountProof: accountProof,
           state: acknowledgementPending ? 'ack-pending' : 'pending',
           attempts: boundedInteger(item.attempts, 0, 1000),
           nextAttemptAt: boundedInteger(item.nextAttemptAt, 0, Number.MAX_SAFE_INTEGER),
@@ -3088,6 +3155,21 @@
       if (persistenceBlocksDelivery(deliveryPersistence)) {
         return markPending(record, 'STORAGE_GATE_UNAVAILABLE');
       }
+      var deliveryPayload = reportPayload(record.event, record.reportingBinding);
+      if (!deliveryPayload || deliveryPayload.error) {
+        return markPending(record, 'LOGIN_REQUIRED');
+      }
+      var currentProof = sessionAccountProof(
+        deliveryPayload.event.reportingBinding,
+        deliveryPayload.sessionId
+      );
+      if (
+        deliveryPayload.event.playbackProvider === 'netease'
+        && (!record.accountProof || currentProof !== record.accountProof)
+      ) {
+        return markPending(record, 'ACCOUNT_CHANGED');
+      }
+      record.body = deliveryPayload.body;
       record.promise = (async function() {
         if (submitOptions.unload && typeof sendBeacon === 'function') {
           try {
@@ -3239,7 +3321,11 @@
         capacityDocument = JSON.stringify({
           version: 2,
           entries: pendingBefore.map(outboxEntry).concat([{
-            event: payload.event,
+            event: persistentEvent(payload.event),
+            accountProof: sessionAccountProof(
+              payload.event.reportingBinding,
+              payload.sessionId
+            ),
             attempts: 0,
             nextAttemptAt: boundedInteger(clock(), 0, Number.MAX_SAFE_INTEGER),
             createdAt: boundedInteger(clock(), 0, Number.MAX_SAFE_INTEGER),
@@ -3265,8 +3351,13 @@
       var now = boundedInteger(clock(), 0, Number.MAX_SAFE_INTEGER);
       var record = {
         sessionId: payload.sessionId,
-        event: payload.event,
+        event: persistentEvent(payload.event),
         body: payload.body,
+        reportingBinding: payload.event.reportingBinding || '',
+        accountProof: sessionAccountProof(
+          payload.event.reportingBinding,
+          payload.sessionId
+        ),
         state: 'pending',
         attempts: 0,
         nextAttemptAt: now,

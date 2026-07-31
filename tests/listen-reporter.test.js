@@ -1015,7 +1015,12 @@ test('offline event stays bound to its creation account and never uses a switche
   await reporter.flushDue();
   assert.deepEqual(calls, ['SECRET_SENTINEL_ACCOUNT_A']);
   const stored = Object.values((await journal.snapshot()).entries)[0];
-  assert.equal(stored.accountScope, reportingBinding('netease', 'account-a').slice(0, 32));
+  assert.notEqual(stored.accountScope, reportingBinding('netease', 'account-a').slice(0, 32));
+  assert.equal(Object.hasOwn(stored.event, 'reportingBinding'), false);
+  assert.doesNotMatch(
+    JSON.stringify(stored),
+    new RegExp(reportingBinding('netease', 'account-a')),
+  );
   assert.equal(Object.hasOwn(stored, 'credentialGeneration'), false);
   assert.doesNotMatch(JSON.stringify(stored), /SECRET_SENTINEL/);
 });
