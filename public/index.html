@@ -19,6 +19,7 @@
 <script src="content-shelf-state.js"></script>
 <script src="content-list-controller.js"></script>
 <script src="playback-transaction.js"></script>
+<script src="playback-source-match-state.js"></script>
 <script src="listen-session-state.js"></script>
 <script src="audio-output-state.js"></script>
 <script src="gapless-playback-state.js"></script>
@@ -22598,31 +22599,6 @@ function showSourceFallbackNotice(title, body) {
   if (sourceFallbackNoticeTimer) clearTimeout(sourceFallbackNoticeTimer);
   sourceFallbackNoticeTimer = setTimeout(closeSourceFallbackNotice, 5000);
 }
-function normalizeMatchText(text) {
-  return String(text || '').toLowerCase()
-    .replace(/[（(【\[].*?[）)】\]]/g, '')
-    .replace(/[\s·・\-—_.,，。:：'"“”‘’/\\|]+/g, '');
-}
-function artistNameParts(song) {
-  var parts = [];
-  if (song && Array.isArray(song.artists)) {
-    song.artists.forEach(function(a){ if (a && a.name) parts.push(a.name); });
-  }
-  if (song && song.artist) {
-    String(song.artist).split(/\s*\/\s*|\s*,\s*|、|&| feat\.? | ft\.? /i).forEach(function(name){
-      if (name && name.trim()) parts.push(name.trim());
-    });
-  }
-  return parts.map(normalizeMatchText).filter(Boolean);
-}
-function isSameTitleArtist(source, candidate) {
-  if (!source || !candidate) return false;
-  if (normalizeMatchText(source.name || source.title) !== normalizeMatchText(candidate.name || candidate.title)) return false;
-  var a = artistNameParts(source);
-  var b = artistNameParts(candidate);
-  if (!a.length || !b.length) return false;
-  return a.some(function(name){ return b.indexOf(name) >= 0; });
-}
 function playbackProviderLabelForKey(provider) {
   return {
     netease: '网易云音乐',
@@ -22634,6 +22610,9 @@ function playbackProviderLabelForKey(provider) {
 }
 function playbackTransactionStateApi() {
   return window.MineradioPlaybackTransaction || null;
+}
+function playbackSourceMatchStateApi() {
+  return window.MineradioPlaybackSourceMatch || null;
 }
 function playbackCapabilityCandidates(song) {
   var helper = playbackTransactionStateApi();
@@ -22650,7 +22629,9 @@ function playbackSearchUrl(provider, query) {
   return '';
 }
 async function searchPlaybackProviderSong(song, target) {
-  var artist = artistNameParts(song)[0] || '';
+  var matcher = playbackSourceMatchStateApi();
+  if (!matcher) return null;
+  var artist = matcher.artistNameParts(song)[0] || '';
   var query = [song.name || song.title || '', song.artist || artist].filter(Boolean).join(' ').trim();
   if (!query) return null;
   var url = playbackSearchUrl(target, query);
@@ -22662,7 +22643,7 @@ async function searchPlaybackProviderSong(song, target) {
     || (Array.isArray(data.result) ? data.result : [])
   ) || [];
   for (var i = 0; i < list.length; i++) {
-    if (isSameTitleArtist(song, list[i])) return cloneSong(list[i]);
+    if (matcher.isSameTitleArtist(song, list[i])) return cloneSong(list[i]);
   }
   return null;
 }
