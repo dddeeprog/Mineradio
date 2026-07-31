@@ -2307,3 +2307,511 @@ test('audio output popover stays inside medium viewports with a visible focus ri
     expect(measurement.focusBorderColor).not.toBe('rgba(255, 255, 255, 0.1)');
   }
 });
+
+test('Cuefield adopts the normal standby without creating a second media element', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    typeof window.prepareSharedNextTrackPlayback === 'function'
+    && typeof window.claimSharedNextTrackPlayback === 'function'
+  ));
+
+  const result = await page.evaluate(async () => {
+    const originalAudio = window.audio;
+    const originalQueue = window.playQueue;
+    const originalIndex = window.currentIdx;
+    const originalMode = window.playMode;
+    const originalResolve = window.resolvePlaybackPreparation;
+    const originalCoordinator = window.gaplessPlaybackCoordinator;
+    const current = { id: 'current', paused: false, src: '/current.mp3' };
+    let created = 0;
+    const released = [];
+    window.audio = current;
+    window.playQueue = [
+      { provider: 'netease', id: 'current', name: 'Current' },
+      { provider: 'netease', id: 'next', name: 'Next' },
+    ];
+    window.currentIdx = 0;
+    window.playMode = 'loop';
+    let resolvePreparation;
+    window.resolvePlaybackPreparation = () => new Promise(resolve => {
+      resolvePreparation = resolve;
+    });
+    window.gaplessPlaybackCoordinator = window.MineradioGaplessPlaybackState.createGaplessPlaybackCoordinator({
+      createMedia() {
+        created += 1;
+        return {
+          id: `standby-${created}`,
+          src: '',
+          preload: '',
+          pause() {},
+          removeAttribute(name) { if (name === 'src') this.src = ''; },
+          load() {},
+        };
+      },
+      prepare: async () => true,
+      release(media) { released.push(media.id); },
+    });
+    window.gaplessPlaybackCoordinator.setCurrent(current);
+
+    const normalPending = window.prepareSharedNextTrackPlayback({ owner: 'normal', reason: 'fixture-normal' });
+    const cuefieldPending = window.prepareSharedNextTrackPlayback({
+      owner: 'cuefield',
+      planId: 'fixture-plan',
+      index: 1,
+      reason: 'fixture-cuefield',
+    });
+    resolvePreparation({
+      sourceUrl: 'https://cdn.example/next.mp3',
+      mediaUrl: '/api/audio?url=' + encodeURIComponent('https://cdn.example/next.mp3'),
+      data: { url: 'https://cdn.example/next.mp3', streamSupported: true },
+    });
+    const [normal, cuefield] = await Promise.all([normalPending, cuefieldPending]);
+    const claimed = window.claimSharedNextTrackPlayback('cuefield', 'fixture-plan', window.queueItemKey(window.playQueue[1]));
+    const snapshot = {
+      created,
+      samePreparation: normal === cuefield,
+      claimedId: claimed && claimed.media && claimed.media.id,
+      owner: window.nextTrackPreloadState.owner,
+      planId: window.nextTrackPreloadState.planId,
+      preparedPlanId: claimed && claimed.__cuefieldPlanId,
+      mediaCount: window.gaplessPlaybackCoordinator.snapshot().mediaCount,
+    };
+
+    if (claimed) window.releasePreparedPlayback(claimed);
+    window.cancelNextTrackPreload('fixture-cleanup');
+    window.audio = originalAudio;
+    window.playQueue = originalQueue;
+    window.currentIdx = originalIndex;
+    window.playMode = originalMode;
+    window.resolvePlaybackPreparation = originalResolve;
+    window.gaplessPlaybackCoordinator = originalCoordinator;
+    snapshot.released = released;
+    return snapshot;
+  });
+
+  expect(result).toEqual({
+    created: 1,
+    samePreparation: true,
+    claimedId: 'standby-1',
+    owner: 'cuefield',
+    planId: 'fixture-plan',
+    preparedPlanId: 'fixture-plan',
+    mediaCount: 1,
+    released: [],
+  });
+});
+
+test('Cuefield balanced mode hands one claimed preparation to the playback transaction', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    window.MineradioCuefield
+    && window.cuefieldFeatureEnabled === true
+    && typeof window.ensureCuefieldAutoMixRuntime === 'function'
+    && typeof window.tickCuefieldAutoMix === 'function'
+  ));
+
+  const result = await page.evaluate(async () => {
+    const original = {
+      audio: window.audio,
+      playQueue: window.playQueue,
+      currentIdx: window.currentIdx,
+      playMode: window.playMode,
+      playing: window.playing,
+      trackSwitchToken: window.trackSwitchToken,
+      resolveContext: window.resolveCuefieldAutoMixContext,
+      prepareShared: window.prepareSharedNextTrackPlayback,
+      claimShared: window.claimSharedNextTrackPlayback,
+      playQueueAt: window.playQueueAt,
+      tick: window.tickCuefieldAutoMix,
+      intensity: window.fx.cuefieldAutoMixIntensity,
+    };
+    if (window.cuefieldAutoMixRuntime) window.cuefieldAutoMixRuntime.destroy();
+    window.cuefieldAutoMixRuntime = null;
+    window.tickCuefieldAutoMix = () => {};
+    const currentMedia = { paused: false, currentTime: 190, duration: 200, src: '/current.mp3' };
+    const queue = [
+      { provider: 'netease', id: 'a', name: 'A', duration: 200 },
+      { provider: 'netease', id: 'b', name: 'B', duration: 180 },
+    ];
+    const boundaries = [];
+    for (let time = 0; time <= 200; time += 2) {
+      boundaries.push({ time, confidence: 0.92, energy: 0.62 });
+    }
+    const makeAnalysis = duration => ({
+      duration,
+      bpm: 120,
+      gridStep: 0.5,
+      camelot: '8A',
+      downbeats: boundaries.filter(boundary => boundary.time <= duration),
+      phraseBoundaries: boundaries.filter((boundary, index) => index % 8 === 0 && boundary.time <= duration),
+      energyCurve: boundaries.filter(boundary => boundary.time <= duration).map(boundary => ({ time: boundary.time, value: 0.62 })),
+      tempoStability: 0.92,
+      beatConfidence: 0.92,
+      downbeatStability: 0.9,
+      dataConfidence: 0.9,
+    });
+    const calls = [];
+    let prepared = null;
+    window.audio = currentMedia;
+    window.playQueue = queue;
+    window.currentIdx = 0;
+    window.playMode = 'loop';
+    window.playing = true;
+    window.trackSwitchToken = 44;
+    window.fx.cuefieldAutoMixIntensity = 'balanced';
+    window.resolveCuefieldAutoMixContext = async frame => ({
+      fromAnalysis: makeAnalysis(200),
+      toAnalysis: makeAnalysis(180),
+      context: {
+        token: 44,
+        currentIndex: 0,
+        nextIndex: frame.nextIndex,
+        currentQueueKey: window.queueItemKey(queue[0]),
+        nextQueueKey: window.queueItemKey(queue[1]),
+        currentMedia,
+        queueSnapshot: queue,
+      },
+    });
+    window.prepareSharedNextTrackPlayback = async options => {
+      calls.push(['prepare', options.owner, options.planId]);
+      prepared = {
+        media: { currentTime: 0 },
+        previousAudio: currentMedia,
+        streamSupported: true,
+        __cuefieldPlanId: options.planId,
+      };
+      return prepared;
+    };
+    window.claimSharedNextTrackPlayback = (owner, planId, key) => {
+      calls.push(['claim', owner, planId, key]);
+      return prepared;
+    };
+    window.playQueueAt = async (index, options) => {
+      calls.push(['handoff', index, options.cuefieldAutoMixHandoff, options.gaplessHandoff, options.crossfadeMs]);
+      return { ok: true, state: 'committed' };
+    };
+
+    const runtime = window.ensureCuefieldAutoMixRuntime();
+    original.tick(100);
+    await runtime.settle();
+    const armed = runtime.snapshot();
+    currentMedia.currentTime = armed.plan.triggerAtSec;
+    original.tick(200);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const completed = runtime.snapshot();
+
+    runtime.destroy();
+    window.cuefieldAutoMixRuntime = null;
+    Object.assign(window, {
+      audio: original.audio,
+      playQueue: original.playQueue,
+      currentIdx: original.currentIdx,
+      playMode: original.playMode,
+      playing: original.playing,
+      trackSwitchToken: original.trackSwitchToken,
+      resolveCuefieldAutoMixContext: original.resolveContext,
+      prepareSharedNextTrackPlayback: original.prepareShared,
+      claimSharedNextTrackPlayback: original.claimShared,
+      playQueueAt: original.playQueueAt,
+      tickCuefieldAutoMix: original.tick,
+    });
+    window.fx.cuefieldAutoMixIntensity = original.intensity;
+    return {
+      armedState: armed.executor.state,
+      completedState: completed.executor.state,
+      crossfadeMs: armed.plan.crossfadeMs,
+      calls,
+    };
+  });
+
+  expect(result.armedState).toBe('armed');
+  expect(result.completedState).toBe('idle');
+  expect(result.crossfadeMs).toBeGreaterThan(0);
+  expect(result.crossfadeMs).toBeLessThanOrEqual(1200);
+  expect(result.calls.map(call => call[0])).toEqual(['prepare', 'claim', 'handoff']);
+  expect(result.calls[2].slice(1)).toEqual([1, true, true, result.crossfadeMs]);
+});
+
+test('Cuefield setting migrates old archives to off and persists schema 3 selections', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    typeof window.setCuefieldAutoMixIntensity === 'function'
+    && typeof window.normalizeFxArchiveSnapshot === 'function'
+  ));
+
+  const result = await page.evaluate(() => {
+    const original = window.fx.cuefieldAutoMixIntensity;
+    const migrated = window.normalizeFxArchiveSnapshot({ preset: 0 });
+    window.setCuefieldAutoMixIntensity('balanced', true);
+    const snapshot = window.captureFxArchiveSnapshot();
+    const payload = window.userFxArchiveExportPayload({
+      name: 'Cuefield fixture',
+      savedAt: 1,
+      snapshot,
+    });
+    const active = document.querySelector('#cuefield-intensity-seg [data-cuefield-intensity="balanced"]');
+    const segment = document.getElementById('cuefield-intensity-seg').getBoundingClientRect();
+    const buttons = Array.from(document.querySelectorAll('#cuefield-intensity-seg button')).map(button => button.getBoundingClientRect());
+    const activeSelected = active.classList.contains('active');
+    window.setCuefieldAutoMixIntensity(original, true);
+    return {
+      migrated: migrated.cuefieldAutoMixIntensity,
+      stored: snapshot.cuefieldAutoMixIntensity,
+      schema: payload.schema,
+      active: activeSelected,
+      inside: buttons.every(button => button.left >= segment.left && button.right <= segment.right),
+    };
+  });
+
+  expect(result).toEqual({
+    migrated: 'off',
+    stored: 'balanced',
+    schema: 3,
+    active: true,
+    inside: true,
+  });
+});
+
+test('Cuefield cannot adopt a standby after ordinary playback has claimed it', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    typeof window.prepareSharedNextTrackPlayback === 'function'
+    && typeof window.claimSharedNextTrackPlayback === 'function'
+  ));
+
+  const result = await page.evaluate(async () => {
+    const originalAudio = window.audio;
+    const originalQueue = window.playQueue;
+    const originalIndex = window.currentIdx;
+    const originalMode = window.playMode;
+    const originalResolve = window.resolvePlaybackPreparation;
+    const originalCoordinator = window.gaplessPlaybackCoordinator;
+    const current = { id: 'current', paused: false, src: '/current.mp3' };
+    let created = 0;
+    window.audio = current;
+    window.playQueue = [
+      { provider: 'netease', id: 'current', name: 'Current' },
+      { provider: 'netease', id: 'next', name: 'Next' },
+    ];
+    window.currentIdx = 0;
+    window.playMode = 'loop';
+    window.resolvePlaybackPreparation = async () => ({
+      sourceUrl: 'https://cdn.example/next.mp3',
+      mediaUrl: '/api/audio?url=' + encodeURIComponent('https://cdn.example/next.mp3'),
+      data: { url: 'https://cdn.example/next.mp3', streamSupported: true },
+    });
+    window.gaplessPlaybackCoordinator = window.MineradioGaplessPlaybackState.createGaplessPlaybackCoordinator({
+      createMedia() {
+        created += 1;
+        return {
+          id: `standby-${created}`,
+          src: '',
+          preload: '',
+          pause() {},
+          removeAttribute(name) { if (name === 'src') this.src = ''; },
+          load() {},
+        };
+      },
+      prepare: async () => true,
+      release() {},
+    });
+    window.gaplessPlaybackCoordinator.setCurrent(current);
+
+    await window.prepareSharedNextTrackPlayback({ owner: 'normal', reason: 'fixture-normal' });
+    const claimed = window.claimSharedNextTrackPlayback(
+      'normal',
+      '',
+      window.queueItemKey(window.playQueue[1]),
+    );
+    const adopted = await window.prepareSharedNextTrackPlayback({
+      owner: 'cuefield',
+      planId: 'late-plan',
+      index: 1,
+      reason: 'fixture-late-cuefield',
+    });
+    const snapshot = {
+      adopted: adopted !== null,
+      created,
+      owner: window.nextTrackPreloadState.owner,
+      planId: window.nextTrackPreloadState.planId,
+      switching: window.nextTrackPreloadState.switching,
+      claimedId: claimed && claimed.media && claimed.media.id,
+    };
+
+    if (claimed) window.releasePreparedPlayback(claimed);
+    window.cancelNextTrackPreload('fixture-cleanup');
+    window.audio = originalAudio;
+    window.playQueue = originalQueue;
+    window.currentIdx = originalIndex;
+    window.playMode = originalMode;
+    window.resolvePlaybackPreparation = originalResolve;
+    window.gaplessPlaybackCoordinator = originalCoordinator;
+    return snapshot;
+  });
+
+  expect(result).toEqual({
+    adopted: false,
+    created: 1,
+    owner: 'normal',
+    planId: '',
+    switching: true,
+    claimedId: 'standby-1',
+  });
+});
+
+test('Cuefield releases claimed media when handoff rejects ownership synchronously', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (
+    window.cuefieldFeatureEnabled === true
+    && typeof window.ensureCuefieldAutoMixRuntime === 'function'
+  ));
+
+  const result = await page.evaluate(async () => {
+    const original = {
+      audio: window.audio,
+      playQueue: window.playQueue,
+      currentIdx: window.currentIdx,
+      playMode: window.playMode,
+      playing: window.playing,
+      trackSwitchToken: window.trackSwitchToken,
+      resolveContext: window.resolveCuefieldAutoMixContext,
+      resolvePreparation: window.resolvePlaybackPreparation,
+      coordinator: window.gaplessPlaybackCoordinator,
+      playQueueAt: window.playQueueAt,
+      tick: window.tickCuefieldAutoMix,
+      intensity: window.fx.cuefieldAutoMixIntensity,
+    };
+    if (window.cuefieldAutoMixRuntime) window.cuefieldAutoMixRuntime.destroy();
+    window.cuefieldAutoMixRuntime = null;
+    window.tickCuefieldAutoMix = () => {};
+    const currentMedia = { paused: false, currentTime: 190, duration: 200, src: '/current.mp3' };
+    const queue = [
+      { provider: 'netease', id: 'a', name: 'A', duration: 200 },
+      { provider: 'netease', id: 'b', name: 'B', duration: 180 },
+    ];
+    const boundaries = [];
+    for (let time = 0; time <= 200; time += 2) {
+      boundaries.push({ time, confidence: 0.92, energy: 0.62 });
+    }
+    const makeAnalysis = duration => ({
+      duration,
+      bpm: 120,
+      gridStep: 0.5,
+      camelot: '8A',
+      downbeats: boundaries.filter(boundary => boundary.time <= duration),
+      phraseBoundaries: boundaries.filter((boundary, index) => index % 8 === 0 && boundary.time <= duration),
+      energyCurve: boundaries.filter(boundary => boundary.time <= duration).map(boundary => ({ time: boundary.time, value: 0.62 })),
+      tempoStability: 0.92,
+      beatConfidence: 0.92,
+      downbeatStability: 0.9,
+      dataConfidence: 0.9,
+    });
+    let standby = null;
+    const calls = [];
+    window.audio = currentMedia;
+    window.playQueue = queue;
+    window.currentIdx = 0;
+    window.playMode = 'loop';
+    window.playing = true;
+    window.trackSwitchToken = 91;
+    window.fx.cuefieldAutoMixIntensity = 'balanced';
+    window.resolveCuefieldAutoMixContext = async frame => ({
+      fromAnalysis: makeAnalysis(200),
+      toAnalysis: makeAnalysis(180),
+      context: {
+        token: 91,
+        currentIndex: 0,
+        nextIndex: frame.nextIndex,
+        currentQueueKey: window.queueItemKey(queue[0]),
+        nextQueueKey: window.queueItemKey(queue[1]),
+        currentMedia,
+        queueSnapshot: queue,
+      },
+    });
+    window.resolvePlaybackPreparation = async () => ({
+      sourceUrl: 'https://cdn.example/next.mp3',
+      mediaUrl: '/api/audio?url=' + encodeURIComponent('https://cdn.example/next.mp3'),
+      data: { url: 'https://cdn.example/next.mp3', streamSupported: true },
+    });
+    window.gaplessPlaybackCoordinator = window.MineradioGaplessPlaybackState.createGaplessPlaybackCoordinator({
+      createMedia() {
+        standby = {
+          id: 'standby-1',
+          src: '',
+          preload: '',
+          pauseCalls: 0,
+          removeCalls: 0,
+          loadCalls: 0,
+          pause() { this.pauseCalls += 1; },
+          removeAttribute(name) {
+            if (name === 'src') {
+              this.src = '';
+              this.removeCalls += 1;
+            }
+          },
+          load() { this.loadCalls += 1; },
+        };
+        return standby;
+      },
+      prepare: async () => true,
+      release(media, reason) {
+        calls.push(['coordinator-release', media.id, reason]);
+      },
+    });
+    window.gaplessPlaybackCoordinator.setCurrent(currentMedia);
+    window.playQueueAt = (index, options) => {
+      if (options.cuefieldAutoMixHandoff) {
+        calls.push(['handoff', index]);
+        throw new Error('handoff rejected ownership');
+      }
+      calls.push(['fallback', index]);
+      return Promise.resolve({ ok: true });
+    };
+
+    const runtime = window.ensureCuefieldAutoMixRuntime();
+    const identity = window.cuefieldPlaybackIdentity(1);
+    runtime.tick({ nowMs: 100, identity, playing: true, currentTimeSec: 190, nextIndex: 1 });
+    await runtime.settle();
+    const trigger = runtime.snapshot().plan.triggerAtSec;
+    runtime.tick({ nowMs: 200, identity, playing: true, currentTimeSec: trigger, nextIndex: 1 });
+    for (let attempt = 0; attempt < 20 && runtime.snapshot().executor.state !== 'idle'; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const snapshot = {
+      status: runtime.snapshot().status,
+      state: runtime.snapshot().executor.state,
+      pauseCalls: standby.pauseCalls,
+      removeCalls: standby.removeCalls,
+      loadCalls: standby.loadCalls,
+      calls,
+    };
+
+    runtime.destroy();
+    window.cuefieldAutoMixRuntime = null;
+    window.cancelNextTrackPreload('fixture-cleanup');
+    Object.assign(window, {
+      audio: original.audio,
+      playQueue: original.playQueue,
+      currentIdx: original.currentIdx,
+      playMode: original.playMode,
+      playing: original.playing,
+      trackSwitchToken: original.trackSwitchToken,
+      resolveCuefieldAutoMixContext: original.resolveContext,
+      resolvePlaybackPreparation: original.resolvePreparation,
+      gaplessPlaybackCoordinator: original.coordinator,
+      playQueueAt: original.playQueueAt,
+      tickCuefieldAutoMix: original.tick,
+    });
+    window.fx.cuefieldAutoMixIntensity = original.intensity;
+    return snapshot;
+  });
+
+  expect(result.status, JSON.stringify(result)).toBe('fallback-complete');
+  expect(result.state).toBe('idle');
+  expect(result.pauseCalls).toBe(1);
+  expect(result.removeCalls).toBe(1);
+  expect(result.loadCalls).toBe(1);
+  expect(result.calls.filter(call => call[0] === 'handoff')).toHaveLength(1);
+  expect(result.calls.filter(call => call[0] === 'fallback')).toHaveLength(1);
+});

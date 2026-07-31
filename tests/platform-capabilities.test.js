@@ -365,6 +365,23 @@ test('feature flags disable registered operations but never invent platform supp
   );
 });
 
+test('capability snapshot publishes read-only runtime feature availability', () => {
+  const snapshot = createCapabilitySnapshot({}, {
+    featureFlags: createFeatureFlags({
+      cuefield: true,
+      sonicTopography: false,
+    }),
+  });
+
+  assert.equal(snapshot.features.cuefield, true);
+  assert.equal(snapshot.features.sonicTopography, false);
+  assert.equal(snapshot.features.platformWrites, true);
+  assert.throws(() => {
+    snapshot.features.cuefield = false;
+  }, TypeError);
+  assert.equal(snapshot.features.cuefield, true);
+});
+
 test('capability accounts expose only validated opaque listen reporting bindings', () => {
   const reportingBinding = `${'a'.repeat(32)}.${'b'.repeat(64)}`;
   const snapshot = createCapabilitySnapshot({

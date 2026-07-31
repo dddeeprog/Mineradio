@@ -1475,6 +1475,9 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .fx-seg button:last-child{border-right:none}
 .fx-seg button:hover{background:rgba(255,255,255,.05);color:#fff}
 .fx-seg button.active{background:rgba(0,245,212,.10);color:var(--fc-accent)}
+.cuefield-intensity-seg{position:relative}
+.cuefield-intensity-seg button{min-width:0;font-size:10.5px;padding-inline:2px}
+.cuefield-intensity-seg[data-state="armed"]{box-shadow:inset 0 0 0 1px rgba(var(--fc-accent-rgb),.20)}
 
 /* --- 高级折叠 --- */
 .fx-advanced{margin-top:16px;border:1px solid rgba(255,255,255,.055);border-radius:13px;padding:10px 12px;background:rgba(255,255,255,.022)}

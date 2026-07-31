@@ -21,6 +21,7 @@
 <script src="listen-session-state.js"></script>
 <script src="audio-output-state.js"></script>
 <script src="gapless-playback-state.js"></script>
+<script src="cuefield-runtime.js"></script>
 <script src="playback-session-state.js"></script>
 <script src="platform-search-state.js"></script>
 <script src="platform-search-ui.js"></script>
@@ -627,6 +628,13 @@ try {
         <button data-performance-quality="high">高</button>
         <button data-performance-quality="ultra">超高</button>
       </div>
+      <div class="fx-section-label">自动混音</div>
+      <div class="fx-seg cuefield-intensity-seg" id="cuefield-intensity-seg" data-state="disabled">
+        <button data-cuefield-intensity="off">关闭</button>
+        <button data-cuefield-intensity="subtle">轻柔</button>
+        <button data-cuefield-intensity="balanced">平衡</button>
+        <button data-cuefield-intensity="club">俱乐部</button>
+      </div>
       <div class="fx-toggle-grid">
         <div class="fx-toggle" id="t-liveBackgroundKeep" onclick="toggleFx('liveBackgroundKeep')" title="开启后后台或最小化时保持视觉渲染，不进入低占用暂停"><span>直播后台保持</span><span class="dot"></span></div>
       </div>
@@ -1121,7 +1129,10 @@ var paletteHelpers = window.MineradioPaletteHelpers || {};
 // ============================================================
 var audio = null, audioCtx = null, source = null, analyser = null, beatAnalyser = null, gainNode = null, audioReady = false;
 var audioGraphRuntime = null, playbackTransactionManager = null, gaplessPlaybackCoordinator = null;
-var nextTrackPreloadState = { token: 0, index: -1, key: '', prepared: null, pending: false, switching: false };
+var nextTrackPreloadState = { token: 0, index: -1, key: '', prepared: null, pending: false, switching: false, owner: '', planId: '', promise: null };
+var cuefieldAutoMixRuntime = null;
+var cuefieldAutoMixFallbackUsed = false;
+var cuefieldFeatureEnabled = false;
 var uiSfxCtx = null, lastShelfSelectSfxAt = 0;
 var FFT_SIZE = 2048;
 var frequencyData = new Uint8Array(FFT_SIZE / 2);
@@ -2011,6 +2022,7 @@ var fxDefaults = {
   shelfAccentColor: '#ffffff',
   performanceBackground: 'auto',
   performanceQuality: 'high',
+  cuefieldAutoMixIntensity: 'off',
   liveBackgroundKeep: false,
   cam: 'off',
 };
@@ -2086,6 +2098,7 @@ var PACKAGED_DEFAULT_FX_SNAPSHOT = Object.freeze({
   desktopLyricsAlign: 'center',
   performanceBackground: 'auto',
   performanceQuality: 'high',
+  cuefieldAutoMixIntensity: 'off',
   liveBackgroundKeep: false,
   particleLyrics: true,
   backCover: false,
@@ -2666,6 +2679,7 @@ function updateDesktopRuntimeState(state) {
   desktopRuntimeState.fullscreen = !!(state.isFullScreen || state.isNativeFullScreen || state.isHtmlFullScreen || state.isWindowFullScreen);
   updateRenderPowerClasses();
   applyRendererPowerMode();
+  if (isDeepBackgroundMode() && isBackgroundReleaseMode()) cancelCuefieldAutoMix('background-release');
   if (fx && (fx.desktopLyrics || fx.wallpaperMode)) scheduleDesktopOverlaySync(0);
   if (typeof updateLocalLibraryImportEntry === 'function') setTimeout(updateLocalLibraryImportEntry, 0);
   if (wasDeep && !isDeepBackgroundMode()) recoverVisualsAfterBackground('desktop-runtime-state');
@@ -2676,6 +2690,7 @@ function installRenderPowerHooks() {
   document.addEventListener('visibilitychange', function(){
     updateRenderPowerClasses();
     applyRendererPowerMode();
+    if (isDeepBackgroundMode() && isBackgroundReleaseMode()) cancelCuefieldAutoMix('background-release');
     if (!isDeepBackgroundMode()) recoverVisualsAfterBackground('visibilitychange');
   });
   window.addEventListener('focus', function(){
@@ -6570,6 +6585,12 @@ function normalizePerformanceQuality(v) {
   var value = String(v || '');
   return /^(eco|balanced|high|ultra)$/.test(value) ? value : fxDefaults.performanceQuality;
 }
+function normalizeCuefieldAutoMixIntensity(v) {
+  var api = window.MineradioCuefield && window.MineradioCuefield.core;
+  if (api && typeof api.normalizeIntensity === 'function') return api.normalizeIntensity(v);
+  var value = String(v || '').trim().toLowerCase();
+  return /^(off|subtle|balanced|club)$/.test(value) ? value : 'off';
+}
 function coverParticleGridForResolution(v) {
   var grid = Math.round(118 * normalizeCoverResolution(v));
   grid = Math.max(88, Math.min(183, grid));
@@ -6673,6 +6694,7 @@ function readSavedLyricLayout() {
       desktopLyricsAlign: desktopLyricsSchemaReady ? normalizeDesktopLyricsAlign(raw.desktopLyricsAlign) : fxDefaults.desktopLyricsAlign,
       performanceBackground: normalizePerformanceBackgroundMode(raw.performanceBackground, raw.liveBackgroundKeep === true),
       performanceQuality: normalizePerformanceQuality(raw.performanceQuality),
+      cuefieldAutoMixIntensity: normalizeCuefieldAutoMixIntensity(raw.cuefieldAutoMixIntensity),
       liveBackgroundKeep: normalizePerformanceBackgroundMode(raw.performanceBackground, raw.liveBackgroundKeep === true) === 'keep',
       wallpaperMode: raw.wallpaperMode === true,
       wallpaperOpacity: clampRange(raw.wallpaperOpacity == null ? fxDefaults.wallpaperOpacity : Number(raw.wallpaperOpacity), 0.35, 1),
@@ -6774,6 +6796,7 @@ function saveLyricLayout() {
       desktopLyricsAlign: normalizeDesktopLyricsAlign(fx.desktopLyricsAlign),
       performanceBackground: normalizePerformanceBackgroundMode(fx.performanceBackground, fx.liveBackgroundKeep === true),
       performanceQuality: normalizePerformanceQuality(fx.performanceQuality),
+      cuefieldAutoMixIntensity: normalizeCuefieldAutoMixIntensity(fx.cuefieldAutoMixIntensity),
       liveBackgroundKeep: normalizePerformanceBackgroundMode(fx.performanceBackground, fx.liveBackgroundKeep === true) === 'keep',
       wallpaperMode: !!fx.wallpaperMode,
       wallpaperOpacity: clampRange(fx.wallpaperOpacity == null ? fxDefaults.wallpaperOpacity : Number(fx.wallpaperOpacity), 0.35, 1),
@@ -22938,14 +22961,24 @@ function ensureGaplessPlaybackCoordinator() {
   if (audio) gaplessPlaybackCoordinator.setCurrent(audio);
   return gaplessPlaybackCoordinator;
 }
-function cancelNextTrackPreload(reason) {
-  nextTrackPreloadState.token += 1;
-  if (gaplessPlaybackCoordinator) gaplessPlaybackCoordinator.cancel(reason || 'cancelled');
+function resetNextTrackPreloadState() {
   nextTrackPreloadState.index = -1;
   nextTrackPreloadState.key = '';
   nextTrackPreloadState.prepared = null;
   nextTrackPreloadState.pending = false;
   nextTrackPreloadState.switching = false;
+  nextTrackPreloadState.owner = '';
+  nextTrackPreloadState.planId = '';
+  nextTrackPreloadState.promise = null;
+}
+function cancelNextTrackPreload(reason, expected) {
+  expected = expected || {};
+  if (expected.owner && nextTrackPreloadState.owner !== expected.owner) return false;
+  if (expected.planId && nextTrackPreloadState.planId !== expected.planId) return false;
+  nextTrackPreloadState.token += 1;
+  if (gaplessPlaybackCoordinator) gaplessPlaybackCoordinator.cancel(reason || 'cancelled');
+  resetNextTrackPreloadState();
+  return true;
 }
 function gaplessNextQueueIndex() {
   if (playMode !== 'loop' || playQueue.length < 2 || currentIdx < 0) return -1;
@@ -22958,17 +22991,27 @@ function inferPreparedStreamSupport(prepared, media) {
   }
   return !!(prepared && prepared.streamSupported === true);
 }
-function scheduleNextTrackPreload(reason) {
-  var nextIdx = gaplessNextQueueIndex();
-  if (nextIdx < 0 || nextIdx === currentIdx || !audio) return;
+function prepareSharedNextTrackPlayback(options) {
+  options = options || {};
+  var owner = options.owner === 'cuefield' ? 'cuefield' : 'normal';
+  var planId = owner === 'cuefield' ? String(options.planId || '') : '';
+  var nextIdx = isFinite(options.index) ? Number(options.index) : gaplessNextQueueIndex();
+  if (nextIdx < 0 || nextIdx === currentIdx || !audio) return Promise.resolve(null);
   var song = playQueue[nextIdx];
   var key = queueItemKey(song);
-  if (!key) return;
-  if (
-    nextTrackPreloadState.pending
-    || nextTrackPreloadState.switching
-    || (nextTrackPreloadState.index === nextIdx && nextTrackPreloadState.key === key)
-  ) return;
+  if (!key) return Promise.resolve(null);
+  if (nextTrackPreloadState.switching) return Promise.resolve(null);
+  var sameCandidate = nextTrackPreloadState.index === nextIdx && nextTrackPreloadState.key === key;
+  if (sameCandidate && (nextTrackPreloadState.pending || nextTrackPreloadState.prepared)) {
+    if (owner === 'cuefield' && nextTrackPreloadState.owner === 'normal') {
+      nextTrackPreloadState.owner = owner;
+      nextTrackPreloadState.planId = planId;
+      if (nextTrackPreloadState.prepared) nextTrackPreloadState.prepared.__cuefieldPlanId = planId;
+    }
+    if (nextTrackPreloadState.prepared) return Promise.resolve(nextTrackPreloadState.prepared);
+    return nextTrackPreloadState.promise || Promise.resolve(null);
+  }
+  if (owner === 'normal' && nextTrackPreloadState.owner === 'cuefield') return Promise.resolve(null);
   var currentSong = playQueue[currentIdx] || null;
   var localTransition = !!(
     currentSong && (currentSong.type === 'local' || currentSong.localUrl)
@@ -22979,56 +23022,94 @@ function scheduleNextTrackPreload(reason) {
     && nativeLyricConfig.common
     && nativeLyricConfig.common.performanceMode === 'battery'
   );
-  if (localTransition || localBeatAnalysis.active || reducedResource) return;
+  if (localTransition || localBeatAnalysis.active || reducedResource) return Promise.resolve(null);
   var coordinator = ensureGaplessPlaybackCoordinator();
-  if (!coordinator) return;
-  cancelNextTrackPreload('preload-replaced');
+  if (!coordinator) return Promise.resolve(null);
+  cancelNextTrackPreload(options.reason || 'preload-replaced');
   var preloadToken = nextTrackPreloadState.token;
   var currentMedia = audio;
   nextTrackPreloadState.index = nextIdx;
   nextTrackPreloadState.key = key;
   nextTrackPreloadState.pending = true;
-  resolvePlaybackPreparation(nextIdx, { preloadOnly: true }, {
-    isCurrent: function() {
-      return (
-        preloadToken === nextTrackPreloadState.token
-        && currentMedia === audio
-        && currentIdx >= 0
-      );
-    },
-  }).then(function(prepared) {
-    if (
-      preloadToken !== nextTrackPreloadState.token
-      || currentMedia !== audio
-      || nextTrackPreloadState.key !== key
-    ) return null;
-    prepared.previousAudio = currentMedia;
-    prepared.streamSupported = inferPreparedStreamSupport(prepared, null);
-    return coordinator.preload({
-      key: key,
-      src: prepared.mediaUrl,
-    }, {
-      unsupportedStream: prepared.streamSupported !== true,
-      reason: reason || 'tail-preload',
-    }).then(function(result) {
+  nextTrackPreloadState.owner = owner;
+  nextTrackPreloadState.planId = planId;
+  var task = resolvePlaybackPreparation(nextIdx, { preloadOnly: true }, {
+      isCurrent: function() {
+        return (
+          preloadToken === nextTrackPreloadState.token
+          && currentMedia === audio
+          && currentIdx >= 0
+        );
+      },
+    }).then(function(prepared) {
       if (
-        !result.ok
-        || preloadToken !== nextTrackPreloadState.token
+        preloadToken !== nextTrackPreloadState.token
         || currentMedia !== audio
-      ) return null;
-      prepared.media = result.media;
-      nextTrackPreloadState.prepared = prepared;
-      return prepared;
+        || nextTrackPreloadState.key !== key
+      ) {
+        releasePreparedPlayback(prepared);
+        return null;
+      }
+      prepared.previousAudio = currentMedia;
+      prepared.streamSupported = inferPreparedStreamSupport(prepared, null);
+      prepared.__cuefieldPlanId = nextTrackPreloadState.owner === 'cuefield'
+        ? nextTrackPreloadState.planId
+        : '';
+      return coordinator.preload({
+        key: key,
+        src: prepared.mediaUrl,
+      }, {
+        unsupportedStream: prepared.streamSupported !== true,
+        reason: options.reason || 'tail-preload',
+      }).then(function(result) {
+        if (
+          !result.ok
+          || preloadToken !== nextTrackPreloadState.token
+          || currentMedia !== audio
+          || nextTrackPreloadState.key !== key
+        ) return null;
+        prepared.media = result.media;
+        nextTrackPreloadState.prepared = prepared;
+        return prepared;
+      });
     });
-  }).catch(function(error) {
+  task = task.catch(function(error) {
     if (error && error.code !== 'PLAYBACK_ATTEMPT_STALE') {
       console.warn('[GaplessPreload]', error);
     }
+    return null;
   }).finally(function() {
     if (preloadToken === nextTrackPreloadState.token) {
       nextTrackPreloadState.pending = false;
+      nextTrackPreloadState.promise = null;
     }
   });
+  nextTrackPreloadState.promise = task;
+  return task;
+}
+function scheduleNextTrackPreload(reason) {
+  prepareSharedNextTrackPlayback({ owner:'normal', reason:reason || 'tail-window' });
+}
+function claimSharedNextTrackPlayback(owner, planId, key) {
+  owner = owner === 'cuefield' ? 'cuefield' : 'normal';
+  planId = String(planId || '');
+  key = String(key || '');
+  if (
+    nextTrackPreloadState.owner !== owner
+    || (owner === 'cuefield' && nextTrackPreloadState.planId !== planId)
+    || (key && nextTrackPreloadState.key !== key)
+    || !nextTrackPreloadState.prepared
+  ) return null;
+  var coordinator = ensureGaplessPlaybackCoordinator();
+  var media = coordinator && coordinator.claim(nextTrackPreloadState.key);
+  if (!media) return null;
+  var prepared = nextTrackPreloadState.prepared;
+  prepared.media = media;
+  prepared.previousAudio = audio;
+  nextTrackPreloadState.switching = true;
+  nextTrackPreloadState.pending = false;
+  nextTrackPreloadState.promise = null;
+  return prepared;
 }
 function maybeAdvanceGaplessPlayback(audioEl) {
   if (!audioEl || audioEl !== audio || audioEl.paused || !isFinite(audioEl.duration)) return;
@@ -23039,16 +23120,13 @@ function maybeAdvanceGaplessPlayback(audioEl) {
     remaining > 0.62
     || !nextTrackPreloadState.prepared
     || nextTrackPreloadState.switching
+    || nextTrackPreloadState.owner === 'cuefield'
   ) return;
-  var coordinator = ensureGaplessPlaybackCoordinator();
-  var prepared = nextTrackPreloadState.prepared;
   var nextIdx = nextTrackPreloadState.index;
   var key = nextTrackPreloadState.key;
-  var claimed = coordinator && coordinator.claim(key);
-  if (!claimed || nextIdx < 0) return;
-  prepared.media = claimed;
+  var prepared = claimSharedNextTrackPlayback('normal', '', key);
+  if (!prepared || nextIdx < 0) return;
   prepared.previousAudio = audioEl;
-  nextTrackPreloadState.switching = true;
   playQueueAt(nextIdx, {
     preparedPlayback: prepared,
     gaplessHandoff: true,
@@ -23057,6 +23135,171 @@ function maybeAdvanceGaplessPlayback(audioEl) {
     if (!result || !result.ok) cancelNextTrackPreload('gapless-transaction-failed');
   }).finally(function() {
     nextTrackPreloadState.switching = false;
+  });
+}
+function cuefieldPlaybackIdentity(nextIdx) {
+  if (currentIdx < 0 || nextIdx < 0 || !audio) return '';
+  return [
+    trackSwitchToken,
+    currentIdx,
+    queueItemKey(playQueue[currentIdx]),
+    nextIdx,
+    queueItemKey(playQueue[nextIdx])
+  ].join(':');
+}
+async function cuefieldBeatMapForSong(song, key) {
+  if (!song || !key) return null;
+  if (beatMapCache[key]) return beatMapCache[key];
+  if (song.type === 'local' || song.localUrl || song.localKey) {
+    var localKey = getSongLocalBeatKey(song);
+    var preferred = localBeatMapPrefs[localKey] === 'dj' ? 'dj' : 'mr';
+    return getLocalBeatEntry(localKey, preferred) || getLocalBeatEntry(localKey, preferred === 'dj' ? 'mr' : 'dj');
+  }
+  return readBeatDiskCache(key);
+}
+async function resolveCuefieldAutoMixContext(frame, control) {
+  var nextIdx = Number(frame.nextIndex);
+  var currentSong = playQueue[currentIdx] || null;
+  var nextSong = playQueue[nextIdx] || null;
+  if (!currentSong || !nextSong || !control.isCurrent()) return null;
+  var fromKey = beatMapSongKey(currentSong);
+  var toKey = beatMapSongKey(nextSong);
+  var fromMap = await cuefieldBeatMapForSong(currentSong, fromKey);
+  if (!control.isCurrent()) return null;
+  var toMap = await cuefieldBeatMapForSong(nextSong, toKey);
+  if (!control.isCurrent()) return null;
+  if (!fromMap || !toMap) scheduleQueueBeatPrefetch(currentIdx, 0);
+  return {
+    fromTrack: currentSong,
+    fromMap: fromMap || { duration:currentSong.duration || (audio && audio.duration) || 0 },
+    fromCamelot: currentSong.camelot || '',
+    fromMusicalKey: currentSong.musicalKey || '',
+    toTrack: nextSong,
+    toMap: toMap || { duration:nextSong.duration || 0 },
+    toCamelot: nextSong.camelot || '',
+    toMusicalKey: nextSong.musicalKey || '',
+    context: {
+      token: trackSwitchToken,
+      currentIndex: currentIdx,
+      nextIndex: nextIdx,
+      currentQueueKey: queueItemKey(currentSong),
+      nextQueueKey: queueItemKey(nextSong),
+      currentMedia: audio,
+      queueSnapshot: playQueue.map(cloneSong),
+    }
+  };
+}
+function cuefieldContextMatchesPlayback(context, allowTokenChange) {
+  return !!(
+    context
+    && (allowTokenChange === true || context.token === trackSwitchToken)
+    && context.currentIndex === currentIdx
+    && context.currentMedia === audio
+    && playQueue[context.currentIndex]
+    && playQueue[context.nextIndex]
+    && queueItemKey(playQueue[context.currentIndex]) === context.currentQueueKey
+    && queueItemKey(playQueue[context.nextIndex]) === context.nextQueueKey
+  );
+}
+function cuefieldContextIsCurrent(context) {
+  return cuefieldContextMatchesPlayback(context, false);
+}
+function ensureCuefieldAutoMixRuntime() {
+  if (!cuefieldFeatureEnabled) return null;
+  var api = window.MineradioCuefield || null;
+  if (cuefieldAutoMixRuntime || !api || typeof api.createBrowserRuntime !== 'function') return cuefieldAutoMixRuntime;
+  cuefieldAutoMixRuntime = api.createBrowserRuntime({
+    retryDelayMs: 1200,
+    resolveContext: resolveCuefieldAutoMixContext,
+    prepare: function(payload) {
+      cuefieldAutoMixFallbackUsed = false;
+      return prepareSharedNextTrackPlayback({
+        owner: 'cuefield',
+        planId: payload.plan.id,
+        index: payload.context.nextIndex,
+        reason: 'cuefield-plan'
+      });
+    },
+    claim: function(payload) {
+      var prepared = claimSharedNextTrackPlayback(
+        'cuefield',
+        payload.plan.id,
+        payload.context.nextQueueKey
+      );
+      if (!prepared || !prepared.media) return null;
+      prepared.previousAudio = payload.context.currentMedia;
+      try { prepared.media.currentTime = Math.max(0, Number(payload.plan.entryAtSec) || 0); } catch (_) {}
+      return prepared;
+    },
+    handoff: function(payload) {
+      var plan = payload.plan;
+      return playQueueAt(payload.context.nextIndex, {
+        preparedPlayback: payload.claimed,
+        gaplessHandoff: true,
+        cuefieldAutoMixHandoff: true,
+        crossfadeMs: plan.crossfadeMs,
+        queue: payload.context.queueSnapshot,
+        preserveHomeState: true
+      });
+    },
+    fallback: function(payload) {
+      var contextMatches = payload.allowContextChange === true
+        ? cuefieldContextMatchesPlayback(payload.context, true)
+        : cuefieldContextIsCurrent(payload.context);
+      if (cuefieldAutoMixFallbackUsed || !contextMatches) {
+        return Promise.resolve({ ok:false, stale:true });
+      }
+      cuefieldAutoMixFallbackUsed = true;
+      cancelNextTrackPreload('cuefield-fallback');
+      return playQueueAt(payload.context.nextIndex, {
+        cuefieldAutoMixFallback: true,
+        queue: payload.context.queueSnapshot,
+        preserveHomeState: true
+      });
+    },
+    release: function(prepared, reason) {
+      var claimedByCuefield = !!(
+        prepared
+        && nextTrackPreloadState.switching
+        && nextTrackPreloadState.owner === 'cuefield'
+        && nextTrackPreloadState.prepared === prepared
+        && nextTrackPreloadState.planId === (prepared.__cuefieldPlanId || '')
+      );
+      cancelNextTrackPreload(reason || 'cuefield-release', {
+        owner: 'cuefield',
+        planId: prepared && prepared.__cuefieldPlanId || ''
+      });
+      if (claimedByCuefield) releasePreparedPlayback(prepared);
+    },
+    isCurrent: cuefieldContextIsCurrent,
+    onCancel: function(reason) {
+      if (nextTrackPreloadState.owner === 'cuefield') {
+        cancelNextTrackPreload(reason || 'cuefield-cancelled', { owner:'cuefield' });
+      }
+    },
+    onStatus: function(status) {
+      updateCuefieldAutoMixControls(status === 'armed' ? 'armed' : status);
+    }
+  });
+  cuefieldAutoMixRuntime.setIntensity(normalizeCuefieldAutoMixIntensity(fx && fx.cuefieldAutoMixIntensity));
+  return cuefieldAutoMixRuntime;
+}
+function tickCuefieldAutoMix(now) {
+  if (!cuefieldFeatureEnabled) return;
+  var runtime = ensureCuefieldAutoMixRuntime();
+  if (!runtime || !fx) return;
+  var intensity = normalizeCuefieldAutoMixIntensity(fx.cuefieldAutoMixIntensity);
+  runtime.setIntensity(intensity);
+  if (intensity === 'off') return;
+  var nextIdx = gaplessNextQueueIndex();
+  var identity = cuefieldPlaybackIdentity(nextIdx);
+  runtime.tick({
+    nowMs: Number(now) || 0,
+    identity: identity,
+    playing: !!(playing && audio && !audio.paused),
+    backgroundRelease: !!(isDeepBackgroundMode() && isBackgroundReleaseMode()),
+    currentTimeSec: audio && isFinite(audio.currentTime) ? Number(audio.currentTime) : 0,
+    nextIndex: nextIdx
   });
 }
 function playbackCrossfadePolicy(opts, prepared) {
@@ -23199,11 +23442,7 @@ async function finalizePreparedPlaybackCommit(value, prepared) {
     console.warn('[GaplessCommit]', error);
   }
   nextTrackPreloadState.token += 1;
-  nextTrackPreloadState.index = -1;
-  nextTrackPreloadState.key = '';
-  nextTrackPreloadState.prepared = null;
-  nextTrackPreloadState.pending = false;
-  nextTrackPreloadState.switching = false;
+  resetNextTrackPreloadState();
   publishCurrentPlaybackSessionSnapshot();
   if (outgoing && outgoing !== incoming) releasePlaybackMedia(outgoing);
   return true;
@@ -23335,6 +23574,10 @@ async function playQueueAt(idx, opts) {
   var requestQueue = (Array.isArray(opts.queue) ? opts.queue : playQueue).map(cloneSong);
   if (idx < 0 || idx >= requestQueue.length) return { ok: false, state: 'idle' };
   var transactionOpts = Object.assign({}, opts, { queue: requestQueue });
+  if (!opts.cuefieldAutoMixHandoff && !opts.cuefieldAutoMixFallback) {
+    if (opts.manual || opts.manualSkip) cancelCuefieldAutoMix('manual-skip');
+    else cancelCuefieldAutoMix('track-replacement');
+  }
   if (!opts.preparedPlayback) cancelNextTrackPreload('new-playback-transaction');
   var manager = ensurePlaybackTransactionManager();
   if (!manager) {
@@ -23774,6 +24017,7 @@ async function togglePlay() {
     if (audio.paused || audio.ended) {
       await attemptAudioPlay({ manual: true });
     } else {
+      cancelCuefieldAutoMix('pause');
       await fadeOutAndPauseAudio();
       playing = false;
       setPlayIcon(false);
@@ -23801,19 +24045,21 @@ function setPlayIcon(p) {
 }
 function nextTrack() {
   if (!playQueue.length) return;
+  cancelCuefieldAutoMix('manual-skip');
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   var targetIdx = playMode === 'shuffle'
     ? Math.floor(Math.random() * playQueue.length)
     : (currentIdx + 1) % playQueue.length;
-  Promise.resolve(playQueueAt(targetIdx)).finally(forcePlaybackControlsInteractive);
+  Promise.resolve(playQueueAt(targetIdx, { manualSkip:true })).finally(forcePlaybackControlsInteractive);
 }
 function prevTrack() {
   if (!playQueue.length) return;
+  cancelCuefieldAutoMix('manual-skip');
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   var targetIdx = (currentIdx - 1 + playQueue.length) % playQueue.length;
-  Promise.resolve(playQueueAt(targetIdx)).finally(forcePlaybackControlsInteractive);
+  Promise.resolve(playQueueAt(targetIdx, { manualSkip:true })).finally(forcePlaybackControlsInteractive);
 }
 function shuffleQueue() {
   var activeSong = currentIdx >= 0 && currentIdx < playQueue.length
@@ -25187,7 +25433,11 @@ function bindPlaybackProgressEvents(audioEl) {
     audioEl.addEventListener(name, function(){ savePlaybackSessionDebounced(name); });
   });
   ['play', 'playing', 'pause', 'ended', 'emptied', 'abort', 'error'].forEach(function(name){
-    audioEl.addEventListener(name, function(){ syncPlaybackStateFromAudioEvent(name); });
+    audioEl.addEventListener(name, function(){
+      if (audioEl === audio && name === 'pause' && !nextTrackPreloadState.switching) cancelCuefieldAutoMix('pause');
+      if (audioEl === audio && /^(emptied|abort|error)$/.test(name)) cancelCuefieldAutoMix('source-failure');
+      syncPlaybackStateFromAudioEvent(name);
+    });
   });
   ['play', 'playing', 'pause', 'ended', 'emptied'].forEach(function(name){
     audioEl.addEventListener(name, refreshHomeWeatherAmbientPlayback);
@@ -25213,6 +25463,7 @@ function emitProgressDragParticles(x, y) {
 function seekFromProgressPointer(e, emitParticles) {
   var durationSec = getPlaybackDurationSeconds();
   if (!audio || !durationSec) return;
+  cancelCuefieldAutoMix('seek');
   cancelNextTrackPreload('seek');
   var bar = document.getElementById('progress-bar');
   var rect = bar.getBoundingClientRect();
@@ -25658,7 +25909,7 @@ var lyricColorPresets = [
 ];
 var USER_FX_ARCHIVE_STORE_KEY = 'mineradio-user-fx-archives-v1';
 var USER_FX_ARCHIVE_EXPORT_TYPE = 'mineradio-user-fx-archive';
-var USER_FX_ARCHIVE_SCHEMA = 2;
+var USER_FX_ARCHIVE_SCHEMA = 3;
 function defaultUserFxArchiveName(index) {
   return '存档 ' + (index + 1);
 }
@@ -25754,6 +26005,11 @@ function normalizeFxArchiveSnapshot(raw) {
     desktopLyricsAlign: normalizeDesktopLyricsAlign(Object.prototype.hasOwnProperty.call(raw, 'desktopLyricsAlign') ? raw.desktopLyricsAlign : fxDefaults.desktopLyricsAlign),
     performanceBackground: normalizePerformanceBackgroundMode(raw.performanceBackground, raw.liveBackgroundKeep === true),
     performanceQuality: normalizePerformanceQuality(raw.performanceQuality),
+    cuefieldAutoMixIntensity: normalizeCuefieldAutoMixIntensity(
+      Object.prototype.hasOwnProperty.call(raw, 'cuefieldAutoMixIntensity')
+        ? raw.cuefieldAutoMixIntensity
+        : 'off'
+    ),
     liveBackgroundKeep: normalizePerformanceBackgroundMode(raw.performanceBackground, raw.liveBackgroundKeep === true) === 'keep',
     particleLyrics: raw.particleLyrics !== false,
     backCover: !!raw.backCover,
@@ -25878,6 +26134,7 @@ function applyFxArchiveSnapshot(snapshot) {
   applyWallpaperModeState(true);
   updateRenderPowerClasses();
   applyRendererPowerMode();
+  syncCuefieldAutoMixRuntime('archive');
   if (data.nativeLyrics) applyNativeLyricConfig(data.nativeLyrics, 'archive');
   saveLyricLayout();
   return true;
@@ -27002,6 +27259,61 @@ function updatePerformanceControls() {
   var liveBackgroundKeepToggle = document.getElementById('t-liveBackgroundKeep');
   if (liveBackgroundKeepToggle) liveBackgroundKeepToggle.classList.toggle('on', fx.liveBackgroundKeep === true);
 }
+function updateCuefieldAutoMixControls(status) {
+  fx.cuefieldAutoMixIntensity = normalizeCuefieldAutoMixIntensity(fx.cuefieldAutoMixIntensity);
+  document.querySelectorAll('#cuefield-intensity-seg [data-cuefield-intensity]').forEach(function(btn){
+    btn.classList.toggle('active', btn.getAttribute('data-cuefield-intensity') === fx.cuefieldAutoMixIntensity);
+    btn.disabled = !cuefieldFeatureEnabled;
+    btn.setAttribute('aria-disabled', cuefieldFeatureEnabled ? 'false' : 'true');
+  });
+  var segment = document.getElementById('cuefield-intensity-seg');
+  if (segment) segment.setAttribute(
+    'data-state',
+    cuefieldFeatureEnabled
+      ? (status || (fx.cuefieldAutoMixIntensity === 'off' ? 'disabled' : 'waiting'))
+      : 'feature-disabled'
+  );
+}
+function cancelCuefieldAutoMix(reason) {
+  reason = String(reason || 'cancelled');
+  var cancelled = false;
+  if (cuefieldAutoMixRuntime && typeof cuefieldAutoMixRuntime.cancel === 'function') {
+    cancelled = cuefieldAutoMixRuntime.cancel(reason) || cancelled;
+  }
+  if (nextTrackPreloadState.owner === 'cuefield') {
+    cancelled = cancelNextTrackPreload(reason, { owner:'cuefield' }) || cancelled;
+  }
+  updateCuefieldAutoMixControls(reason);
+  return cancelled;
+}
+function syncCuefieldAutoMixRuntime(reason) {
+  fx.cuefieldAutoMixIntensity = normalizeCuefieldAutoMixIntensity(fx.cuefieldAutoMixIntensity);
+  var runtime = ensureCuefieldAutoMixRuntime();
+  if (runtime && typeof runtime.setIntensity === 'function') runtime.setIntensity(fx.cuefieldAutoMixIntensity);
+  if (fx.cuefieldAutoMixIntensity === 'off') cancelCuefieldAutoMix('feature-disabled');
+  updateCuefieldAutoMixControls(reason);
+  return runtime;
+}
+function setCuefieldAutoMixIntensity(value, silent) {
+  var next = normalizeCuefieldAutoMixIntensity(value);
+  fx.cuefieldAutoMixIntensity = next;
+  if (next === 'off') cancelCuefieldAutoMix('feature-disabled');
+  else syncCuefieldAutoMixRuntime('waiting');
+  updateCuefieldAutoMixControls(next === 'off' ? 'disabled' : 'waiting');
+  saveLyricLayout();
+  if (!silent) {
+    var label = next === 'subtle' ? '轻柔' : (next === 'balanced' ? '平衡' : (next === 'club' ? '俱乐部' : '关闭'));
+    showToast('自动混音: ' + label);
+  }
+  return next;
+}
+function applyRuntimeFeatureFlags(snapshot) {
+  var enabled = !!(snapshot && snapshot.features && snapshot.features.cuefield === true);
+  cuefieldFeatureEnabled = enabled;
+  if (!cuefieldFeatureEnabled) cancelCuefieldAutoMix('feature-disabled');
+  else updateCuefieldAutoMixControls();
+  return cuefieldFeatureEnabled;
+}
 function setPerformanceBackgroundMode(mode, silent) {
   var next = normalizePerformanceBackgroundMode(mode, false);
   fx.performanceBackground = next;
@@ -27113,6 +27425,7 @@ function updateFxInputs() {
   var liveBackgroundKeepToggle = document.getElementById('t-liveBackgroundKeep');
   if (liveBackgroundKeepToggle) liveBackgroundKeepToggle.classList.toggle('on', fx.liveBackgroundKeep === true);
   updatePerformanceControls();
+  updateCuefieldAutoMixControls();
   updateDevelopmentFxControls();
   var aiDepthToggle = document.getElementById('t-aidepth');
   if (aiDepthToggle) aiDepthToggle.classList.toggle('on', fx.aiDepth);
@@ -27894,6 +28207,11 @@ function bindFxPanel() {
       setPerformanceQualityMode(btn.getAttribute('data-performance-quality'));
     });
   });
+  document.querySelectorAll('#cuefield-intensity-seg [data-cuefield-intensity]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      setCuefieldAutoMixIntensity(btn.getAttribute('data-cuefield-intensity'));
+    });
+  });
   updateFxInputs();
 }
 function toggleFx(key) {
@@ -27998,6 +28316,7 @@ function resetFx() {
   applyWallpaperModeState(true);
   updateRenderPowerClasses();
   applyRendererPowerMode();
+  syncCuefieldAutoMixRuntime('reset');
   setStageLyricPalette(stageLyrics.coverPalette || stageLyrics.palette);
   setPreset(fx.preset, { silent: true, preserveCamera: true, skipTransition: true });
   if (fx.floatLayer) createFloatLayer(); else destroyFloatLayer();
@@ -28575,6 +28894,7 @@ async function refreshPlatformLoginCapabilities(force) {
     var snapshot = await apiJson('/api/platform/capabilities?t=' + Date.now());
     if (!window.MineradioPlatformLogin || !snapshot || !Array.isArray(snapshot.providers)) throw new Error('PLATFORM_CAPABILITIES_INVALID');
     platformLoginCapabilitySnapshot = snapshot;
+    applyRuntimeFeatureFlags(snapshot);
     platformLoginState = window.MineradioPlatformLogin.createLoginState(snapshot, {
       selectedProvider: loginProvider
     });
@@ -28587,6 +28907,7 @@ async function refreshPlatformLoginCapabilities(force) {
     return snapshot;
   } catch (e) {
     platformLoginCapabilitySnapshot = null;
+    applyRuntimeFeatureFlags(null);
     platformLoginState = null;
     if (platformLoginUi) {
       platformLoginUi.destroy();
@@ -32133,6 +32454,7 @@ function renderSceneWithShelfOverlay() {
 function animate() {
   requestAnimationFrame(animate);
   var now = performance.now();
+  tickCuefieldAutoMix(now);
   if (shouldSkipAdaptiveRenderFrame(now)) return;
   var dt = Math.min((now - prevTime) / 1000, 0.05);
   prevTime = now;

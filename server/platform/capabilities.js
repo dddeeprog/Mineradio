@@ -272,6 +272,7 @@ function createCapabilitySnapshot(statusByProvider, options) {
   return {
     schema: PLATFORM_CAPABILITY_SCHEMA,
     generatedAt: safeGeneratedAt(now),
+    features: featureFlags.snapshot(),
     providers: PLATFORM_ORDER.map(provider => createProviderCapability(
       provider,
       hasOwn(statusByProvider, provider) ? statusByProvider[provider] : {},

@@ -89,8 +89,8 @@ test('native lyric config persists, rebuilds documents on lyric changes and upda
   assert.doesNotMatch(html, /renderer\.domElement\.style\.pointerEvents = visible \? 'auto' : 'none'/);
 });
 
-test('user visual archive schema 2 includes sanitized native lyric settings', () => {
-  assert.match(html, /USER_FX_ARCHIVE_SCHEMA = 2/);
+test('user visual archive schema 3 includes sanitized native lyric settings', () => {
+  assert.match(html, /USER_FX_ARCHIVE_SCHEMA = 3/);
   assert.match(html, /nativeLyrics:/);
   assert.match(html, /toArchiveNativeLyricConfig/);
   assert.match(html, /applyNativeLyricConfig/);

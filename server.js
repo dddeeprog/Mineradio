@@ -149,6 +149,7 @@ implementationRegistry.register('netease', 'recentPlayReport');
 implementationRegistry.register('netease', 'listenDurationReport');
 const platformFeatureFlags = createFeatureFlags({
   listenReporting: true,
+  cuefield: true,
 });
 
 function applySystemCertificateAuthorities() {
