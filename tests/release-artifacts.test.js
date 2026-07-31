@@ -335,6 +335,12 @@ test('release artifact module is an electron-builder hook and dir builds return 
     platformToTargets: platformTargets('dir'),
   }), []);
 
+  assert.deepEqual(await artifactVerifier({
+    artifactPaths: [],
+    outDir: makeTempDir(),
+    platformToTargets: new Map([[Platform.WINDOWS, new Map()]]),
+  }), []);
+
   const distDir = makeTempDir();
   await assert.rejects(
     async () => artifactVerifier({

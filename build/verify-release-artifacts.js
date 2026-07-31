@@ -810,7 +810,7 @@ function inspectBuildTargets(buildResult) {
   let hasNsis = false;
   let dirOnly = true;
   for (const [platform, targets] of buildResult.platformToTargets) {
-    if (!isRecord(platform) || !(targets instanceof Map) || targets.size === 0) {
+    if (!isRecord(platform) || !(targets instanceof Map)) {
       throw new Error('electron-builder platformToTargets target map is malformed.');
     }
     const isWindows = platform.nodeName === 'win32'
@@ -834,7 +834,9 @@ function inspectBuildTargets(buildResult) {
     }
   }
   if (targetCount === 0) {
-    throw new Error('electron-builder platformToTargets target map is empty.');
+    // electron-builder intentionally omits the synthetic `dir` target from the
+    // inner map after a successful directory-only build.
+    return { dirOnly: true, hasNsis: false };
   }
   return { dirOnly, hasNsis };
 }
