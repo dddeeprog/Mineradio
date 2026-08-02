@@ -30,7 +30,7 @@ Mineradio 是一款 Windows 桌面沉浸式音乐播放器，把天气电台、�
 
 ## 使用说明
 
-Windows 用户可以在 GitHub Releases 中下载安装包。
+Windows 用户可以在 [English-worse/Mineradio Releases](https://github.com/English-worse/Mineradio/releases) 中下载安装包。
 
 正式分发以 Release 资产中的 `Mineradio-1.1.0-Setup.exe` 为准，不建议直接下载 `win-unpacked` 目录作为正式分发包。安装包会创建桌面快捷方式；直接运行打包版 `Mineradio.exe` 时，应用也会在首次启动时补创建桌面快捷方式。
 
@@ -48,7 +48,7 @@ npm run build:win
 
 ## 更新机制
 
-Mineradio 会请求 GitHub Releases latest 检测新版本。远端版本高于本地版本时，应用内更新入口会展示 Release 内容、下载安装包到本机用户数据目录，并通过系统打开安装包。
+Mineradio 会请求正式发布仓库 [English-worse/Mineradio Releases latest](https://github.com/English-worse/Mineradio/releases/latest) 检测新版本。远端版本高于本地版本时，应用内更新入口会展示 Release 内容、下载安装包到本机用户数据目录，并通过系统打开安装包。
 
 本地验证更新链路时，可以通过 `MINERADIO_UPDATE_MANIFEST` 指向一个本地 manifest JSON 或 HTTP 地址来模拟线上 Release。
 

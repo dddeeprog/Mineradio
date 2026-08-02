@@ -1,27 +1,100 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog } = require('electron');
-const net = require('net');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu, safeStorage, powerMonitor, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
+const { Readable } = require('stream');
+const { randomBytes, randomUUID } = require('node:crypto');
+const {
+  configureStableAppPaths,
+  resolveDesktopBuildIdentity,
+} = require('./app-paths');
+const {
+  createPlatformCredentialRuntime,
+} = require('./platform-credential-runtime');
+const {
+  isAllowedAppUrl,
+  isSafeExternalUrl,
+} = require('./navigation-guard');
+const {
+  clearPlatformLoginSession,
+  openPlatformLoginWindow,
+} = require('./platform-login-window');
+const {
+  createSpotifyPkceFlow,
+  startSpotifyLoopbackServer,
+} = require('./spotify-pkce');
+const { assertAllowedIpcSender } = require('./ipc-auth');
+const { WallpaperRuntime } = require('./wallpaper-runtime');
+const {
+  WallpaperEngineLibrary,
+  registerWallpaperEngineScheme,
+} = require('./wallpaper-engine-library');
+const { WallpaperEngineRuntime } = require('./wallpaper-engine-runtime');
+const {
+  createDesktopWallpaperFeatureGate,
+} = require('./runtime-feature-gate');
+const { createSystemMemoryState } = require('./system-memory-state');
+const {
+  createReleaseFeatureFlags,
+} = require('../server/platform/feature-flags');
+const {
+  createLocalAssetsManager,
+  localFilePathFromProxyUrl,
+  parseLocalFileRangeHeader,
+  LOCAL_FILE_PROTOCOL,
+  LOCAL_LIBRARY_MIME,
+} = require('./local-assets');
+const {
+  filterPersistentUiStatePatch,
+  mergeDesktopShellSettings,
+  normalizeDesktopShellSettings,
+  normalizePersistentUiState,
+} = require('./shell-state');
+const {
+  desktopLyricsStateSignature,
+  normalizeDesktopLyricsOpacity,
+  shouldIgnoreDesktopLyricsMouse,
+} = require('./overlay-state');
+const { createPlayerBridge } = require('./player-bridge');
+const { createEislandBridgeServer } = require('./eisland-bridge-server');
+const { createBridgeDiscoveryPublisher } = require('./eisland-bridge-discovery');
+const { createEislandBridgeLifecycle } = require('./eisland-bridge-lifecycle');
 
 let mainWindow = null;
 let localServer = null;
 let mainServerPort = 0;
+let platformCredentialRuntime = null;
+let platformCredentialRuntimePromise = null;
 let desktopLyricsWindow = null;
 let desktopLyricsState = {};
 let desktopLyricsUserBounds = null;
 let desktopLyricsProgrammaticMove = false;
 let desktopLyricsPointerCapture = false;
 let desktopLyricsMouseIgnored = null;
+let desktopLyricsLastStateSignature = '';
+let desktopLyricsLastOpacity = null;
 let desktopLyricsMousePoller = null;
 let desktopLyricsMousePollerBuffer = '';
 let desktopLyricsHotBounds = null;
 let desktopLyricsLastMiddleAt = 0;
-let wallpaperWindow = null;
-let wallpaperState = {};
+let wallpaperRuntime = null;
+let wallpaperEngineRuntime = null;
+let systemMemoryPollTimer = null;
+let systemResourceMonitoringStarted = false;
+const systemMemoryState = createSystemMemoryState({ recoveryHoldMs: 15000 });
+const desktopWallpaperFeatureGate = createDesktopWallpaperFeatureGate(
+  createReleaseFeatureFlags(),
+);
 let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
+let tray = null;
+let closeToTrayEnabled = true;
+let appQuitting = false;
+let appShutdownPrepared = false;
+let appShutdownPromise = null;
+let createWindowPromise = null;
+let eislandBridgeLifecycle = null;
 const registeredGlobalHotkeys = new Map();
 
 const WINDOWED_ASPECT = 16 / 9;
@@ -29,13 +102,23 @@ const WINDOWED_SCALE = 3 / 4;
 const WINDOWED_MARGIN = 32;
 const MIN_WINDOWED_WIDTH = 960;
 const MIN_WINDOWED_HEIGHT = 540;
-const APP_NAME = 'Mineradio';
-const APP_USER_MODEL_ID = 'com.mineradio.desktop';
+const APP_IDENTITY = resolveDesktopBuildIdentity();
+const APP_NAME = APP_IDENTITY.productName;
+const APP_USER_MODEL_ID = APP_IDENTITY.appId;
 const APP_ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico');
-const NETEASE_LOGIN_PARTITION = 'persist:mineradio-netease-login';
-const NETEASE_LOGIN_URL = 'https://music.163.com/#/login';
-const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
-const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
+const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
+const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
+const APP_PATHS = configureStableAppPaths(app, { identity: APP_IDENTITY });
+const wallpaperEngineLibrary = new WallpaperEngineLibrary({
+  userDataPath: APP_PATHS.userData,
+  configPath: path.join(APP_PATHS.userData, 'wallpaper-engine-library.json'),
+});
+const LEGACY_APP_DATA_ROOTS = Object.freeze(APP_IDENTITY.channel === 'stable'
+  ? [
+    path.resolve(__dirname, '..'),
+    path.join(path.dirname(APP_PATHS.userData), 'mineradio'),
+  ]
+  : []);
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
@@ -54,6 +137,17 @@ for (const [name, value] of CHROMIUM_PERFORMANCE_SWITCHES) {
   if (value == null) app.commandLine.appendSwitch(name);
   else app.commandLine.appendSwitch(name, value);
 }
+protocol.registerSchemesAsPrivileged([{
+  scheme: LOCAL_FILE_PROTOCOL,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    stream: true,
+    corsEnabled: true,
+  },
+}]);
+registerWallpaperEngineScheme(protocol);
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 const QQ_LOGIN_COOKIE_PRIORITY = [
@@ -89,43 +183,136 @@ const NETEASE_LOGIN_COOKIE_PRIORITY = [
   'WNMCID',
   'JSESSIONID-WYYY',
 ];
+const KUGOU_LOGIN_COOKIE_PRIORITY = [
+  'KuGoo',
+  'token',
+  'userid',
+  'KugooID',
+  'kg_mid',
+  'kg_dfid',
+  'Kugou',
+  'NickName',
+];
+const QISHUI_LOGIN_COOKIE_PRIORITY = [
+  'sessionid',
+  'sessionid_ss',
+  'sid_guard',
+  'sid_tt',
+  'passport_csrf_token',
+  'passport_csrf_token_default',
+  'ttwid',
+];
+const localAssetsManager = createLocalAssetsManager();
+let localFileProtocolRegistered = false;
 
-function findOpenPort(startPort) {
+function waitForServer(server) {
+  if (!server) return Promise.reject(new TypeError('Local server is unavailable.'));
+  if (server.ready && typeof server.ready.then === 'function') return server.ready;
+  if (server.listening) return Promise.resolve(server.address().port);
+
   return new Promise((resolve, reject) => {
-    function tryPort(port) {
-      const tester = net.createServer();
-
-      tester.once('error', (err) => {
-        if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
-          tryPort(port + 1);
-          return;
-        }
-        reject(err);
-      });
-
-      tester.once('listening', () => {
-        tester.close(() => resolve(port));
-      });
-
-      tester.listen(port, '127.0.0.1');
-    }
-
-    tryPort(startPort);
+    const cleanup = () => {
+      server.removeListener('listening', onListening);
+      server.removeListener('error', onError);
+    };
+    const onListening = () => {
+      cleanup();
+      resolve(server.address().port);
+    };
+    const onError = error => {
+      cleanup();
+      reject(error);
+    };
+    server.once('listening', onListening);
+    server.once('error', onError);
   });
 }
 
-function waitForServer(server) {
-  if (!server || server.listening) return Promise.resolve();
+function initializePlatformCredentialRuntime() {
+  if (!platformCredentialRuntimePromise) {
+    const pendingRuntime = createPlatformCredentialRuntime({
+      paths: APP_PATHS,
+      sourceRoots: LEGACY_APP_DATA_ROOTS,
+      safeStorage,
+    });
+    platformCredentialRuntimePromise = pendingRuntime
+      .then((runtime) => {
+        platformCredentialRuntime = runtime;
+        return runtime;
+      })
+      .catch((error) => {
+        platformCredentialRuntimePromise = null;
+        throw error;
+      });
+  }
+  return platformCredentialRuntimePromise;
+}
 
-  return new Promise((resolve, reject) => {
-    server.once('listening', resolve);
-    server.once('error', reject);
-  });
+function credentialRuntimeUnavailable() {
+  return {
+    ok: false,
+    error: 'PLATFORM_CREDENTIAL_RUNTIME_UNAVAILABLE',
+  };
 }
 
 function sendWindowState(win) {
   if (!win || win.isDestroyed()) return;
   win.webContents.send('desktop-window-state', getWindowState(win));
+  sendSystemResourceState(win);
+}
+
+function safeSystemMemoryInfo() {
+  try {
+    return process.getSystemMemoryInfo();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function sendSystemResourceState(win = mainWindow) {
+  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return false;
+  win.webContents.send('mineradio-system-resource-state', systemMemoryState.snapshot());
+  return true;
+}
+
+function sampleSystemResourceState(patch = {}, broadcast = true) {
+  const sample = { ...patch };
+  const memoryInfo = safeSystemMemoryInfo();
+  if (memoryInfo) sample.memoryInfo = memoryInfo;
+  if (!Object.prototype.hasOwnProperty.call(sample, 'onBattery')) {
+    try { sample.onBattery = powerMonitor.isOnBatteryPower(); } catch (_error) {}
+  }
+  const snapshot = systemMemoryState.sample(sample, Date.now());
+  if (broadcast) sendSystemResourceState();
+  return snapshot;
+}
+
+function startSystemResourceMonitoring() {
+  if (systemResourceMonitoringStarted) return systemMemoryState.snapshot();
+  systemResourceMonitoringStarted = true;
+  const initial = sampleSystemResourceState({}, false);
+  systemMemoryPollTimer = setInterval(() => sampleSystemResourceState(), 15000);
+  if (systemMemoryPollTimer && typeof systemMemoryPollTimer.unref === 'function') systemMemoryPollTimer.unref();
+  return initial;
+}
+
+function stopSystemResourceMonitoring() {
+  if (systemMemoryPollTimer) clearInterval(systemMemoryPollTimer);
+  systemMemoryPollTimer = null;
+  systemResourceMonitoringStarted = false;
+}
+
+async function prepareAppShutdown() {
+  unregisterMineradioGlobalHotkeys();
+  stopSystemResourceMonitoring();
+  closeOverlayWindows();
+  const disposals = [];
+  if (eislandBridgeLifecycle) disposals.push(Promise.resolve().then(() => eislandBridgeLifecycle.stop()));
+  if (wallpaperRuntime) disposals.push(Promise.resolve().then(() => wallpaperRuntime.dispose()));
+  if (wallpaperEngineRuntime) disposals.push(Promise.resolve().then(() => wallpaperEngineRuntime.dispose()));
+  await Promise.allSettled(disposals);
+  wallpaperEngineLibrary.dispose();
+  if (localServer && localServer.close) localServer.close();
 }
 
 function sendGlobalHotkeyAction(action) {
@@ -259,6 +446,130 @@ function getSenderWindow(event) {
   return BrowserWindow.fromWebContents(event.sender);
 }
 
+function openSafeExternal(url) {
+  if (!isSafeExternalUrl(url)) return Promise.resolve(false);
+  return shell.openExternal(url).then(() => true).catch(() => false);
+}
+
+function guardMainNavigation(event, url) {
+  if (isAllowedAppUrl(url, mainServerPort)) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  openSafeExternal(url);
+}
+
+function handleIpc(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    assertAllowedIpcSender(event, channel, mainServerPort);
+    return handler(event, ...args);
+  });
+}
+
+ipcMain.on('mineradio-eisland-bridge-state', (event, snapshot) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-state', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererState(snapshot);
+});
+
+ipcMain.on('mineradio-eisland-bridge-heartbeat', (event, snapshot) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-heartbeat', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererHeartbeat(snapshot);
+});
+
+ipcMain.on('mineradio-eisland-bridge-command-complete', (event, receipt) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-command-complete', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererCommandReceipt(receipt);
+});
+
+function ensureWallpaperEngineRuntime() {
+  if (!wallpaperEngineRuntime) {
+    wallpaperEngineRuntime = new WallpaperEngineRuntime({
+      library: wallpaperEngineLibrary,
+      desktopCapturer,
+      nativeTempPath: path.join(APP_PATHS.platformCacheDirectory, 'wallpaper-engine-native'),
+    });
+  }
+  return wallpaperEngineRuntime;
+}
+
+function wallpaperEngineError(error, fallback) {
+  return {
+    ok: false,
+    error: String(error && (error.code || error.message) || fallback),
+  };
+}
+
+async function withWallpaperEngineRuntimeStatus(snapshot, force = false) {
+  return {
+    ...snapshot,
+    runtime: await ensureWallpaperEngineRuntime().probe(force === true),
+  };
+}
+
+function localFileContentType(filePath) {
+  return LOCAL_LIBRARY_MIME[path.extname(String(filePath || '')).toLowerCase()] || 'application/octet-stream';
+}
+
+function localFileErrorResponse(error) {
+  const message = String(error && error.message || error || 'LOCAL_FILE_FAILED');
+  if (/LOCAL_FILE_URL/.test(message)) return new Response('Invalid local file url', { status: 400 });
+  if (/LOCAL_FILE_NOT_AUTHORIZED/.test(message)) return new Response('Local file not authorized', { status: 403 });
+  if (/LOCAL_FILE_NOT_FOUND/.test(message)) return new Response('Local file not found', { status: 404 });
+  console.warn('Local file protocol failed:', message);
+  return new Response('Local file failed', { status: 500 });
+}
+
+async function handleLocalFileProtocolRequest(request) {
+  try {
+    const filePath = localFilePathFromProxyUrl(request.url);
+    const target = localAssetsManager.resolveAuthorizedLocalFile(filePath);
+    const stat = await fs.promises.stat(target);
+    if (!stat.isFile()) return new Response('Local file not found', { status: 404 });
+
+    const range = parseLocalFileRangeHeader(request.headers.get('range') || '', stat.size);
+    const baseHeaders = {
+      'Accept-Ranges': 'bytes',
+      'Content-Type': localFileContentType(target),
+    };
+    if (!range) {
+      return new Response('Range not satisfiable', {
+        status: 416,
+        headers: {
+          ...baseHeaders,
+          'Content-Range': `bytes */${stat.size}`,
+        },
+      });
+    }
+
+    if (stat.size <= 0 || range.end < range.start) {
+      return new Response('', {
+        status: 200,
+        headers: {
+          ...baseHeaders,
+          'Content-Length': '0',
+        },
+      });
+    }
+
+    const headers = {
+      ...baseHeaders,
+      'Content-Length': String(range.end - range.start + 1),
+    };
+    if (range.partial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${stat.size}`;
+    const fileStream = fs.createReadStream(target, { start: range.start, end: range.end });
+    return new Response(Readable.toWeb(fileStream), {
+      status: range.partial ? 206 : 200,
+      headers,
+    });
+  } catch (error) {
+    return localFileErrorResponse(error);
+  }
+}
+
+function registerLocalFileProtocol() {
+  if (localFileProtocolRegistered) return;
+  protocol.handle(LOCAL_FILE_PROTOCOL, handleLocalFileProtocolRequest);
+  localFileProtocolRegistered = true;
+}
+
 function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -268,8 +579,123 @@ function focusMainWindow() {
   return true;
 }
 
+function desktopShellSettingsPath() {
+  return path.join(APP_PATHS.userData, DESKTOP_SHELL_SETTINGS_FILE);
+}
+
+function readDesktopShellSettings() {
+  try {
+    const file = desktopShellSettingsPath();
+    if (!fs.existsSync(file)) return normalizeDesktopShellSettings({});
+    return normalizeDesktopShellSettings(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (_e) {
+    return normalizeDesktopShellSettings({});
+  }
+}
+
+function writeDesktopShellSettings(patch) {
+  const file = desktopShellSettingsPath();
+  const next = mergeDesktopShellSettings(readDesktopShellSettings(), patch);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function applySavedDesktopShellSettings() {
+  closeToTrayEnabled = readDesktopShellSettings().closeToTray;
+}
+
+function desktopUiStatePath() {
+  return path.join(APP_PATHS.userData, DESKTOP_UI_STATE_FILE);
+}
+
+function readDesktopUiState() {
+  try {
+    const file = desktopUiStatePath();
+    if (!fs.existsSync(file)) return normalizePersistentUiState({});
+    return normalizePersistentUiState(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (_e) {
+    return normalizePersistentUiState({});
+  }
+}
+
+function writeDesktopUiStatePatch(patch) {
+  const filtered = filterPersistentUiStatePatch(patch);
+  const current = readDesktopUiState();
+  const values = { ...current.values };
+  for (const [key, value] of Object.entries(filtered)) {
+    if (value == null) delete values[key];
+    else values[key] = value;
+  }
+  const next = normalizePersistentUiState({ values, updatedAt: Date.now() });
+  const file = desktopUiStatePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function isStartupEnabled() {
+  if (process.platform !== 'win32') return false;
+  try {
+    return !!app.getLoginItemSettings().openAtLogin;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function setStartupEnabled(enabled) {
+  if (process.platform !== 'win32') return { ok: false, enabled: false, unsupported: true };
+  app.setLoginItemSettings({ openAtLogin: !!enabled, path: process.execPath, args: [] });
+  return { ok: true, enabled: isStartupEnabled() };
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示 Mineradio', click: focusMainWindow },
+    {
+      label: '关闭按钮最小化到托盘',
+      type: 'checkbox',
+      checked: closeToTrayEnabled,
+      click: (item) => {
+        closeToTrayEnabled = !!item.checked;
+        writeDesktopShellSettings({ closeToTray: closeToTrayEnabled });
+        refreshTrayMenu();
+      },
+    },
+    {
+      label: '开机自动启动',
+      type: 'checkbox',
+      checked: isStartupEnabled(),
+      click: (item) => {
+        const result = setStartupEnabled(item.checked);
+        if (!result.ok) item.checked = false;
+        refreshTrayMenu();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '退出 Mineradio',
+      click: () => {
+        appQuitting = true;
+        app.quit();
+      },
+    },
+  ]));
+}
+
+function createTray() {
+  if (tray || process.platform !== 'win32') return;
+  const icon = fs.existsSync(APP_ICON_ICO) ? APP_ICON_ICO : process.execPath;
+  tray = new Tray(icon);
+  tray.setToolTip(APP_NAME);
+  tray.on('click', focusMainWindow);
+  tray.on('double-click', focusMainWindow);
+  refreshTrayMenu();
+}
+
 function getUpdateDownloadDir() {
-  return path.join(app.getPath('userData'), 'updates');
+  return APP_PATHS.updateDirectory;
 }
 
 function shouldEnsureDesktopShortcut() {
@@ -361,6 +787,19 @@ function isNeteaseCookieDomain(domain) {
     normalized === 'netease.com' || normalized.endsWith('.netease.com');
 }
 
+function isKugouCookieDomain(domain) {
+  const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
+  return normalized === 'kugou.com' || normalized.endsWith('.kugou.com');
+}
+
+function isQishuiCookieDomain(domain) {
+  const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
+  return normalized === 'qishui.com'
+    || normalized.endsWith('.qishui.com')
+    || normalized === 'douyin.com'
+    || normalized.endsWith('.douyin.com');
+}
+
 function buildCookieHeaderFor(cookies, isAllowedDomain, priority) {
   const picked = new Map();
   (cookies || []).forEach((cookie) => {
@@ -397,223 +836,340 @@ async function readNeteaseLoginCookieHeader(cookieSession) {
   return buildCookieHeaderFor(cookies, isNeteaseCookieDomain, NETEASE_LOGIN_COOKIE_PRIORITY);
 }
 
+async function readKugouLoginCookieHeader(cookieSession) {
+  const cookies = await cookieSession.cookies.get({});
+  return buildCookieHeaderFor(
+    cookies,
+    isKugouCookieDomain,
+    KUGOU_LOGIN_COOKIE_PRIORITY,
+  );
+}
+
+async function readQishuiLoginCookieHeader(cookieSession) {
+  const cookies = await cookieSession.cookies.get({});
+  return buildCookieHeaderFor(
+    cookies,
+    isQishuiCookieDomain,
+    QISHUI_LOGIN_COOKIE_PRIORITY,
+  );
+}
+
+function kugouCookieHasLogin(cookieText) {
+  const value = parseCookieHeader(cookieText);
+  return Boolean(
+    (value.token || value.KuGoo)
+    && (value.userid || value.KugooID || value.KuGoo),
+  );
+}
+
+function qishuiCookieHasLogin(cookieText) {
+  const value = parseCookieHeader(cookieText);
+  return Boolean(
+    value.sessionid
+    || value.sessionid_ss
+    || value.sid_guard
+    || value.sid_tt,
+  );
+}
+
 async function openNeteaseMusicLoginWindow(owner) {
-  const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
-  const initialCookie = await readNeteaseLoginCookieHeader(cookieSession);
-  if (neteaseCookieHasLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let pollTimer = null;
-
-    const loginWindow = new BrowserWindow({
-      width: 940,
-      height: 760,
-      minWidth: 780,
-      minHeight: 580,
-      parent: owner && !owner.isDestroyed() ? owner : undefined,
-      modal: false,
-      show: false,
-      autoHideMenuBar: true,
-      title: '网易云音乐登录',
-      backgroundColor: '#111111',
-      icon: APP_ICON_ICO,
-      webPreferences: {
-        partition: NETEASE_LOGIN_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-
-    const finish = async (result) => {
-      if (settled) return;
-      settled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (loginWindow && !loginWindow.isDestroyed()) {
-        loginWindow.close();
-      }
-      resolve(result);
-    };
-
-    const checkCookies = async () => {
-      try {
-        const cookie = await readNeteaseLoginCookieHeader(cookieSession);
-        if (neteaseCookieHasLogin(cookie)) {
-          finish({ ok: true, cookie });
-        }
-      } catch (e) {
-        console.warn('Netease login cookie check failed:', e.message);
-      }
-    };
-
-    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\/([^/]+\.)?(163|music\.163|netease)\.com/i.test(url)) {
-        loginWindow.loadURL(url).catch((e) => console.warn('Netease login popup navigation failed:', e.message));
-      } else if (/^https?:\/\//i.test(url)) {
-        shell.openExternal(url).catch(() => {});
-      }
-      return { action: 'deny' };
-    });
-
-    loginWindow.webContents.on('did-finish-load', () => {
-      checkCookies();
-      loginWindow.webContents.executeJavaScript(`
-        setTimeout(() => {
-          const docs = [document];
-          document.querySelectorAll('iframe').forEach((frame) => {
-            try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (_) {}
-          });
-          for (const doc of docs) {
-            const nodes = Array.from(doc.querySelectorAll('a, button, span, div'));
-            const loginNode = nodes.find((node) => {
-              const text = (node.textContent || '').trim();
-              if (!/登录|立即登录/.test(text)) return false;
-              const rect = node.getBoundingClientRect();
-              return rect.width > 0 && rect.height > 0;
-            });
-            if (loginNode) { loginNode.click(); return true; }
-          }
-          return false;
-        }, 900);
-      `, true).catch(() => {});
-    });
-
-    loginWindow.on('ready-to-show', () => loginWindow.show());
-    loginWindow.on('closed', async () => {
-      if (settled) return;
-      if (pollTimer) clearInterval(pollTimer);
-      try {
-        const cookie = await readNeteaseLoginCookieHeader(cookieSession);
-        resolve(neteaseCookieHasLogin(cookie)
-          ? { ok: true, cookie, partial: !qqCookieHasPlaybackLogin(cookie) }
-          : { ok: false, cancelled: true, message: '网易云登录窗口已关闭' });
-      } catch (e) {
-        resolve({ ok: false, error: e.message || '网易云登录窗口已关闭' });
-      }
-    });
-
-    pollTimer = setInterval(checkCookies, 1200);
-    loginWindow.loadURL(NETEASE_LOGIN_URL).catch((e) => finish({ ok: false, error: e.message }));
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'netease',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readNeteaseLoginCookieHeader,
+    credentialComplete: neteaseCookieHasLogin,
+    credentialAcceptOnClose: neteaseCookieHasLogin,
   });
 }
 
 async function openQQMusicLoginWindow(owner) {
-  const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
-  const initialCookie = await readQQLoginCookieHeader(cookieSession);
-  if (qqCookieHasPlaybackLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'qq',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readQQLoginCookieHeader,
+    credentialComplete: qqCookieHasPlaybackLogin,
+    credentialHasIdentity: qqCookieHasLogin,
+    credentialAcceptOnClose: qqCookieHasLogin,
+  });
+}
 
-  return new Promise((resolve) => {
-    let settled = false;
-    let pollTimer = null;
-    let warmupStarted = false;
+async function openKugouMusicLoginWindow(owner) {
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'kugou',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readKugouLoginCookieHeader,
+    credentialComplete: kugouCookieHasLogin,
+    credentialHasIdentity: kugouCookieHasLogin,
+    credentialAcceptOnClose: kugouCookieHasLogin,
+  });
+}
 
-    const loginWindow = new BrowserWindow({
-      width: 900,
-      height: 720,
-      minWidth: 760,
-      minHeight: 560,
-      parent: owner && !owner.isDestroyed() ? owner : undefined,
-      modal: false,
-      show: false,
-      autoHideMenuBar: true,
-      title: 'QQ 音乐登录',
-      backgroundColor: '#111111',
-      icon: APP_ICON_ICO,
-      webPreferences: {
-        partition: QQ_LOGIN_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
+async function openQishuiMusicLoginWindow(owner) {
+  return openPlatformLoginWindow({
+    BrowserWindow,
+    session,
+    provider: 'qishui',
+    owner,
+    icon: APP_ICON_ICO,
+    openExternal: openSafeExternal,
+    readCredential: readQishuiLoginCookieHeader,
+    credentialComplete: qishuiCookieHasLogin,
+    credentialAcceptOnClose: qishuiCookieHasLogin,
+  });
+}
+
+async function readLoopbackJson(response) {
+  try {
+    const value = await response.json();
+    return value && typeof value === 'object' ? value : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function loopbackOrigin(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+async function desktopRequestJson(url, options, body) {
+  const response = await fetch(url, {
+    ...options,
+    body,
+  });
+  const payload = await readLoopbackJson(response);
+  if (!response.ok) {
+    const error = new Error('PLATFORM_REQUEST_FAILED');
+    error.code = 'PLATFORM_REQUEST_FAILED';
+    throw error;
+  }
+  return payload;
+}
+
+async function commitPlatformCredential(provider, method, credential) {
+  if (!mainServerPort) return credentialRuntimeUnavailable();
+  const body = method === 'pkce'
+    ? { provider, method, credential }
+    : method === 'external-window'
+      ? { provider, method, credential }
+      : {
+        provider,
+        method,
+        value: method === 'token'
+          ? credential && credential.token
+          : credential && credential.cookie,
+      };
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${mainServerPort}/api/platform/login/import`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: loopbackOrigin(mainServerPort),
+        },
+        body: JSON.stringify(body),
       },
-    });
-
-    const finish = async (result) => {
-      if (settled) return;
-      settled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (loginWindow && !loginWindow.isDestroyed()) {
-        loginWindow.close();
-      }
-      resolve(result);
+    );
+    const info = await readLoopbackJson(response);
+    if (!response.ok || info.loggedIn !== true) {
+      return {
+        ok: false,
+        provider,
+        error: info.error || 'PLATFORM_LOGIN_COMMIT_FAILED',
+      };
+    }
+    const membership = info.membership
+      && typeof info.membership === 'object'
+      ? info.membership
+      : {};
+    return {
+      ok: true,
+      provider,
+      loggedIn: true,
+      accountId: info.accountId || '',
+      userId: info.accountId || '',
+      nickname: typeof info.nickname === 'string' ? info.nickname : '',
+      avatar: typeof info.avatar === 'string' ? info.avatar : '',
+      vipLevel: typeof membership.vipLevel === 'string'
+        ? membership.vipLevel
+        : 'none',
+      isVip: membership.isVip === true,
+      isSvip: membership.isSvip === true,
+      metadataOnly: provider === 'kugou'
+        || provider === 'qishui'
+        || provider === 'spotify',
     };
-
-    const checkCookies = async () => {
-      try {
-        const cookie = await readQQLoginCookieHeader(cookieSession);
-        if (qqCookieHasPlaybackLogin(cookie)) {
-          finish({ ok: true, cookie });
-        } else if (qqCookieHasLogin(cookie) && !warmupStarted) {
-          warmupStarted = true;
-          setTimeout(() => {
-            if (!settled && loginWindow && !loginWindow.isDestroyed()) {
-              loginWindow.loadURL('https://y.qq.com/n/ryqq/player').catch((e) => console.warn('QQ login warmup navigation failed:', e.message));
-            }
-          }, 900);
-        }
-      } catch (e) {
-        console.warn('QQ login cookie check failed:', e.message);
-      }
+  } catch (_error) {
+    return {
+      ok: false,
+      provider,
+      error: 'PLATFORM_LOGIN_COMMIT_FAILED',
     };
-
-    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) {
-        loginWindow.loadURL(url).catch((e) => console.warn('QQ login popup navigation failed:', e.message));
-      } else {
-        shell.openExternal(url).catch(() => {});
-      }
-      return { action: 'deny' };
-    });
-
-    loginWindow.webContents.on('did-finish-load', () => {
-      checkCookies();
-      loginWindow.webContents.executeJavaScript(`
-        setTimeout(() => {
-          const nodes = Array.from(document.querySelectorAll('a, button, span, div'));
-          const loginNode = nodes.find((node) => {
-            const text = (node.textContent || '').trim();
-            if (!/登录|登陆/.test(text)) return false;
-            const rect = node.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0;
-          });
-          if (loginNode) loginNode.click();
-        }, 700);
-      `, true).catch(() => {});
-    });
-
-    loginWindow.on('ready-to-show', () => loginWindow.show());
-    loginWindow.on('closed', async () => {
-      if (settled) return;
-      if (pollTimer) clearInterval(pollTimer);
-      try {
-        const cookie = await readQQLoginCookieHeader(cookieSession);
-        resolve(qqCookieHasLogin(cookie)
-          ? { ok: true, cookie }
-          : { ok: false, cancelled: true, message: 'QQ 登录窗口已关闭' });
-      } catch (e) {
-        resolve({ ok: false, error: e.message || 'QQ 登录窗口已关闭' });
-      }
-    });
-
-    pollTimer = setInterval(checkCookies, 1200);
-    loginWindow.loadURL(QQ_LOGIN_URL).catch((e) => finish({ ok: false, error: e.message }));
-  });
+  }
 }
 
-async function clearQQMusicLoginSession() {
-  const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
-  await cookieSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
-  });
-  return { ok: true };
+async function commitLoginWindowCredential(provider, capture) {
+  if (!capture || capture.ok !== true
+    || typeof capture.credential !== 'string') {
+    return {
+      ok: false,
+      cancelled: capture && capture.cancelled === true,
+      error: capture && capture.error || 'PLATFORM_LOGIN_CANCELLED',
+    };
+  }
+  const result = await commitPlatformCredential(
+    provider,
+    'external-window',
+    { cookie: capture.credential },
+  );
+  if (result.ok) {
+    result.partial = capture.partial === true;
+    if (provider === 'qq') {
+      result.playbackKeyReady = qqCookieHasPlaybackLogin(capture.credential);
+    }
+  }
+  return result;
 }
 
-async function clearNeteaseMusicLoginSession() {
-  const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
-  await cookieSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
+function spotifyClientId(options) {
+  options = options && typeof options === 'object' ? options : {};
+  const value = String(
+    options.clientId
+    || process.env.MINERADIO_SPOTIFY_CLIENT_ID
+    || process.env.SPOTIFY_CLIENT_ID
+    || '',
+  ).trim();
+  return /^[A-Za-z0-9]{16,128}$/.test(value) ? value : '';
+}
+
+async function openSpotifyMusicLoginWindow(owner, options) {
+  const clientId = spotifyClientId(options);
+  if (!clientId) {
+    return {
+      ok: false,
+      provider: 'spotify',
+      error: 'SPOTIFY_CLIENT_ID_REQUIRED',
+    };
+  }
+  const callback = await startSpotifyLoopbackServer();
+  const flow = createSpotifyPkceFlow({
+    clientId,
+    requestJson: desktopRequestJson,
   });
-  return { ok: true };
+  const pending = flow.begin(callback.redirectUri);
+  let capture;
+  try {
+    capture = await openPlatformLoginWindow({
+      BrowserWindow,
+      session,
+      provider: 'spotify',
+      owner,
+      icon: APP_ICON_ICO,
+      loginUrl: pending.authorizationUrl,
+      redirectUri: pending.redirectUri,
+      callbackPromise: callback.waitForCallback,
+      openExternal: openSafeExternal,
+    });
+    if (!capture || capture.ok !== true || !capture.callbackUrl) {
+      flow.cancel();
+      return capture || {
+        ok: false,
+        error: 'SPOTIFY_LOGIN_CANCELLED',
+      };
+    }
+    const credential = await flow.consumeCallback(capture.callbackUrl);
+    return commitPlatformCredential('spotify', 'pkce', credential);
+  } catch (_error) {
+    flow.cancel();
+    return {
+      ok: false,
+      provider: 'spotify',
+      error: 'SPOTIFY_LOGIN_FAILED',
+    };
+  } finally {
+    callback.close();
+  }
+}
+
+async function openPlatformMusicLogin(owner, provider, options) {
+  if (provider === 'spotify') {
+    return openSpotifyMusicLoginWindow(owner, options);
+  }
+  const openers = {
+    netease: openNeteaseMusicLoginWindow,
+    qq: openQQMusicLoginWindow,
+    kugou: openKugouMusicLoginWindow,
+    qishui: openQishuiMusicLoginWindow,
+  };
+  const opener = openers[provider];
+  if (!Object.hasOwn(openers, provider)
+    || typeof opener !== 'function') {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+    };
+  }
+  const capture = await opener(owner);
+  return commitLoginWindowCredential(provider, capture);
+}
+
+async function clearServerCredential(provider) {
+  if (!mainServerPort) return credentialRuntimeUnavailable();
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${mainServerPort}/api/platform/logout`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: loopbackOrigin(mainServerPort),
+        },
+        body: JSON.stringify({ provider }),
+      },
+    );
+    const result = await readLoopbackJson(response);
+    return response.ok && result.ok !== false
+      ? { ok: true, provider }
+      : { ok: false, error: result.error || 'PLATFORM_LOGOUT_FAILED' };
+  } catch (_error) {
+    return { ok: false, error: 'PLATFORM_LOGOUT_FAILED' };
+  }
+}
+
+async function clearPlatformMusicLoginSession(provider) {
+  const serverResult = await clearServerCredential(provider);
+  try {
+    await clearPlatformLoginSession(session, provider);
+  } catch (_error) {
+    if (serverResult.ok) {
+      return {
+        ok: false,
+        provider,
+        error: 'PLATFORM_LOGIN_SESSION_CLEAR_FAILED',
+      };
+    }
+  }
+  return serverResult;
+}
+
+function clearQQMusicLoginSession() {
+  return clearPlatformMusicLoginSession('qq');
+}
+
+function clearNeteaseMusicLoginSession() {
+  return clearPlatformMusicLoginSession('netease');
 }
 
 function getWindowedBounds(win) {
@@ -767,8 +1323,7 @@ function rememberDesktopLyricsBounds() {
 
 function applyDesktopLyricsMouseBehavior() {
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
-  const locked = desktopLyricsState.clickThrough !== false;
-  const shouldIgnore = locked || !desktopLyricsPointerCapture;
+  const shouldIgnore = shouldIgnoreDesktopLyricsMouse(desktopLyricsPointerCapture);
   if (desktopLyricsMouseIgnored === shouldIgnore) return;
   desktopLyricsMouseIgnored = shouldIgnore;
   desktopLyricsWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
@@ -886,13 +1441,22 @@ function positionDesktopLyricsWindow(payload = desktopLyricsState, options = {})
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
   const shouldUseManualBounds = desktopLyricsUserBounds && !options.force;
   setDesktopLyricsBounds(shouldUseManualBounds ? desktopLyricsUserBounds : desktopLyricsDefaultBounds(payload));
-  if (typeof desktopLyricsWindow.setOpacity === 'function') {
-    desktopLyricsWindow.setOpacity(clampNumber(payload.opacity, 0.28, 1, 0.92));
-  }
+  setDesktopLyricsOpacity(payload.opacity);
 }
 
-function sendDesktopLyricsState() {
+function setDesktopLyricsOpacity(value) {
+  if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed() || typeof desktopLyricsWindow.setOpacity !== 'function') return;
+  const nextOpacity = normalizeDesktopLyricsOpacity(value);
+  if (desktopLyricsLastOpacity != null && Math.abs(desktopLyricsLastOpacity - nextOpacity) <= 0.001) return;
+  desktopLyricsLastOpacity = nextOpacity;
+  desktopLyricsWindow.setOpacity(nextOpacity);
+}
+
+function sendDesktopLyricsState(force = false) {
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
+  const signature = desktopLyricsStateSignature(desktopLyricsState);
+  if (!force && signature === desktopLyricsLastStateSignature) return;
+  desktopLyricsLastStateSignature = signature;
   desktopLyricsWindow.webContents.send('mineradio-desktop-lyrics-state', desktopLyricsState);
 }
 
@@ -910,7 +1474,7 @@ function createDesktopLyricsWindow(payload = {}) {
     if (yChanged) {
       positionDesktopLyricsWindow(desktopLyricsState, { force: yChanged });
     } else if (opacityChanged && typeof desktopLyricsWindow.setOpacity === 'function') {
-      desktopLyricsWindow.setOpacity(clampNumber(desktopLyricsState.opacity, 0.28, 1, 0.92));
+      setDesktopLyricsOpacity(desktopLyricsState.opacity);
     }
     applyDesktopLyricsMouseBehavior();
     sendDesktopLyricsState();
@@ -950,12 +1514,14 @@ function createDesktopLyricsWindow(payload = {}) {
   desktopLyricsWindow.once('ready-to-show', () => {
     if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
     desktopLyricsWindow.showInactive();
-    sendDesktopLyricsState();
+    sendDesktopLyricsState(true);
   });
-  desktopLyricsWindow.webContents.once('did-finish-load', sendDesktopLyricsState);
+  desktopLyricsWindow.webContents.once('did-finish-load', () => sendDesktopLyricsState(true));
   desktopLyricsWindow.on('closed', () => {
     desktopLyricsWindow = null;
     desktopLyricsMouseIgnored = null;
+    desktopLyricsLastStateSignature = '';
+    desktopLyricsLastOpacity = null;
   });
   desktopLyricsWindow.on('moved', rememberDesktopLyricsBounds);
   desktopLyricsWindow.loadURL(overlayUrl('desktop-lyrics.html')).catch((e) => console.warn('Desktop lyrics load failed:', e.message));
@@ -966,6 +1532,8 @@ function closeDesktopLyricsWindow() {
   desktopLyricsState = { ...desktopLyricsState, enabled: false };
   desktopLyricsPointerCapture = false;
   desktopLyricsMouseIgnored = null;
+  desktopLyricsLastStateSignature = '';
+  desktopLyricsLastOpacity = null;
   desktopLyricsHotBounds = null;
   stopDesktopLyricsMousePoller();
   if (desktopLyricsWindow && !desktopLyricsWindow.isDestroyed()) {
@@ -976,156 +1544,178 @@ function closeDesktopLyricsWindow() {
   broadcastDesktopLyricsEnabledState(false);
 }
 
-function nativeWindowHandleDecimal(win) {
-  const handle = win.getNativeWindowHandle();
-  if (process.arch === 'x64') return handle.readBigUInt64LE(0).toString();
-  return String(handle.readUInt32LE(0));
+function broadcastWallpaperRuntimeStatus(status) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('mineradio-wallpaper-runtime-state', status || {});
 }
 
-function attachWallpaperToWorkerW(win) {
-  if (process.platform !== 'win32' || !win || win.isDestroyed()) return;
-  const hwnd = nativeWindowHandleDecimal(win);
-  const script = `
-$ErrorActionPreference = "Stop"
-if (-not ("MineradioNativeWin" -as [type])) {
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class MineradioNativeWin {
-  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
-  [DllImport("user32.dll", SetLastError=true)] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
-  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+function ensureWallpaperRuntime() {
+  return desktopWallpaperFeatureGate.run(() => {
+    if (wallpaperRuntime && !wallpaperRuntime.disposed) return wallpaperRuntime;
+    wallpaperRuntime = new WallpaperRuntime({
+      BrowserWindow,
+      screen,
+      platform: process.platform,
+      preloadPath: path.join(__dirname, 'overlay-preload.js'),
+      overlayUrl: () => overlayUrl('wallpaper.html'),
+      execFileImpl: execFile,
+      onStatus: broadcastWallpaperRuntimeStatus,
+    });
+    return wallpaperRuntime;
+  }, null);
 }
-"@
+
+function positionWallpaperWindow(reason = 'display-metrics-changed') {
+  if (!wallpaperRuntime) return Promise.resolve({ ok: true, enabled: false });
+  return wallpaperRuntime.handleSystemEvent(reason);
 }
-$progman = [MineradioNativeWin]::FindWindow("Progman", $null)
-$result = [IntPtr]::Zero
-[MineradioNativeWin]::SendMessageTimeout($progman, 0x052C, [IntPtr]::Zero, [IntPtr]::Zero, 0, 1000, [ref]$result) | Out-Null
-$script:workerw = [IntPtr]::Zero
-$enum = [MineradioNativeWin+EnumWindowsProc]{
-  param([IntPtr]$top, [IntPtr]$param)
-  $shell = [MineradioNativeWin]::FindWindowEx($top, [IntPtr]::Zero, "SHELLDLL_DefView", $null)
-  if ($shell -ne [IntPtr]::Zero) {
-    $script:workerw = [MineradioNativeWin]::FindWindowEx([IntPtr]::Zero, $top, "WorkerW", $null)
-  }
-  return $true
+
+function closeWallpaperWindow(reason = 'disabled') {
+  if (!wallpaperRuntime) return Promise.resolve({ ok: true, enabled: false });
+  return wallpaperRuntime.stop(reason);
 }
-[MineradioNativeWin]::EnumWindows($enum, [IntPtr]::Zero) | Out-Null
-if ($script:workerw -eq [IntPtr]::Zero) { $script:workerw = $progman }
-$target = [IntPtr]::new([Int64]${hwnd})
-[MineradioNativeWin]::SetParent($target, $script:workerw) | Out-Null
-[MineradioNativeWin]::SetWindowPos($target, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
-`;
-  execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-    windowsHide: true,
-    timeout: 5000,
-  }, (error) => {
-    if (error) console.warn('Wallpaper WorkerW attach failed:', error.message);
+
+function wallpaperFeatureDisabledResult() {
+  return { ok: false, enabled: false, error: 'DESKTOP_WALLPAPER_DISABLED' };
+}
+
+function registerWallpaperSystemEventHandlers() {
+  return desktopWallpaperFeatureGate.register(() => {
+    screen.on('display-metrics-changed', () => {
+      positionWallpaperWindow('display-metrics-changed').catch(() => {});
+    });
+    screen.on('display-added', () => {
+      positionWallpaperWindow('display-added').catch(() => {});
+    });
+    screen.on('display-removed', () => {
+      positionWallpaperWindow('display-removed').catch(() => {});
+    });
+    powerMonitor.on('lock-screen', () => positionWallpaperWindow('lock-screen').catch(() => {}));
+    powerMonitor.on('unlock-screen', () => positionWallpaperWindow('unlock-screen').catch(() => {}));
+    powerMonitor.on('suspend', () => positionWallpaperWindow('suspend').catch(() => {}));
+    powerMonitor.on('resume', () => positionWallpaperWindow('resume').catch(() => {}));
   });
-}
-
-function positionWallpaperWindow() {
-  if (!wallpaperWindow || wallpaperWindow.isDestroyed()) return;
-  const bounds = screen.getPrimaryDisplay().bounds;
-  wallpaperWindow.setBounds(bounds, false);
-}
-
-function sendWallpaperState() {
-  if (!wallpaperWindow || wallpaperWindow.isDestroyed()) return;
-  wallpaperWindow.webContents.send('mineradio-wallpaper-state', wallpaperState);
-}
-
-function createWallpaperWindow(payload = {}) {
-  wallpaperState = { ...wallpaperState, ...payload, enabled: true };
-  if (wallpaperWindow && !wallpaperWindow.isDestroyed()) {
-    positionWallpaperWindow();
-    sendWallpaperState();
-    return wallpaperWindow;
-  }
-  const bounds = screen.getPrimaryDisplay().bounds;
-  wallpaperWindow = new BrowserWindow({
-    ...bounds,
-    frame: false,
-    transparent: false,
-    backgroundColor: '#050608',
-    hasShadow: false,
-    resizable: false,
-    movable: false,
-    focusable: false,
-    skipTaskbar: true,
-    show: false,
-    title: 'Mineradio Wallpaper',
-    webPreferences: {
-      preload: path.join(__dirname, 'overlay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      backgroundThrottling: false,
-    },
-  });
-  wallpaperWindow.setIgnoreMouseEvents(true, { forward: true });
-  wallpaperWindow.once('ready-to-show', () => {
-    if (!wallpaperWindow || wallpaperWindow.isDestroyed()) return;
-    positionWallpaperWindow();
-    wallpaperWindow.showInactive();
-    attachWallpaperToWorkerW(wallpaperWindow);
-    sendWallpaperState();
-  });
-  wallpaperWindow.webContents.once('did-finish-load', sendWallpaperState);
-  wallpaperWindow.on('closed', () => {
-    wallpaperWindow = null;
-  });
-  wallpaperWindow.loadURL(overlayUrl('wallpaper.html')).catch((e) => console.warn('Wallpaper load failed:', e.message));
-  return wallpaperWindow;
-}
-
-function closeWallpaperWindow() {
-  wallpaperState = { ...wallpaperState, enabled: false };
-  if (wallpaperWindow && !wallpaperWindow.isDestroyed()) {
-    sendWallpaperState();
-    wallpaperWindow.close();
-  }
-  wallpaperWindow = null;
 }
 
 function closeOverlayWindows() {
   closeDesktopLyricsWindow();
-  closeWallpaperWindow();
+  closeWallpaperWindow('main-window-closed').catch((error) => {
+    console.warn('Wallpaper shutdown failed:', error && error.message);
+  });
 }
 
-ipcMain.handle('desktop-window-minimize', (event) => {
+handleIpc('desktop-window-minimize', (event) => {
   getSenderWindow(event)?.minimize();
 });
 
-ipcMain.handle('desktop-window-toggle-maximize', (event) => {
+handleIpc('desktop-window-toggle-maximize', (event) => {
   toggleFullscreen(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-toggle-fullscreen', (event) => {
+handleIpc('desktop-window-toggle-fullscreen', (event) => {
   toggleFullscreen(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-exit-fullscreen-windowed', (event) => {
+handleIpc('desktop-window-exit-fullscreen-windowed', (event) => {
   exitFullscreenToWindow(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-get-state', (event) => {
+handleIpc('desktop-window-get-state', (event) => {
   return getWindowState(getSenderWindow(event));
 });
 
-ipcMain.handle('desktop-window-close', (event) => {
+handleIpc('mineradio-system-resource-get-state', () => {
+  return sampleSystemResourceState({}, false);
+});
+
+handleIpc('desktop-window-close', (event) => {
   getSenderWindow(event)?.close();
 });
 
-ipcMain.handle('mineradio-hotkeys-configure-global', (_event, bindings) => {
+handleIpc('mineradio-hotkeys-configure-global', (_event, bindings) => {
   return configureMineradioGlobalHotkeys(bindings);
 });
 
-ipcMain.handle('mineradio-export-json-file', async (event, payload = {}) => {
+handleIpc('mineradio-tray-get-settings', () => {
+  const startup = isStartupEnabled();
+  return { ok: true, closeToTray: closeToTrayEnabled, startup, startupEnabled: startup };
+});
+
+handleIpc('mineradio-tray-set-close-to-tray', (_event, enabled) => {
+  closeToTrayEnabled = !!enabled;
+  writeDesktopShellSettings({ closeToTray: closeToTrayEnabled });
+  refreshTrayMenu();
+  return { ok: true, closeToTray: closeToTrayEnabled };
+});
+
+handleIpc('mineradio-startup-set-enabled', (_event, enabled) => {
+  const result = setStartupEnabled(!!enabled);
+  refreshTrayMenu();
+  return result;
+});
+
+handleIpc('mineradio-credential-status', () => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  return {
+    ok: true,
+    ...platformCredentialRuntime.status(),
+  };
+});
+
+handleIpc('mineradio-credential-set', async (_event, provider, credential) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+    };
+  }
+  if (!credential || typeof credential !== 'object') {
+    return { ok: false, error: 'PLATFORM_CREDENTIAL_INVALID' };
+  }
+  if (provider === 'spotify') {
+    return commitPlatformCredential(provider, 'pkce', credential);
+  }
+  const token = Object.getOwnPropertyDescriptor(credential, 'token');
+  if (provider === 'qishui' && token && typeof token.value === 'string') {
+    return commitPlatformCredential(provider, 'token', {
+      token: token.value,
+    });
+  }
+  const cookie = Object.getOwnPropertyDescriptor(credential, 'cookie');
+  if (!cookie || typeof cookie.value !== 'string') {
+    return { ok: false, error: 'PLATFORM_CREDENTIAL_INVALID' };
+  }
+  return commitPlatformCredential(provider, 'cookie', {
+    cookie: cookie.value,
+  });
+});
+
+handleIpc('mineradio-credential-clear', async (_event, provider) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    return {
+      ok: false,
+      error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN',
+    };
+  }
+  return clearServerCredential(provider);
+});
+
+ipcMain.on('mineradio-ui-state-read-sync', (event) => {
+  try {
+    assertAllowedIpcSender(event, 'mineradio-ui-state-read-sync', mainServerPort);
+    event.returnValue = readDesktopUiState().values || {};
+  } catch (_e) {
+    event.returnValue = {};
+  }
+});
+
+handleIpc('mineradio-ui-state-write', (_event, patch) => {
+  return { ok: true, ...writeDesktopUiStatePatch(patch) };
+});
+
+handleIpc('mineradio-export-json-file', async (event, payload = {}) => {
   try {
     const owner = getSenderWindow(event);
     const defaultName = String(payload.defaultName || 'mineradio-export.json').replace(/[\\/:*?"<>|]+/g, '-');
@@ -1143,7 +1733,7 @@ ipcMain.handle('mineradio-export-json-file', async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle('mineradio-import-json-file', async (event) => {
+handleIpc('mineradio-import-json-file', async (event) => {
   try {
     const owner = getSenderWindow(event);
     const result = await dialog.showOpenDialog(owner, {
@@ -1160,23 +1750,94 @@ ipcMain.handle('mineradio-import-json-file', async (event) => {
   }
 });
 
-ipcMain.handle('netease-music-open-login', async (event) => {
-  return openNeteaseMusicLoginWindow(getSenderWindow(event));
+handleIpc('mineradio-local-music-choose-folder', async (event) => {
+  try {
+    const owner = getSenderWindow(event);
+    const result = await dialog.showOpenDialog(owner, {
+      title: '选择本地音乐文件夹',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) return { ok: false, canceled: true };
+    return await localAssetsManager.scanLocalMusicFolder(result.filePaths[0]);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_CHOOSE_FAILED' };
+  }
 });
 
-ipcMain.handle('netease-music-clear-login', async () => {
+handleIpc('mineradio-local-music-scan-folder', async (_event, folderPath, options) => {
+  try {
+    if (!folderPath) return { ok: false, error: 'LOCAL_LIBRARY_PATH_EMPTY' };
+    return await localAssetsManager.scanLocalMusicFolder(folderPath, options || {});
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_SCAN_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-music-refresh-entries', async (_event, folderPath, snapshotOrFiles) => {
+  try {
+    if (!folderPath) return { ok: false, error: 'LOCAL_LIBRARY_PATH_EMPTY' };
+    return await localAssetsManager.refreshLocalMusicFileEntries(folderPath, snapshotOrFiles);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_LIBRARY_REFRESH_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-file-read-range', async (_event, filePath, start, end) => {
+  try {
+    return await localAssetsManager.readAuthorizedLocalFileRange(filePath, start, end);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_FILE_READ_FAILED' };
+  }
+});
+
+handleIpc('mineradio-local-file-read-data-url', async (_event, filePath) => {
+  try {
+    return await localAssetsManager.readAuthorizedLocalFileDataUrl(filePath);
+  } catch (e) {
+    return { ok: false, error: e.message || 'LOCAL_FILE_READ_FAILED' };
+  }
+});
+
+handleIpc('platform-music-open-login', async (event, provider, options) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    provider,
+    options,
+  );
+});
+
+handleIpc('platform-music-clear-login', async (_event, provider) => {
+  if (!platformCredentialRuntime) return credentialRuntimeUnavailable();
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    return { ok: false, error: 'PLATFORM_LOGIN_PROVIDER_UNKNOWN' };
+  }
+  return clearPlatformMusicLoginSession(provider);
+});
+
+handleIpc('netease-music-open-login', async (event) => {
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    'netease',
+  );
+});
+
+handleIpc('netease-music-clear-login', async () => {
   return clearNeteaseMusicLoginSession();
 });
 
-ipcMain.handle('qq-music-open-login', async (event) => {
-  return openQQMusicLoginWindow(getSenderWindow(event));
+handleIpc('qq-music-open-login', async (event) => {
+  return openPlatformMusicLogin(
+    getSenderWindow(event),
+    'qq',
+  );
 });
 
-ipcMain.handle('qq-music-clear-login', async () => {
+handleIpc('qq-music-clear-login', async () => {
   return clearQQMusicLoginSession();
 });
 
-ipcMain.handle('mineradio-open-update-installer', async (_event, filePath) => {
+handleIpc('mineradio-open-update-installer', async (_event, filePath) => {
   try {
     const target = path.resolve(String(filePath || ''));
     const updateDir = path.resolve(getUpdateDownloadDir());
@@ -1191,17 +1852,18 @@ ipcMain.handle('mineradio-open-update-installer', async (_event, filePath) => {
   }
 });
 
-ipcMain.handle('mineradio-restart-app', async () => {
+handleIpc('mineradio-restart-app', async () => {
   try {
+    if (wallpaperEngineRuntime) await wallpaperEngineRuntime.dispose();
     app.relaunch();
-    app.exit(0);
+    app.quit();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message || 'RESTART_FAILED' };
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, payload) => {
+handleIpc('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, payload) => {
   try {
     if (enabled) {
       createDesktopLyricsWindow(payload || {});
@@ -1215,7 +1877,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-enabled', async (_event, enabled, p
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-update', async (_event, payload) => {
+handleIpc('mineradio-desktop-lyrics-update', async (_event, payload) => {
   try {
     const nextState = { ...desktopLyricsState, ...(payload || {}) };
     if (nextState.enabled) {
@@ -1232,11 +1894,11 @@ ipcMain.handle('mineradio-desktop-lyrics-update', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-dragging', async () => {
+handleIpc('mineradio-desktop-lyrics-set-dragging', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-pointer-capture', async (_event, active) => {
+handleIpc('mineradio-desktop-lyrics-set-pointer-capture', async (_event, active) => {
   try {
     desktopLyricsPointerCapture = !!active;
     applyDesktopLyricsMouseBehavior();
@@ -1246,7 +1908,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-pointer-capture', async (_event, ac
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds) => {
+handleIpc('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds) => {
   try {
     const left = clampNumber(bounds && bounds.left, -2000, 4000, 0);
     const top = clampNumber(bounds && bounds.top, -2000, 4000, 0);
@@ -1259,7 +1921,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-hot-bounds', async (_event, bounds)
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-set-lock-state', async (_event, locked) => {
+handleIpc('mineradio-desktop-lyrics-set-lock-state', async (_event, locked) => {
   try {
     desktopLyricsState = { ...desktopLyricsState, clickThrough: !!locked };
     if (desktopLyricsState.clickThrough !== false) desktopLyricsPointerCapture = false;
@@ -1271,7 +1933,7 @@ ipcMain.handle('mineradio-desktop-lyrics-set-lock-state', async (_event, locked)
   }
 });
 
-ipcMain.handle('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
+handleIpc('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
   try {
     if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return { ok: false, error: 'NO_DESKTOP_LYRICS_WINDOW' };
     if (desktopLyricsState.clickThrough !== false) return { ok: false, error: 'DESKTOP_LYRICS_LOCKED' };
@@ -1289,59 +1951,185 @@ ipcMain.handle('mineradio-desktop-lyrics-move-by', async (_event, dx, dy) => {
   }
 });
 
-ipcMain.handle('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) => {
+handleIpc('mineradio-wallpaper-set-enabled', async (_event, enabled, payload) => {
   try {
-    if (enabled) createWallpaperWindow(payload || {});
-    else closeWallpaperWindow();
-    return { ok: true };
+    if (enabled) {
+      const runtime = ensureWallpaperRuntime();
+      if (!runtime) return wallpaperFeatureDisabledResult();
+      return await runtime.start(payload || {});
+    }
+    return await closeWallpaperWindow('disabled');
   } catch (e) {
     return { ok: false, error: e.message || 'WALLPAPER_FAILED' };
   }
 });
 
-ipcMain.handle('mineradio-wallpaper-update', async (_event, payload) => {
+handleIpc('mineradio-wallpaper-update', async (_event, payload) => {
   try {
-    wallpaperState = { ...wallpaperState, ...(payload || {}) };
-    if (wallpaperState.enabled) {
-      createWallpaperWindow(wallpaperState);
-      if (wallpaperWindow && !wallpaperWindow.isDestroyed()) {
-        positionWallpaperWindow();
-        sendWallpaperState();
-      }
-    } else if (wallpaperWindow && !wallpaperWindow.isDestroyed()) {
-      sendWallpaperState();
-    }
-    return { ok: true };
+    const runtime = ensureWallpaperRuntime();
+    if (!runtime) return wallpaperFeatureDisabledResult();
+    return await runtime.update(payload || {});
   } catch (e) {
     return { ok: false, error: e.message || 'WALLPAPER_UPDATE_FAILED' };
   }
 });
 
-async function createWindow() {
-  htmlFullscreenActive = false;
-  windowFullscreenActive = false;
-  const port = await findOpenPort(3000);
-  mainServerPort = port;
+handleIpc('mineradio-wallpaper-get-status', async () => {
+  const runtime = wallpaperRuntime;
+  return {
+    ok: true,
+    status: runtime ? runtime.getStatus('requested') : { enabled: false, active: false, phase: 'disabled' },
+    diagnostics: runtime ? runtime.getDiagnostics() : { events: [] },
+  };
+});
 
+handleIpc('mineradio-wallpaper-engine-list', async (_event, payload = {}) => {
+  try {
+    const force = payload && payload.force === true;
+    const snapshot = await wallpaperEngineLibrary.list({ force });
+    return await withWallpaperEngineRuntimeStatus(snapshot, force);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_LIBRARY_SCAN_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-choose-directory', async (event) => {
+  try {
+    const result = await dialog.showOpenDialog(getSenderWindow(event), {
+      title: '选择 Wallpaper Engine 项目目录',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.addManualRoot(result.filePaths[0]),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_DIRECTORY_IMPORT_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-choose-project-file', async (event) => {
+  try {
+    const result = await dialog.showOpenDialog(getSenderWindow(event), {
+      title: '选择 Wallpaper Engine 项目',
+      properties: ['openFile'],
+      filters: [{ name: 'Wallpaper Engine 项目', extensions: ['json', 'pkg', 'pak'] }],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.addManualProjectFile(result.filePaths[0]),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_PROJECT_IMPORT_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-remove-directory', async (_event, rootId) => {
+  try {
+    const id = String(rootId || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(id)) return { ok: false, error: 'WALLPAPER_ENGINE_ROOT_ID_INVALID' };
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.removeManualRoot(id),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_DIRECTORY_REMOVE_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-runtime-status', async (_event, payload = {}) => {
+  try {
+    const runtime = ensureWallpaperEngineRuntime();
+    return {
+      ok: true,
+      engine: await runtime.probe(payload && payload.force === true),
+      session: runtime.getStatus(),
+    };
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_RUNTIME_STATUS_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-start-scene', async (event, payload = {}) => {
+  try {
+    const id = String(payload && payload.id || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(id)) return { ok: false, error: 'WALLPAPER_SCENE_ID_INVALID' };
+    const owner = getSenderWindow(event) || mainWindow;
+    const bounds = owner && typeof owner.getContentBounds === 'function'
+      ? owner.getContentBounds()
+      : { x: 0, y: 0, width: 1280, height: 720 };
+    return await ensureWallpaperEngineRuntime().start(id, {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      fps: clampNumber(payload && payload.fps, 15, 120, 60),
+    });
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_START_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-park-scene', async (_event, payload = {}) => {
+  try {
+    const sessionId = String(payload && payload.sessionId || payload || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(sessionId)) return { ok: false, error: 'WALLPAPER_ENGINE_SESSION_ID_INVALID' };
+    return await ensureWallpaperEngineRuntime().parkActiveWindow(sessionId);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_PARK_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-stop-scene', async (_event, payload = {}) => {
+  try {
+    const sessionId = String(payload && payload.sessionId || '').trim().toLowerCase();
+    if (sessionId && !/^[a-f0-9]{24}$/.test(sessionId)) {
+      return { ok: false, error: 'WALLPAPER_ENGINE_SESSION_ID_INVALID' };
+    }
+    return await ensureWallpaperEngineRuntime().stop(sessionId);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_STOP_FAILED');
+  }
+});
+
+function configureLocalServerEnvironment(port) {
   process.env.HOST = '127.0.0.1';
   process.env.PORT = String(port);
-  process.env.COOKIE_FILE = path.join(app.getPath('userData'), '.cookie');
-  process.env.QQ_COOKIE_FILE = path.join(app.getPath('userData'), '.qq-cookie');
-  process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
-  try {
-    const legacyQQCookie = path.join(__dirname, '..', '.qq-cookie');
-    if (fs.existsSync(legacyQQCookie)) {
-      if (!fs.existsSync(process.env.QQ_COOKIE_FILE)) {
-        fs.copyFileSync(legacyQQCookie, process.env.QQ_COOKIE_FILE);
-      }
-      fs.unlinkSync(legacyQQCookie);
-    }
-  } catch (e) {
-    console.warn('QQ cookie migration skipped:', e.message);
-  }
+  process.env.MINERADIO_PLATFORM_CACHE_FILE = APP_PATHS.platformCache;
+  process.env.MINERADIO_LISTEN_SYNC_FILE = APP_PATHS.listenJournal;
+  process.env.MINERADIO_UPDATE_DIR = APP_PATHS.updateDirectory;
+  process.env.MINERADIO_BEAT_CACHE_DIR = APP_PATHS.beatmapDirectory;
+  process.env.MINERADIO_LYRICS_DIR = APP_PATHS.lyricsDirectory;
+  process.env.MINERADIO_LOCAL_METADATA_DIR = APP_PATHS.localMetadataDirectory;
+}
 
-  localServer = require(path.join(__dirname, '..', 'server.js'));
+function createWindow() {
+  if (createWindowPromise) return createWindowPromise;
+  if (mainWindow && !mainWindow.isDestroyed()) return Promise.resolve(mainWindow);
+  createWindowPromise = createWindowInternal().finally(() => {
+    createWindowPromise = null;
+  });
+  return createWindowPromise;
+}
+
+async function createWindowInternal() {
+  if (appQuitting) return null;
+  await initializePlatformCredentialRuntime();
+  if (appQuitting) return null;
+  htmlFullscreenActive = false;
+  windowFullscreenActive = false;
+  if (!localServer) {
+    configureLocalServerEnvironment(3000);
+    localServer = require(path.join(__dirname, '..', 'server.js'));
+  }
   await waitForServer(localServer);
+  if (appQuitting) return null;
+  const port = localServer.address().port;
+  mainServerPort = port;
+  process.env.PORT = String(port);
 
   const initialBounds = getWindowedBounds();
 
@@ -1368,8 +2156,13 @@ async function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openSafeExternal(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', guardMainNavigation);
+  mainWindow.webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) guardMainNavigation(event, url);
   });
 
   mainWindow.webContents.once('did-finish-load', () => {
@@ -1384,6 +2177,7 @@ async function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    if (appQuitting || !mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.show();
     sendWindowState(mainWindow);
   });
@@ -1398,6 +2192,12 @@ async function createWindow() {
   mainWindow.on('blur', () => sendWindowState(mainWindow));
   mainWindow.on('move', () => scheduleWindowStateSend(mainWindow));
   mainWindow.on('resize', () => scheduleWindowStateSend(mainWindow));
+  mainWindow.on('close', (event) => {
+    if (appQuitting || !closeToTrayEnabled || process.platform !== 'win32') return;
+    event.preventDefault();
+    mainWindow.hide();
+    sendWindowState(mainWindow);
+  });
   mainWindow.on('closed', () => {
     if (mainWindowStateTimer) {
       clearTimeout(mainWindowStateTimer);
@@ -1424,29 +2224,64 @@ async function createWindow() {
   });
 
   await mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  if (appQuitting) {
+    const window = mainWindow;
+    if (window && !window.isDestroyed()) window.destroy();
+    return null;
+  }
+  return mainWindow;
 }
 
-app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!focusMainWindow()) {
-      app.whenReady().then(() => createWindow()).catch((e) => console.error('Second instance window restore failed:', e));
-    }
+    focusMainWindow();
   });
 
   app.whenReady().then(async () => {
+    await initializePlatformCredentialRuntime();
+    registerLocalFileProtocol();
+    await wallpaperEngineLibrary.installProtocol(protocol);
+    applySavedDesktopShellSettings();
+    createTray();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
-      positionWallpaperWindow();
       scheduleWindowStateSend(mainWindow);
     });
-    screen.on('display-added', () => scheduleWindowStateSend(mainWindow));
-    screen.on('display-removed', () => scheduleWindowStateSend(mainWindow));
-    await createWindow();
+    screen.on('display-added', () => {
+      scheduleWindowStateSend(mainWindow);
+    });
+    screen.on('display-removed', () => {
+      scheduleWindowStateSend(mainWindow);
+    });
+    registerWallpaperSystemEventHandlers();
+    powerMonitor.on('lock-screen', () => sampleSystemResourceState({ locked: true }));
+    powerMonitor.on('unlock-screen', () => sampleSystemResourceState({ locked: false }));
+    powerMonitor.on('suspend', () => sampleSystemResourceState({ suspended: true }));
+    powerMonitor.on('resume', () => sampleSystemResourceState({ suspended: false }));
+    powerMonitor.on('on-battery', () => sampleSystemResourceState({ onBattery: true }));
+    powerMonitor.on('on-ac', () => sampleSystemResourceState({ onBattery: false }));
+    powerMonitor.on('thermal-state-change', (details) => sampleSystemResourceState({ thermalState: details && details.state }));
+    powerMonitor.on('speed-limit-change', (details) => sampleSystemResourceState({ speedLimit: details && details.limit }));
+    startSystemResourceMonitoring();
+    eislandBridgeLifecycle = createEislandBridgeLifecycle({
+      appData: app.getPath('appData'),
+      createBridgeDiscoveryPublisher,
+      createBridgeServer: createEislandBridgeServer,
+      createInstanceId: randomUUID,
+      createPlayerBridge,
+      createToken: () => randomBytes(32).toString('base64url'),
+      getMainWindow: () => mainWindow,
+      isPrimaryInstance: () => gotSingleInstanceLock,
+      pid: process.pid,
+      quit: () => app.quit(),
+    });
+    await eislandBridgeLifecycle.start({ createWindow });
+  }).catch((error) => {
+    console.error('Mineradio startup failed:', error);
   });
 
   app.on('activate', () => {
@@ -1458,9 +2293,16 @@ if (!gotSingleInstanceLock) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', () => {
-    unregisterMineradioGlobalHotkeys();
-    closeOverlayWindows();
-    if (localServer && localServer.close) localServer.close();
+  app.on('before-quit', (event) => {
+    appQuitting = true;
+    if (appShutdownPrepared) return;
+    event.preventDefault();
+    if (appShutdownPromise) return;
+    appShutdownPromise = prepareAppShutdown()
+      .catch((error) => console.error('[Desktop] Shutdown cleanup failed:', error && error.message || error))
+      .finally(() => {
+        appShutdownPrepared = true;
+        app.quit();
+      });
   });
 }

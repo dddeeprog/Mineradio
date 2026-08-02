@@ -1,3 +1,8 @@
+; Adapted from XxHuberrr/Mineradio build/installer.nsh at
+; 4abaa190de42c632365ae4244e041bad16443224 (GPL-3.0-only).
+; Local rewrite preserves the visual shell while delegating ownership safety
+; to generated allowlists and build/installer-guard.nsh.
+
 !ifndef MUI_BGCOLOR
   !define MUI_BGCOLOR "FFFFFF"
 !endif
@@ -35,6 +40,18 @@
 !include FileFunc.nsh
 !include nsDialogs.nsh
 !include WinMessages.nsh
+!define /ifndef INSTALL_REGISTRY_KEY "Software\${APP_GUID}"
+!define /ifndef MINERADIO_PENDING_REGISTRY_KEY "${INSTALL_REGISTRY_KEY}.Pending"
+!define /ifndef UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"
+!define MINERADIO_UNINSTALL_FILENAME "Uninstall ${PRODUCT_FILENAME}.exe"
+!include ".generated\installer-files.nsh"
+!include "installer-guard.nsh"
+
+!ifndef BUILD_UNINSTALLER
+!macro customHeader
+  !insertmacro MineradioDefineInstalledManifestValidator
+!macroend
+!endif
 
 !ifndef BUILD_UNINSTALLER
   Var MineradioWelcomePage
@@ -48,8 +65,112 @@
 
 !macro customInit
   !ifndef BUILD_UNINSTALLER
+    ${If} "$installMode" == "CurrentUser"
+      StrCpy $MineradioUpgradeModeArgument "/currentuser"
+    ${Else}
+      StrCpy $MineradioUpgradeModeArgument "/allusers"
+    ${EndIf}
     Call MineradioUsePreferredInstallDir
+    Call MineradioRecoverOwnershipTransaction
+    Pop $0
+    ${If} "$0" != "1"
+      MessageBox MB_ICONSTOP|MB_OK "Mineradio could not safely recover an interrupted ownership transaction."
+      Abort
+    ${EndIf}
+    Call MineradioValidateInstallCommitTarget
+    Pop $0
+    ${If} "$0" != "1"
+      MessageBox MB_ICONSTOP|MB_OK "The selected installation directory is unsafe or belongs to another Mineradio channel."
+      Abort
+    ${EndIf}
+    Call MineradioPrepareUpgrade
+    ${If} "$installMode" == "all"
+      Push "$INSTDIR"
+      Push "$MineradioOwnedUpgrade"
+      Push "$MineradioOwnedUpgradePath"
+      Push "$MineradioInstallReservationActive"
+      SetShellVarContext current
+      StrCpy $MineradioUpgradeModeArgument "/currentuser"
+      Call MineradioRecoverOwnershipTransaction
+      Pop $0
+      ${If} "$0" != "1"
+        MessageBox MB_ICONSTOP|MB_OK "Mineradio could not safely recover an interrupted current-user ownership transaction."
+        Abort
+      ${EndIf}
+      Call MineradioPrepareUpgrade
+      SetShellVarContext all
+      Pop $MineradioInstallReservationActive
+      Pop $MineradioOwnedUpgradePath
+      Pop $MineradioOwnedUpgrade
+      Pop $INSTDIR
+      StrCpy $MineradioUpgradeModeArgument "/allusers"
+    ${EndIf}
+    Call MineradioUsePreferredInstallDir
+    Call MineradioValidateInstallCommitTarget
+    Pop $0
+    ${If} "$0" != "1"
+      MessageBox MB_ICONSTOP|MB_OK "The selected installation directory is unsafe or belongs to another Mineradio channel."
+      Abort
+    ${EndIf}
+    ${If} ${Silent}
+      Call MineradioEnsureInstallReservation
+      Pop $0
+      ${If} "$0" != "1"
+        MessageBox MB_ICONSTOP|MB_OK "Mineradio could not reserve the selected installation directory."
+        Abort
+      ${EndIf}
+    ${EndIf}
   !endif
+!macroend
+
+!macro customInstall
+  !ifndef BUILD_UNINSTALLER
+    Call MineradioValidateInstallCommitTarget
+    Pop $0
+    ${If} "$0" != "1"
+      Abort
+    ${EndIf}
+    !insertmacro MineradioInstallOwnedManifest
+    Call MineradioCommitInstalledOwnership
+    Pop $0
+    ${If} "$0" != "1"
+      MessageBox MB_ICONSTOP|MB_OK "Mineradio installation manifest validation failed. Ownership was not committed."
+      Abort
+    ${EndIf}
+  !endif
+!macroend
+
+!macro customRemoveFiles
+  !ifdef BUILD_UNINSTALLER
+    Call un.MineradioValidateExactOwnership
+    Pop $0
+    ${If} "$0" != "1"
+      MessageBox MB_ICONSTOP|MB_OK "Mineradio ownership validation failed. No installed files were removed."
+      Abort
+    ${EndIf}
+    !insertmacro MineradioValidateManagedPaths
+    !insertmacro MineradioRemoveManagedFiles
+  !endif
+!macroend
+
+!macro MineradioHandleOldUninstallResult
+  ${If} ${Errors}
+    DetailPrint "The verified Mineradio uninstaller could not be started."
+    SetErrorLevel 2
+    Quit
+  ${ElseIf} $R0 != 0
+    DetailPrint "The verified Mineradio uninstaller failed with code $R0."
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+!macroend
+
+!macro customUnInstallCheck
+  !insertmacro MineradioHandleOldUninstallResult
+!macroend
+
+!macro customUnInstallCheckCurrentUser
+  !insertmacro MineradioHandleOldUninstallResult
 !macroend
 
 !macro customWelcomePage
@@ -198,6 +319,8 @@ Function MineradioTintCommonControls
 FunctionEnd
 
 Function MineradioUsePreferredInstallDir
+  StrCmp "$MineradioOwnedUpgrade" "1" MineradioUsePreferredInstallDirDone
+  StrCmp "$MineradioInstallReservationActive" "1" MineradioUsePreferredInstallDirDone
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "/D=" $R1
@@ -206,8 +329,9 @@ Function MineradioUsePreferredInstallDir
     StrCpy $INSTDIR "$R1"
   ${Else}
     IfFileExists "D:\*.*" 0 +2
-    StrCpy $INSTDIR "D:\Mineradio"
+    StrCpy $INSTDIR "D:\${PRODUCT_NAME}"
   ${EndIf}
+  MineradioUsePreferredInstallDirDone:
 FunctionEnd
 
 Function MineradioNormalizeInstallDir
@@ -216,14 +340,14 @@ Function MineradioNormalizeInstallDir
   ${If} $1 == 2
     StrCpy $2 "$0" 1 1
     ${If} $2 == ":"
-      StrCpy $0 "$0\Mineradio"
+      StrCpy $0 "$0\${PRODUCT_NAME}"
     ${EndIf}
   ${ElseIf} $1 == 3
     StrCpy $2 "$0" 1 1
     StrCpy $3 "$0" 1 2
     ${If} $2 == ":"
     ${AndIf} $3 == "\"
-      StrCpy $0 "$0Mineradio"
+      StrCpy $0 "$0${PRODUCT_NAME}"
     ${EndIf}
   ${EndIf}
   Exch $0
@@ -249,7 +373,7 @@ Function MineradioWelcomeShow
   SendMessage $0 ${WM_SETFONT} $MineradioSmallFont 1
   SetCtlColors $0 "3257F7" "FFFFFF"
 
-  ${NSD_CreateLabel} 22u 42u 226u 30u "Mineradio 安装"
+  ${NSD_CreateLabel} 22u 42u 226u 30u "${PRODUCT_NAME} 安装"
   Pop $0
   SendMessage $0 ${WM_SETFONT} $MineradioHeroFont 1
   SetCtlColors $0 "111217" "FFFFFF"
@@ -258,7 +382,7 @@ Function MineradioWelcomeShow
   Pop $0
   SetCtlColors $0 "" "3257F7"
 
-  ${NSD_CreateLabel} 22u 96u 238u 24u "为这台电脑安装 Mineradio。默认安装到 D:\Mineradio，下一步可以自由选择其它位置。"
+  ${NSD_CreateLabel} 22u 96u 238u 24u "为这台电脑安装 ${PRODUCT_NAME}。默认安装到 D:\${PRODUCT_NAME}，下一步可以自由选择其它位置。"
   Pop $0
   SendMessage $0 ${WM_SETFONT} $MineradioBodyFont 1
   SetCtlColors $0 "4B5263" "FFFFFF"
@@ -272,7 +396,7 @@ Function MineradioWelcomeShow
 FunctionEnd
 
 Function MineradioDirectoryBrowse
-  nsDialogs::SelectFolderDialog "选择 Mineradio 安装文件夹" "$INSTDIR"
+  nsDialogs::SelectFolderDialog "选择 ${PRODUCT_NAME} 安装文件夹" "$INSTDIR"
   Pop $0
   ${If} $0 != error
   ${AndIf} $0 != ""
@@ -323,7 +447,7 @@ Function MineradioDirectoryShow
   SendMessage $0 ${WM_SETFONT} $MineradioSmallFont 1
   ${NSD_OnClick} $0 MineradioDirectoryBrowse
 
-  ${NSD_CreateLabel} 22u 122u 238u 12u "默认推荐：D:\Mineradio；选盘符会自动建文件夹。"
+  ${NSD_CreateLabel} 22u 122u 238u 12u "默认推荐：D:\${PRODUCT_NAME}；选盘符会自动建文件夹。"
   Pop $0
   SendMessage $0 ${WM_SETFONT} $MineradioSmallFont 1
   SetCtlColors $0 "6B7280" "FFFFFF"
@@ -342,5 +466,17 @@ Function MineradioDirectoryLeave
   Pop $0
   StrCpy $INSTDIR "$0"
   SendMessage $MineradioDirectoryInput ${WM_SETTEXT} 0 "STR:$INSTDIR"
+  Call MineradioValidateInstallCommitTarget
+  Pop $1
+  ${If} "$1" != "1"
+    MessageBox MB_ICONSTOP|MB_OK "The selected installation directory is unsafe or belongs to another Mineradio channel."
+    Abort
+  ${EndIf}
+  Call MineradioEnsureInstallReservation
+  Pop $1
+  ${If} "$1" != "1"
+    MessageBox MB_ICONSTOP|MB_OK "Mineradio could not reserve the selected installation directory."
+    Abort
+  ${EndIf}
 FunctionEnd
 !endif

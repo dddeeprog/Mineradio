@@ -1,10 +1,13 @@
 // ====================================================================
 //  粒子音乐可视化播放器 — Server v2
 //  - 网易云搜索 / 歌曲URL / 封面/音频代理
-//  - 扫码登录 (login_qr_*) + cookie 持久化 (./.cookie)
+//  - 扫码登录 (login_qr_*) + 安全凭据会话
 //  - 试听检测 (freeTrialInfo) + 全 quality 探测
 //  - 所有受保护 API 都会带上已登录用户的 cookie
 // ====================================================================
+const { installProcessOutputGuards } = require('./server/process-stream-safety');
+installProcessOutputGuards();
+
 const {
   search,
   cloudsearch,
@@ -18,7 +21,12 @@ const {
   logout,
   user_account,
   user_playlist,
+  album,
+  album_detail_dynamic,
+  album_sub,
   comment_music,
+  comment,
+  comment_like,
   artist_detail,
   artist_top_song,
   artist_songs,
@@ -28,6 +36,7 @@ const {
   playlist_tracks,
   playlist_track_add,
   playlist_create,
+  playlist_subscribe,
   playlist_detail,
   playlist_track_all,
   personalized,
@@ -43,6 +52,7 @@ const {
   sati_resource_sub_list,
   lyric,
   lyric_new,
+  scrobble,
 } = require('NeteaseCloudMusicApi');
 const http = require('http');
 const https = require('https');
@@ -53,16 +63,91 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const {
+  corsHeadersForOrigin,
+  isAllowedCorsOrigin,
+  isAllowedRequestOrigin,
+  isMethodAllowedForRoute,
+  resolveBindHost,
+} = require('./server/security');
+const updateTools = require('./server/update');
+const {
+  createGithubUpdatePlan,
+  normalizeUpdateChannel,
+  selectGithubRelease,
+} = require('./server/update-channel');
+const cookieTools = require('./server/cookies');
+const proxyTools = require('./server/proxy');
+const weatherTools = require('./server/weather');
+const neteaseMusic = require('./server/music/netease');
+const qqMusic = require('./server/music/qq');
+const {
+  createAccountCacheBinding,
+  createAccountScopedCache,
+} = require('./server/platform/account-cache');
+const { createAccountContext } = require('./server/platform/account-context');
+const { createAccountLifecycle } = require('./server/platform/account-lifecycle');
+const {
+  createCredentialSession,
+  processCredentialSessionHost,
+} = require('./server/platform/credential-session');
+const {
+  createBaselineImplementationRegistry,
+} = require('./server/platform/implementation-registry');
+const { createReleaseFeatureFlags } = require('./server/platform/feature-flags');
+const { createListenJournal } = require('./server/platform/listen-journal');
+const {
+  createListenReporter,
+  createNeteaseScrobbleAdapter,
+  createReportingAccountResolver,
+  loadOrCreateReportingBindingSecret,
+} = require('./server/platform/listen-reporter');
+const { createSearchAggregator } = require('./server/platform/search-aggregator');
+const {
+  createKugouAccountVerifier,
+  createKugouSearchAdapter,
+} = require('./server/platform/providers/kugou-search');
+const { createLegacySearchAdapter } = require('./server/platform/providers/legacy-search');
+const {
+  createQishuiAccountVerifier,
+  createQishuiSearchAdapter,
+} = require('./server/platform/providers/qishui-search');
+const { createSpotifySearchAdapter } = require('./server/platform/providers/spotify-search');
+const {
+  createNeteaseLibraryAdapter,
+} = require('./server/platform/providers/netease-library');
+const { createAppStatusRoutes } = require('./server/routes/app-status');
+const { createBeatmapCacheRoutes } = require('./server/routes/beatmap-cache');
+const { createDiscoverRoutes } = require('./server/routes/discover');
+const { createFoliaLyricRoutes } = require('./server/routes/folia-lyrics');
+const { createFoliaThemeRoutes } = require('./server/routes/folia-theme');
+const { createListenRoutes } = require('./server/routes/listen');
+const { createNeteaseRoutes } = require('./server/routes/netease');
+const { createPlatformRoutes } = require('./server/routes/platform');
+const { createPlatformSearchRoutes } = require('./server/routes/platform-search');
+const { createPodcastRoutes } = require('./server/routes/podcast');
+const { createProxyRoutes } = require('./server/routes/proxy');
+const { createQQRoutes } = require('./server/routes/qq');
+const { createUpdateRoutes } = require('./server/routes/update');
+const { createWeatherFullRoutes } = require('./server/routes/weather-full');
+const { createWeatherRadioRoutes } = require('./server/routes/weather-radio');
+const { listenOnAvailablePort } = require('./server/listener');
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const configuredPort = Number(process.env.PORT);
+const PREFERRED_PORT = Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65535
+  ? configuredPort
+  : 3000;
+const HOST = resolveBindHost(process.env);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const COOKIE_FILE = process.env.COOKIE_FILE || path.join(__dirname, '.cookie');
-const QQ_COOKIE_FILE = process.env.QQ_COOKIE_FILE || path.join(__dirname, '.qq-cookie');
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
-const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
+const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR
+  || path.join(__dirname, 'data', 'beatmap');
+const LISTEN_SYNC_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE
+  || path.join(__dirname, 'data', 'journal', 'listen-sync-journal.json');
+const LISTEN_BINDING_SECRET_FILE = process.env.MINERADIO_LISTEN_BINDING_SECRET_FILE
+  || `${LISTEN_SYNC_FILE}.binding-secret`;
 const APP_PACKAGE = readPackageInfo();
 const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
@@ -74,18 +159,23 @@ const UPDATE_FALLBACK_NOTES = [
   '音源失败自动换源',
   '右上角更新提示',
 ];
-const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
-const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
-const WEATHER_IP_LOCATION_URL = 'http://ip-api.com/json/';
-const WEATHER_DEFAULT_LOCATION = {
-  name: '上海',
-  country: 'China',
-  latitude: 31.2304,
-  longitude: 121.4737,
-  timezone: 'Asia/Shanghai',
-};
+const WEATHER_DEFAULT_LOCATION = weatherTools.WEATHER_DEFAULT_LOCATION;
+const WEATHER_IP_LOCATION_URL = weatherTools.WEATHER_IP_LOCATION_URL;
+
+let server = null;
+
+function currentServerPort() {
+  const address = server && server.address();
+  return address && typeof address === 'object' && Number.isInteger(address.port)
+    ? address.port
+    : PREFERRED_PORT;
+}
 
 const updateDownloadJobs = new Map();
+const implementationRegistry = createBaselineImplementationRegistry();
+implementationRegistry.register('netease', 'recentPlayReport');
+implementationRegistry.register('netease', 'listenDurationReport');
+const platformFeatureFlags = createReleaseFeatureFlags();
 
 function applySystemCertificateAuthorities() {
   try {
@@ -119,71 +209,81 @@ const MIME = {
   '.svg':  'image/svg+xml',
 };
 
-// ---------- Cookie 持久化 ----------
-const COOKIE_ATTRIBUTE_NAMES = new Set(['path', 'domain', 'expires', 'max-age', 'samesite', 'secure', 'httponly']);
-function collectCookiePair(picked, key, value) {
-  key = String(key || '').trim();
-  if (!key || COOKIE_ATTRIBUTE_NAMES.has(key.toLowerCase())) return;
-  if (value === null || value === undefined) return;
-  picked.set(key, String(value).trim());
-}
-function collectCookieInput(input, picked) {
-  if (input === null || input === undefined) return;
-  if (Array.isArray(input)) {
-    input.forEach(item => collectCookieInput(item, picked));
-    return;
-  }
-  if (typeof input === 'object') {
-    if (input.name && Object.prototype.hasOwnProperty.call(input, 'value')) {
-      collectCookiePair(picked, input.name, input.value);
-      return;
-    }
-    Object.keys(input).forEach(key => {
-      const value = input[key];
-      if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
-        collectCookiePair(picked, key, value.value);
-      } else if (typeof value !== 'object') {
-        collectCookiePair(picked, key, value);
-      }
-    });
-    return;
-  }
-  String(input).split(/\r?\n/).forEach(line => {
-    line.split(';').forEach(part => {
-      const raw = String(part || '').trim();
-      const idx = raw.indexOf('=');
-      if (idx <= 0) return;
-      collectCookiePair(picked, raw.slice(0, idx), raw.slice(idx + 1));
-    });
-  });
-}
-function normalizeCookieHeader(input) {
-  const picked = new Map();
-  collectCookieInput(input, picked);
-  return Array.from(picked.entries())
-    .filter(([key, value]) => key && value != null && String(value) !== '')
-    .map(([key, value]) => `${key}=${value}`)
-    .join('; ');
-}
-function rawCookieFallback(input) {
-  if (typeof input === 'string') return input.trim();
-  if (Array.isArray(input) && input.every(item => typeof item === 'string')) return input.join('; ').trim();
-  return '';
-}
-let userCookie = '';
-try { if (fs.existsSync(COOKIE_FILE)) userCookie = fs.readFileSync(COOKIE_FILE, 'utf8').trim(); }
-catch (e) { userCookie = ''; }
-function saveCookie(c) {
-  userCookie = normalizeCookieHeader(c) || rawCookieFallback(c);
-  try { fs.writeFileSync(COOKIE_FILE, userCookie); } catch (e) {}
+// ---------- 安全凭据与账户上下文 ----------
+const normalizeCookieHeader = cookieTools.normalizeCookieHeader;
+const rawCookieFallback = cookieTools.rawCookieFallback;
+const parseCookieString = cookieTools.parseCookieString;
+const readCookieFromResponse = cookieTools.readCookieFromResponse;
+const normalizeQQCookieInput = cookieTools.normalizeQQCookieInput;
+
+function resolveCredentialSession() {
+  const attached = processCredentialSessionHost.get();
+  if (attached) return attached;
+  const session = createCredentialSession({ mode: 'memory-only' });
+  session.hydrate({});
+  processCredentialSessionHost.attach(session);
+  return session;
 }
 
-let qqCookie = '';
-try { if (fs.existsSync(QQ_COOKIE_FILE)) qqCookie = fs.readFileSync(QQ_COOKIE_FILE, 'utf8').trim(); }
-catch (e) { qqCookie = ''; }
-function saveQQCookie(c) {
-  qqCookie = normalizeCookieHeader(c) || rawCookieFallback(c);
-  try { fs.writeFileSync(QQ_COOKIE_FILE, qqCookie); } catch (e) {}
+const credentialSession = resolveCredentialSession();
+const accountScopedCache = createAccountScopedCache();
+const platformInflight = new Map();
+const platformAccountStates = new Map();
+const accountContext = createAccountContext({
+  clearScope: scope => accountScopedCache.clearScope(scope),
+  clearInflight(provider) {
+    platformInflight.delete(provider);
+  },
+  clearSession(provider) {
+    return credentialSession.clear(provider);
+  },
+  publish(provider, account) {
+    platformAccountStates.set(provider, account);
+  },
+});
+const accountLifecycle = createAccountLifecycle({
+  credentialSession,
+  accountContext,
+});
+
+function providerCredential(provider) {
+  try {
+    return credentialSession.read(provider) || {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function getUserCookie() {
+  const value = providerCredential('netease').cookie;
+  return typeof value === 'string' ? value : '';
+}
+
+function getQQCookie() {
+  const value = providerCredential('qq').cookie;
+  return typeof value === 'string' ? value : '';
+}
+
+function neteaseAccountCache(info, cookieSnapshot) {
+  const accountId = info && (info.userId ?? info.accountId);
+  const credential = typeof cookieSnapshot === 'string'
+    ? cookieSnapshot
+    : getUserCookie();
+  if (!info || info.loggedIn !== true || accountId == null || accountId === '' || !credential) {
+    return null;
+  }
+  return createAccountCacheBinding({
+    cache: accountScopedCache,
+    provider: 'netease',
+    accountId,
+    credential,
+  });
+}
+
+function invalidateNeteaseAccountCache(info, change) {
+  const cache = neteaseAccountCache(info);
+  if (!cache || !change || typeof change !== 'object') return false;
+  return cache.delete(change.namespace, change.key);
 }
 
 // ---------- 工具 ----------
@@ -196,9 +296,10 @@ function serveStatic(res, filePath) {
   });
 }
 function sendJSON(res, data, status) {
+  const req = res.mineradioRequest || null;
   res.writeHead(status || 200, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
+    ...corsHeadersForOrigin(req && req.headers && req.headers.origin, currentServerPort()),
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
@@ -224,6 +325,7 @@ function parseGitHubRepository(input) {
 }
 function readUpdateConfig(pkg) {
   const local = (pkg && pkg.mineradio && pkg.mineradio.update) || {};
+  const build = (pkg && pkg.mineradioBuild) || {};
   const repoHint = process.env.MINERADIO_UPDATE_REPOSITORY
     || process.env.GITHUB_REPOSITORY
     || local.repository
@@ -237,6 +339,9 @@ function readUpdateConfig(pkg) {
     provider: local.provider || 'github',
     owner,
     repo,
+    channel: normalizeUpdateChannel(
+      process.env.MINERADIO_UPDATE_CHANNEL || local.channel || build.updateChannel,
+    ),
     configured: !!(owner && repo),
     preview: local.preview !== false,
     preferMirrors: local.preferMirrors !== false,
@@ -269,17 +374,10 @@ function readUpdateMirrors(local) {
   return mirrors.slice(0, 6);
 }
 function normalizeDigest(value, algorithm) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const prefix = new RegExp('^' + algorithm + ':', 'i');
-  return raw.replace(prefix, '').trim().replace(/^['"]|['"]$/g, '');
+  return updateTools.normalizeDigest(value, algorithm);
 }
 function assetDigestInfo(asset) {
-  const digest = String(asset && asset.digest || '').trim();
-  return {
-    sha256: normalizeDigest((asset && asset.sha256) || (/^sha256:/i.test(digest) ? digest : ''), 'sha256').toLowerCase(),
-    sha512: normalizeDigest((asset && asset.sha512) || (/^sha512:/i.test(digest) ? digest : ''), 'sha512'),
-  };
+  return updateTools.assetDigestInfo(asset);
 }
 function buildMirrorUrl(originalUrl, mirror) {
   const source = String(originalUrl || '').trim();
@@ -327,19 +425,10 @@ function publicDownloadUrls(candidates) {
     .filter(Boolean);
 }
 function normalizeVersion(value) {
-  return String(value || '').trim().replace(/^v/i, '').replace(/[+].*$/, '').replace(/-.+$/, '');
+  return updateTools.normalizeVersion(value);
 }
 function compareVersions(a, b) {
-  const aa = normalizeVersion(a).split('.').map(n => parseInt(n, 10) || 0);
-  const bb = normalizeVersion(b).split('.').map(n => parseInt(n, 10) || 0);
-  const len = Math.max(aa.length, bb.length, 3);
-  for (let i = 0; i < len; i++) {
-    const left = aa[i] || 0;
-    const right = bb[i] || 0;
-    if (left > right) return 1;
-    if (left < right) return -1;
-  }
-  return 0;
+  return updateTools.compareVersions(a, b);
 }
 function cleanReleaseLine(line) {
   return String(line || '')
@@ -363,55 +452,17 @@ function extractReleaseNotes(body) {
   return notes.slice(0, 4);
 }
 function pickReleaseAsset(assets) {
-  const list = Array.isArray(assets) ? assets : [];
-  const preferred = list.find(a => /\.(exe|msi)$/i.test(a && a.name || ''))
-    || list.find(a => /\.(zip|7z)$/i.test(a && a.name || ''))
-    || list[0];
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
+  return updateTools.pickReleaseAsset(assets, {
+    downloadUrlsFor: url => publicDownloadUrls(uniqueDownloadCandidates(url)),
+  });
 }
 function patchAssetVersions(name) {
-  const matches = String(name || '').match(/\d+(?:[._-]\d+){1,3}/g) || [];
-  return matches.map(item => normalizeVersion(item.replace(/[._-]/g, '.'))).filter(Boolean);
+  return updateTools.patchAssetVersions(name);
 }
 function pickPatchAsset(assets, currentVersion, latestVersion) {
-  const list = Array.isArray(assets) ? assets : [];
-  const current = normalizeVersion(currentVersion || APP_VERSION);
-  const latest = normalizeVersion(latestVersion || '');
-  const preferred = list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    if (latest) return versions[0] === current && versions[versions.length - 1] === latest;
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => {
-    const name = String(a && a.name || '');
-    if (!/\.(patch\.json|patch|json)$/i.test(name)) return false;
-    const versions = patchAssetVersions(name);
-    return versions[0] === current && name.toLowerCase().includes('patch');
-  }) || list.find(a => /\.(patch\.json|patch)$/i.test(a && a.name || ''));
-  if (!preferred) return null;
-  const digest = assetDigestInfo(preferred);
-  const candidates = uniqueDownloadCandidates(preferred.browser_download_url || '');
-  return {
-    name: preferred.name || '',
-    size: preferred.size || 0,
-    contentType: preferred.content_type || '',
-    downloadUrl: preferred.browser_download_url || '',
-    downloadUrls: publicDownloadUrls(candidates),
-    sha256: digest.sha256 || '',
-    sha512: digest.sha512 || '',
-  };
+  return updateTools.pickPatchAsset(assets, currentVersion || APP_VERSION, latestVersion, {
+    downloadUrlsFor: url => publicDownloadUrls(uniqueDownloadCandidates(url)),
+  });
 }
 function updateAssetNameFromUrl(value) {
   try {
@@ -707,19 +758,20 @@ function parseLatestYmlUpdateInfo(text, reason) {
 }
 async function fetchLatestYmlUpdateInfo(reason) {
   if (!UPDATE_CONFIG.configured || UPDATE_CONFIG.provider !== 'github') throw updateError('UPDATE_REPOSITORY_NOT_CONFIGURED');
-  const latestYmlUrl = `https://github.com/${encodeURIComponent(UPDATE_CONFIG.owner)}/${encodeURIComponent(UPDATE_CONFIG.repo)}/releases/latest/download/latest.yml`;
-  const candidates = uniqueDownloadCandidates(latestYmlUrl);
+  const updatePlan = createGithubUpdatePlan(UPDATE_CONFIG);
+  if (!updatePlan.fallbackManifestUrl) throw updateError('UPDATE_CHANNEL_MANIFEST_UNAVAILABLE');
+  const candidates = uniqueDownloadCandidates(updatePlan.fallbackManifestUrl);
   const result = await fetchTextFromCandidates(candidates, 6500);
   return parseLatestYmlUpdateInfo(result.text, reason);
 }
 async function fetchLatestUpdateInfo() {
   if (UPDATE_CONFIG.manifest) return fetchManifestUpdateInfo(UPDATE_CONFIG.manifest);
   if (!UPDATE_CONFIG.configured || UPDATE_CONFIG.provider !== 'github') return localUpdateFallback();
-  const apiUrl = `https://api.github.com/repos/${encodeURIComponent(UPDATE_CONFIG.owner)}/${encodeURIComponent(UPDATE_CONFIG.repo)}/releases/latest`;
+  const updatePlan = createGithubUpdatePlan(UPDATE_CONFIG);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8500);
   try {
-    const resp = await fetch(apiUrl, {
+    const resp = await fetch(updatePlan.releaseApiUrl, {
       signal: controller.signal,
       headers: {
         'User-Agent': `Mineradio/${APP_VERSION}`,
@@ -730,7 +782,8 @@ async function fetchLatestUpdateInfo() {
       try { return await fetchLatestYmlUpdateInfo('GitHub Releases ' + resp.status); }
       catch (_) { return localUpdateFallback('GitHub Releases ' + resp.status, { configured: true }); }
     }
-    const data = await resp.json();
+    const data = selectGithubRelease(await resp.json(), updatePlan.channel);
+    if (!data) return localUpdateFallback('UPDATE_CHANNEL_RELEASE_NOT_FOUND', { configured: true });
     const latestVersion = normalizeVersion(data.tag_name || data.name || APP_VERSION) || APP_VERSION;
     const asset = pickReleaseAsset(data.assets);
     const patch = pickPatchAsset(data.assets, APP_VERSION, latestVersion);
@@ -764,13 +817,7 @@ async function fetchLatestUpdateInfo() {
   }
 }
 function safeUpdateFileName(name, version) {
-  const raw = String(name || '').trim() || `Mineradio-${version || APP_VERSION}.exe`;
-  const cleaned = raw
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160);
-  return cleaned || `Mineradio-${version || APP_VERSION}.exe`;
+  return updateTools.safeUpdateFileName(name, version || APP_VERSION);
 }
 function publicUpdateJob(job) {
   if (!job) return { ok: false, error: 'UPDATE_JOB_NOT_FOUND' };
@@ -1130,68 +1177,25 @@ function startUpdateDownloadJob(info) {
   return publicUpdateJob(job);
 }
 function sha256Hex(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
+  return updateTools.sha256Hex(buffer);
 }
 function safePatchRelativePath(value) {
-  const rel = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
-  if (!rel || rel.includes('\0')) return '';
-  const parts = rel.split('/').filter(Boolean);
-  if (!parts.length || parts.some(part => part === '..' || part === '.')) return '';
-  const root = parts[0];
-  if (PATCH_ALLOWED_FILES.has(rel)) return rel;
-  if (!PATCH_ALLOWED_ROOTS.has(root)) return '';
-  if (/\.(exe|dll|node|msi|bat|cmd|ps1|pfx|pem|key)$/i.test(rel)) return '';
-  return parts.join('/');
-}
-function patchTargetPath(rel) {
-  const safeRel = safePatchRelativePath(rel);
-  if (!safeRel) return null;
-  const target = path.resolve(__dirname, safeRel);
-  const root = path.resolve(__dirname);
-  if (target !== root && !target.startsWith(root + path.sep)) return null;
-  return target;
-}
-function decodePatchFile(file) {
-  if (!file || typeof file !== 'object') return null;
-  if (typeof file.contentBase64 === 'string') return Buffer.from(file.contentBase64, 'base64');
-  if (typeof file.content === 'string') return Buffer.from(file.content, file.encoding === 'base64' ? 'base64' : 'utf8');
-  return null;
-}
-function backupPatchTarget(job, rel, target) {
-  if (!fs.existsSync(target)) return;
-  const backup = path.join(UPDATE_PATCH_BACKUP_DIR, job.id, rel);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  fs.copyFileSync(target, backup);
-}
-function writePatchFile(job, file) {
-  const rel = safePatchRelativePath(file.path || file.name);
-  const target = rel ? patchTargetPath(rel) : null;
-  const content = decodePatchFile(file);
-  if (!rel || !target || !content) throw new Error('INVALID_PATCH_FILE');
-  if (content.length > PATCH_MAX_BYTES) throw new Error('PATCH_FILE_TOO_LARGE');
-  const expected = String(file.sha256 || '').trim().toLowerCase();
-  const actual = sha256Hex(content);
-  if (expected && expected !== actual) throw new Error('PATCH_HASH_MISMATCH:' + rel);
-  backupPatchTarget(job, rel, target);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = target + '.mineradio-patch';
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, target);
-  if (expected && sha256Hex(fs.readFileSync(target)) !== expected) throw new Error('PATCH_WRITE_VERIFY_FAILED:' + rel);
-  return rel;
+  return updateTools.safePatchRelativePath(value, {
+    allowedRoots: PATCH_ALLOWED_ROOTS,
+    allowedFiles: PATCH_ALLOWED_FILES,
+  });
 }
 function normalizePatchPayload(payload) {
-  if (!payload || typeof payload !== 'object') throw new Error('INVALID_PATCH_PAYLOAD');
-  const type = String(payload.type || payload.kind || '');
-  if (type && type !== 'mineradio-resource-patch') throw new Error('UNSUPPORTED_PATCH_TYPE');
-  const from = normalizeVersion(payload.from || payload.baseVersion || '');
-  const to = normalizeVersion(payload.to || payload.version || payload.targetVersion || '');
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  if (!from || compareVersions(from, APP_VERSION) !== 0) throw new Error('PATCH_VERSION_MISMATCH');
-  if (!to || compareVersions(to, APP_VERSION) <= 0) throw new Error('PATCH_TARGET_VERSION_INVALID');
-  if (!files.length) throw new Error('PATCH_EMPTY');
-  if (files.length > 40) throw new Error('PATCH_TOO_MANY_FILES');
-  return { from, to, files, restartRequired: payload.restartRequired !== false };
+  return updateTools.normalizePatchPayload(payload, { currentVersion: APP_VERSION });
+}
+function applyPatchToJob(job, files) {
+  return updateTools.applyPatchFiles(files, {
+    rootDir: __dirname,
+    backupDir: path.join(UPDATE_PATCH_BACKUP_DIR, job.id),
+    allowedRoots: PATCH_ALLOWED_ROOTS,
+    allowedFiles: PATCH_ALLOWED_FILES,
+    maxBytes: PATCH_MAX_BYTES,
+  });
 }
 async function downloadAndApplyPatch(job) {
   const chunks = [];
@@ -1224,16 +1228,13 @@ async function downloadAndApplyPatch(job) {
     }
 
     const raw = Buffer.concat(chunks);
-    const expectedPatchHash = String(job.sha256 || '').trim().toLowerCase();
-    if (expectedPatchHash && sha256Hex(raw) !== expectedPatchHash) throw new Error('PATCH_PACKAGE_HASH_MISMATCH');
+    verifyUpdateBuffer(raw, job);
     const patch = normalizePatchPayload(JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, '')));
     job.version = patch.to;
     job.message = '正在应用快速补丁';
     job.progress = 88;
     job.updatedAt = Date.now();
-    const changed = [];
-    patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-    job.changedFiles = changed;
+    job.changedFiles = applyPatchToJob(job, patch.files);
     job.status = 'ready';
     job.progress = 100;
     job.restartRequired = patch.restartRequired;
@@ -1305,9 +1306,7 @@ async function downloadAndApplyPatchWithMirrors(job) {
       job.progress = 88;
       job.etaSeconds = 0;
       job.updatedAt = Date.now();
-      const changed = [];
-      patch.files.forEach(file => changed.push(writePatchFile(job, file)));
-      job.changedFiles = changed;
+      job.changedFiles = applyPatchToJob(job, patch.files);
       job.status = 'ready';
       job.progress = 100;
       job.restartRequired = patch.restartRequired;
@@ -1331,6 +1330,12 @@ function startUpdatePatchJob(info) {
   if (!info || !info.configured) return { ok: false, error: 'UPDATE_REPOSITORY_NOT_CONFIGURED' };
   if (!info.updateAvailable) return { ok: false, error: 'NO_UPDATE_AVAILABLE' };
   if (!release.patchAvailable || !/^https?:\/\//i.test(downloadUrl)) return { ok: false, error: 'PATCH_ASSET_MISSING' };
+  let patchDigest;
+  try {
+    patchDigest = updateTools.assertPatchPackageDigest(patch);
+  } catch (err) {
+    return { ok: false, error: err.code || 'PATCH_DIGEST_MISSING' };
+  }
 
   const version = info.latestVersion || release.version || patch.to || '';
   const existing = Array.from(updateDownloadJobs.values())
@@ -1354,8 +1359,8 @@ function startUpdatePatchJob(info) {
     downloadCandidates,
     releaseUrl: release.htmlUrl || '',
     expectedSize: patch.size || 0,
-    sha256: normalizeDigest(patch.sha256 || '', 'sha256').toLowerCase(),
-    sha512: normalizeDigest(patch.sha512 || '', 'sha512'),
+    sha256: patchDigest.sha256,
+    sha512: patchDigest.sha512,
     restartRequired: true,
     sourceLabel: '',
     attempt: 0,
@@ -1399,84 +1404,23 @@ function normalizeApiMessage(payload) {
   const body = payload && (payload.body || payload);
   return (body && (body.message || body.msg || body.error)) || (body && body.body && (body.body.message || body.body.msg || body.body.error)) || '';
 }
-function parseCookieString(cookieText) {
-  const out = {};
-  String(cookieText || '').split(';').forEach(part => {
-    const raw = String(part || '').trim();
-    if (!raw) return;
-    const idx = raw.indexOf('=');
-    if (idx <= 0) return;
-    const key = raw.slice(0, idx).trim();
-    const value = raw.slice(idx + 1).trim();
-    if (key) out[key] = value;
-  });
-  return out;
-}
-function serializeCookieObject(obj) {
-  return Object.keys(obj || {})
-    .filter(k => obj[k] != null && String(obj[k]) !== '')
-    .map(k => k + '=' + String(obj[k]))
-    .join('; ');
-}
 function qqCookieObject() {
-  return parseCookieString(qqCookie);
-}
-function normalizeQQUin(raw) {
-  const digits = String(raw || '').replace(/\D/g, '');
-  return digits.replace(/^0+/, '') || digits;
+  return parseCookieString(getQQCookie());
 }
 function qqCookieUin(obj) {
-  obj = obj || qqCookieObject();
-  const raw = Number(obj.login_type) === 2 ? (obj.wxuin || obj.uin || obj.p_uin) : (obj.uin || obj.qqmusic_uin || obj.wxuin || obj.p_uin);
-  return normalizeQQUin(raw);
+  return cookieTools.qqCookieUin(obj || qqCookieObject());
 }
 function qqCookieMusicKey(obj) {
-  obj = obj || qqCookieObject();
-  return obj.qm_keyst || obj.qqmusic_key || obj.music_key || obj.p_skey || obj.skey ||
-    obj.psrf_qqaccess_token || obj.psrf_qqrefresh_token || obj.wxrefresh_token || obj.wxskey || '';
+  return cookieTools.qqCookieMusicKey(obj || qqCookieObject());
 }
 function qqCookiePlaybackKey(obj) {
-  obj = obj || qqCookieObject();
-  return obj.qm_keyst || obj.qqmusic_key || obj.music_key || obj.wxskey || '';
-}
-function decodeQQCookieValue(value) {
-  try { return decodeURIComponent(String(value || '').replace(/\+/g, '%20')).trim(); }
-  catch (e) { return String(value || '').trim(); }
+  return cookieTools.qqCookiePlaybackKey(obj || qqCookieObject());
 }
 function qqCookieNickname(obj, uin) {
-  obj = obj || qqCookieObject();
-  uin = normalizeQQUin(uin || qqCookieUin(obj));
-  const padded = uin ? '0' + uin : '';
-  const keys = [
-    uin && ('ptnick_' + uin),
-    padded && ('ptnick_' + padded),
-    'ptnick',
-    'nick',
-    'nickname',
-    'qq_nickname'
-  ].filter(Boolean);
-  for (const key of keys) {
-    if (obj[key]) {
-      const nick = decodeQQCookieValue(obj[key]);
-      if (nick) return nick;
-    }
-  }
-  const ptnickKey = Object.keys(obj).find(key => /^ptnick_/i.test(key) && obj[key]);
-  return ptnickKey ? decodeQQCookieValue(obj[ptnickKey]) : '';
+  return cookieTools.qqCookieNickname(obj || qqCookieObject(), uin);
 }
 function qqCookieAvatar(obj, uin) {
-  obj = obj || qqCookieObject();
-  const direct = obj.qqmusic_avatar || obj.avatar || obj.avatarUrl || obj.headpic || '';
-  if (direct) return decodeQQCookieValue(direct);
-  uin = normalizeQQUin(uin || qqCookieUin(obj));
-  return uin ? `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(uin)}&s=100` : '';
-}
-function normalizeQQCookieInput(cookieText) {
-  const obj = parseCookieString(cookieText);
-  if (Number(obj.login_type) === 2 && obj.wxuin && !obj.uin) obj.uin = obj.wxuin;
-  if (!obj.uin && (obj.qqmusic_uin || obj.p_uin)) obj.uin = obj.qqmusic_uin || obj.p_uin;
-  if (obj.uin) obj.uin = normalizeQQUin(obj.uin);
-  return serializeCookieObject(obj);
+  return cookieTools.qqCookieAvatar(obj || qqCookieObject(), uin);
 }
 function playbackRestriction(provider, category, message, action, extra) {
   return {
@@ -1564,47 +1508,9 @@ function qualityCandidatesFrom(target, candidates) {
 function hasNeteaseSvip(loginInfo) {
   return !!(loginInfo && loginInfo.loggedIn && (loginInfo.vipLevel === 'svip' || loginInfo.isSvip || Number(loginInfo.vipType || 0) >= 10));
 }
-function mapArtists(raw) {
-  return (raw || [])
-    .map(a => ({ id: a && a.id, name: (a && a.name) || '' }))
-    .filter(a => a.name);
-}
-function mapSongRecord(s) {
-  s = s || {};
-  const artists = mapArtists(s.ar || s.artists);
-  const album = s.al || s.album || {};
-  return {
-    provider: 'netease',
-    source: 'netease',
-    type: 'song',
-    id: s.id,
-    name: s.name,
-    artist: artists.map(a => a.name).join(' / '),
-    artists,
-    artistId: artists[0] && artists[0].id,
-    album: album.name || '',
-    cover: album.picUrl || album.coverUrl || '',
-    duration: s.dt || s.duration || 0,
-    fee: s.fee,
-  };
-}
-function mapDiscoverPlaylist(pl, tag) {
-  pl = pl || {};
-  const creator = pl.creator || pl.user || {};
-  const id = pl.id || pl.resourceId || pl.creativeId;
-  return {
-    provider: 'netease',
-    source: 'netease',
-    type: 'playlist',
-    id,
-    name: pl.name || pl.title || '',
-    cover: pl.picUrl || pl.coverImgUrl || pl.coverUrl || pl.uiElement && pl.uiElement.image && pl.uiElement.image.imageUrl || '',
-    trackCount: pl.trackCount || pl.songCount || pl.programCount || 0,
-    playCount: pl.playCount || pl.playcount || 0,
-    creator: creator.nickname || creator.name || '',
-    tag: tag || pl.alg || '',
-  };
-}
+const mapArtists = neteaseMusic.mapArtists;
+const mapSongRecord = neteaseMusic.mapSongRecord;
+const mapDiscoverPlaylist = neteaseMusic.mapDiscoverPlaylist;
 
 function lowSignalText(value) {
   return String(value || '').trim().toLowerCase();
@@ -1638,9 +1544,14 @@ async function requireLogin(res) {
 // ---------- 业务: 搜索 ----------
 //   优先用 cloudsearch (新接口, 字段更全, picUrl 更稳定)
 //   对于仍然缺失封面的歌曲, 用 song_detail 批量补齐
-async function handleSearch(keywords, limit) {
+async function handleSearch(keywords, limit, offset) {
   console.log('[Search]', keywords, 'limit:', limit);
-  const result = await cloudsearch({ keywords, limit, cookie: userCookie });
+  const result = await cloudsearch({
+    keywords,
+    limit,
+    offset: Math.max(0, Number(offset) || 0),
+    cookie: getUserCookie(),
+  });
   const songs = result.body && result.body.result && result.body.result.songs ? result.body.result.songs : [];
 
   let mapped = songs.map(s => {
@@ -1652,7 +1563,7 @@ async function handleSearch(keywords, limit) {
   if (missing.length) {
     try {
       console.log('[Search] backfilling covers for', missing.length, 'songs');
-      const dd = await song_detail({ ids: missing.join(','), cookie: userCookie });
+      const dd = await song_detail({ ids: missing.join(','), cookie: getUserCookie() });
       const songsArr = (dd.body && dd.body.songs) || [];
       const idToPic = {};
       songsArr.forEach(s => {
@@ -1681,10 +1592,10 @@ async function handleDiscoverHome() {
     };
   }
   const tasks = [
-    personalized({ limit: 8, cookie: userCookie, timestamp: Date.now() }),
-    dj_hot({ limit: 6, offset: 0, cookie: userCookie, timestamp: Date.now() }),
-    recommend_resource({ cookie: userCookie, timestamp: Date.now() }),
-    recommend_songs({ cookie: userCookie, timestamp: Date.now() }),
+    personalized({ limit: 8, cookie: getUserCookie(), timestamp: Date.now() }),
+    dj_hot({ limit: 6, offset: 0, cookie: getUserCookie(), timestamp: Date.now() }),
+    recommend_resource({ cookie: getUserCookie(), timestamp: Date.now() }),
+    recommend_songs({ cookie: getUserCookie(), timestamp: Date.now() }),
   ];
   const result = await Promise.allSettled(tasks);
 
@@ -1779,213 +1690,28 @@ async function requestJson(targetUrl, opts, body) {
   }
 }
 
-function clampNumber(value, min, max, fallback) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
-function openMeteoWeatherLabel(code) {
-  code = Number(code);
-  if (code === 0) return '晴';
-  if (code === 1 || code === 2) return '少云';
-  if (code === 3) return '阴';
-  if (code === 45 || code === 48) return '雾';
-  if (code === 51 || code === 53 || code === 55) return '毛毛雨';
-  if (code === 56 || code === 57) return '冻雨';
-  if (code === 61 || code === 63 || code === 65) return '雨';
-  if (code === 66 || code === 67) return '冻雨';
-  if (code === 71 || code === 73 || code === 75 || code === 77) return '雪';
-  if (code === 80 || code === 81 || code === 82) return '阵雨';
-  if (code === 85 || code === 86) return '阵雪';
-  if (code === 95 || code === 96 || code === 99) return '雷雨';
-  return '天气';
-}
-
-function buildWeatherMood(weather, date) {
-  const now = date || new Date();
-  const hour = now.getHours();
-  const code = Number(weather && weather.weatherCode);
-  const temp = Number(weather && weather.temperature);
-  const apparent = Number(weather && weather.apparentTemperature);
-  const rain = Number(weather && weather.precipitation) || 0;
-  const humidity = Number(weather && weather.humidity) || 0;
-  const wind = Number(weather && weather.windSpeed) || 0;
-  const isNight = weather && weather.isDay === 0 || hour < 6 || hour >= 20;
-  const isMorning = hour >= 5 && hour < 11;
-  const isDusk = hour >= 17 && hour < 20;
-  const isRain = rain > 0 || [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(code);
-  const isSnow = [71, 73, 75, 77, 85, 86].includes(code);
-  const isCloud = [2, 3, 45, 48].includes(code);
-  const isStorm = [95, 96, 99].includes(code);
-  const feels = Number.isFinite(apparent) ? apparent : temp;
-
-  let mood = {
-    key: 'clear',
-    title: '晴朗电台',
-    tagline: '让节奏亮一点，像窗边的光',
-    energy: 0.62,
-    warmth: 0.58,
-    focus: 0.48,
-    melancholy: 0.24,
-    keywords: ['轻快 华语', 'city pop', 'indie pop', 'chill pop', '阳光 歌单'],
-  };
-  if (isStorm) {
-    mood = {
-      key: 'storm',
-      title: '雷雨电台',
-      tagline: '低频更厚，适合把世界关小一点',
-      energy: 0.46,
-      warmth: 0.34,
-      focus: 0.66,
-      melancholy: 0.62,
-      keywords: ['暗色 R&B', 'trip hop', '夜晚 电子', '氛围 摇滚', '雨夜 歌单'],
-    };
-  } else if (isRain) {
-    mood = {
-      key: 'rain',
-      title: '雨天电台',
-      tagline: '留一点潮湿的空间给旋律',
-      energy: 0.38,
-      warmth: 0.42,
-      focus: 0.64,
-      melancholy: 0.66,
-      keywords: ['雨天 R&B', 'lofi rainy', '华语 慢歌', 'dream pop', '雨夜 歌单'],
-    };
-  } else if (isSnow || feels <= 3) {
-    mood = {
-      key: 'snow',
-      title: '冷空气电台',
-      tagline: '干净、慢速、带一点冬天的颗粒感',
-      energy: 0.34,
-      warmth: 0.28,
-      focus: 0.72,
-      melancholy: 0.54,
-      keywords: ['冬天 民谣', 'ambient piano', '日系 冬天', 'indie folk', '安静 歌单'],
-    };
-  } else if (feels >= 31 || humidity >= 78) {
-    mood = {
-      key: 'humid',
-      title: '闷热电台',
-      tagline: '降低密度，留出一点呼吸',
-      energy: 0.48,
-      warmth: 0.76,
-      focus: 0.46,
-      melancholy: 0.30,
-      keywords: ['夏日 chill', 'bossa nova', 'city pop 夏天', '轻电子', '海边 歌单'],
-    };
-  } else if (isCloud) {
-    mood = {
-      key: 'cloudy',
-      title: '阴天电台',
-      tagline: '不急着明亮，先让声音变软',
-      energy: 0.40,
-      warmth: 0.46,
-      focus: 0.58,
-      melancholy: 0.52,
-      keywords: ['阴天 华语', 'indie rock mellow', 'neo soul', 'chillhop', '独立 民谣'],
-    };
-  }
-
-  if (isNight) {
-    mood.key += '-night';
-    mood.title = mood.key.startsWith('clear') ? '夜色电台' : mood.title.replace('电台', '夜听');
-    mood.tagline = '音量放低一点，让夜色参与编曲';
-    mood.energy = Math.min(mood.energy, 0.42);
-    mood.focus = Math.max(mood.focus, 0.68);
-    mood.melancholy = Math.max(mood.melancholy, 0.52);
-    mood.keywords = ['夜晚 R&B', 'late night jazz', 'ambient', 'lofi sleep', '夜跑 歌单'].concat(mood.keywords.slice(0, 3));
-  } else if (isMorning) {
-    mood.title = mood.key.startsWith('rain') ? '雨晨电台' : '早晨电台';
-    mood.energy = Math.max(mood.energy, 0.52);
-    mood.keywords = ['早晨 通勤', 'morning acoustic', '清晨 indie', '轻快 华语'].concat(mood.keywords.slice(0, 3));
-  } else if (isDusk) {
-    mood.title = mood.key.startsWith('rain') ? '黄昏雨声' : '黄昏电台';
-    mood.melancholy = Math.max(mood.melancholy, 0.48);
-    mood.keywords = ['黄昏 city pop', '日落 歌单', '落日飞车', 'soul pop'].concat(mood.keywords.slice(0, 3));
-  }
-
-  if (wind >= 28) {
-    mood.energy = Math.max(mood.energy, 0.56);
-    mood.keywords = ['公路 摇滚', 'windy day playlist'].concat(mood.keywords.slice(0, 4));
-  }
-  mood.keywords = Array.from(new Set(mood.keywords)).slice(0, 7);
-  return mood;
-}
-
 async function resolveOpenMeteoLocation(query) {
   const raw = String(query || '').trim();
   if (!raw) return WEATHER_DEFAULT_LOCATION;
-  const u = new URL(OPEN_METEO_GEOCODE_URL);
-  u.searchParams.set('name', raw);
-  u.searchParams.set('count', '1');
-  u.searchParams.set('language', 'zh');
-  u.searchParams.set('format', 'json');
-  const body = await requestJson(u.toString(), { headers: { 'User-Agent': UA } });
+  const body = await requestJson(weatherTools.buildOpenMeteoGeocodeUrl(raw), { headers: { 'User-Agent': UA } });
   const first = body && Array.isArray(body.results) && body.results[0];
-  if (!first) return { ...WEATHER_DEFAULT_LOCATION, query: raw, fallback: true };
-  return {
-    name: first.name || raw,
-    country: first.country || '',
-    admin1: first.admin1 || '',
-    latitude: first.latitude,
-    longitude: first.longitude,
-    timezone: first.timezone || 'auto',
-  };
+  return weatherTools.normalizeOpenMeteoLocation(first, raw);
 }
 
 async function fetchOpenMeteoWeather(params) {
   params = params || {};
-  let location;
-  const lat = clampNumber(params.lat, -90, 90, NaN);
-  const lon = clampNumber(params.lon, -180, 180, NaN);
-  if (Number.isFinite(lat) && Number.isFinite(lon)) {
-    location = {
-      name: String(params.city || params.name || '当前位置').trim() || '当前位置',
-      country: '',
-      latitude: lat,
-      longitude: lon,
-      timezone: params.timezone || 'auto',
-    };
-  } else {
-    location = await resolveOpenMeteoLocation(params.city || params.q || params.location);
-  }
-  const u = new URL(OPEN_METEO_FORECAST_URL);
-  u.searchParams.set('latitude', String(location.latitude));
-  u.searchParams.set('longitude', String(location.longitude));
-  u.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m');
-  u.searchParams.set('hourly', 'precipitation_probability,weather_code,temperature_2m');
-  u.searchParams.set('forecast_days', '1');
-  u.searchParams.set('timezone', location.timezone || 'auto');
-  const body = await requestJson(u.toString(), { headers: { 'User-Agent': UA } });
-  const cur = body && body.current || {};
-  const weather = {
-    provider: 'open-meteo',
-    location: {
-      name: location.name,
-      country: location.country || '',
-      admin1: location.admin1 || '',
-      latitude: location.latitude,
-      longitude: location.longitude,
-      timezone: body.timezone || location.timezone || '',
-      fallback: !!location.fallback,
-    },
-    label: openMeteoWeatherLabel(cur.weather_code),
-    weatherCode: Number(cur.weather_code),
-    temperature: Number(cur.temperature_2m),
-    apparentTemperature: Number(cur.apparent_temperature),
-    humidity: Number(cur.relative_humidity_2m),
-    precipitation: Number(cur.precipitation || cur.rain || cur.showers || cur.snowfall || 0),
-    cloudCover: Number(cur.cloud_cover),
-    windSpeed: Number(cur.wind_speed_10m),
-    windGusts: Number(cur.wind_gusts_10m),
-    isDay: Number(cur.is_day),
-    time: cur.time || '',
-    updatedAt: Date.now(),
-  };
-  weather.mood = buildWeatherMood(weather);
-  return weather;
+  const location = weatherTools.locationFromParams(params)
+    || await resolveOpenMeteoLocation(params.city || params.q || params.location);
+  const body = await requestJson(weatherTools.buildOpenMeteoForecastUrl(location), { headers: { 'User-Agent': UA } });
+  return weatherTools.normalizeOpenMeteoWeather(body, location);
+}
+
+async function buildFullWeather(params) {
+  params = params || {};
+  const location = weatherTools.locationFromParams(params)
+    || await resolveOpenMeteoLocation(params.city || params.q || params.location);
+  const body = await requestJson(weatherTools.buildOpenMeteoForecastUrl(location), { headers: { 'User-Agent': UA } });
+  return weatherTools.normalizeOpenMeteoFullWeather(body, location);
 }
 
 async function fetchIpWeatherLocation() {
@@ -2010,54 +1736,8 @@ async function fetchIpWeatherLocation() {
   };
 }
 
-function weatherRadioSeedQueries(mood) {
-  const key = String(mood && mood.key || '');
-  if (key.includes('rain') || key.includes('storm')) return ['陈奕迅 阴天快乐', '周杰伦 雨下一整晚', '孙燕姿 遇见', '林宥嘉 说谎', '毛不易 消愁'];
-  if (key.includes('snow') || key.includes('cloudy')) return ['陈奕迅 好久不见', '莫文蔚 阴天', '李健 贝加尔湖畔', '朴树 平凡之路', '蔡健雅 达尔文'];
-  if (key.includes('humid')) return ['落日飞车 My Jinji', '告五人 爱人错过', '夏日入侵企画 想去海边', '陈绮贞 旅行的意义', '王若琳 Lost in Paradise'];
-  if (key.includes('night')) return ['方大同 特别的人', '陶喆 爱很简单', 'Frank Ocean Pink + White', '林忆莲 夜太黑', "Norah Jones Don't Know Why"];
-  return ['孙燕姿 天黑黑', '周杰伦 晴天', '五月天 温柔', '陈奕迅 稳稳的幸福', '王菲'];
-}
-
-function fallbackWeatherForRadio(params, err) {
-  params = params || {};
-  const name = String(params.city || params.q || params.location || WEATHER_DEFAULT_LOCATION.name).trim() || WEATHER_DEFAULT_LOCATION.name;
-  return {
-    provider: 'open-meteo',
-    location: {
-      name,
-      country: '',
-      admin1: '',
-      latitude: null,
-      longitude: null,
-      timezone: params.timezone || WEATHER_DEFAULT_LOCATION.timezone,
-      fallback: true,
-    },
-    label: '天气暂不可用',
-    weatherCode: null,
-    temperature: null,
-    apparentTemperature: null,
-    humidity: null,
-    precipitation: null,
-    cloudCover: null,
-    windSpeed: null,
-    windGusts: null,
-    isDay: null,
-    time: '',
-    updatedAt: Date.now(),
-    error: err && err.message || '',
-    mood: {
-      key: 'fallback',
-      title: '临时电台',
-      tagline: '天气暂时没有回来，先放一组稳妥的歌',
-      energy: 0.54,
-      warmth: 0.55,
-      focus: 0.55,
-      melancholy: 0.35,
-      keywords: ['华语 流行', 'indie pop', 'city pop', '轻快 歌单', 'chill pop'],
-    },
-  };
-}
+const weatherRadioSeedQueries = weatherTools.weatherRadioSeedQueries;
+const fallbackWeatherForRadio = weatherTools.fallbackWeatherForRadio;
 
 function uniqueSongsByKey(songs) {
   const seen = new Set();
@@ -2081,7 +1761,7 @@ async function fetchWeatherPlaylistSongs(playlist, limit) {
   let rawTracks = [];
   try {
     if (typeof playlist_track_all === 'function') {
-      const all = await playlist_track_all({ id, limit: limit || 36, offset: 0, cookie: userCookie, timestamp: Date.now() });
+      const all = await playlist_track_all({ id, limit: limit || 36, offset: 0, cookie: getUserCookie(), timestamp: Date.now() });
       rawTracks = (all.body && (all.body.songs || all.body.tracks)) || [];
     }
   } catch (e) {
@@ -2089,7 +1769,7 @@ async function fetchWeatherPlaylistSongs(playlist, limit) {
   }
   if (!rawTracks.length && typeof playlist_detail === 'function') {
     try {
-      const detail = await playlist_detail({ id, s: 0, cookie: userCookie, timestamp: Date.now() });
+      const detail = await playlist_detail({ id, s: 0, cookie: getUserCookie(), timestamp: Date.now() });
       const pl = (detail.body && detail.body.playlist) || {};
       rawTracks = pl.tracks || [];
     } catch (e) {
@@ -2108,7 +1788,7 @@ async function filterLikelyPlayableWeatherSongs(songs) {
   for (let i = 0; i < source.length; i += 4) {
     const chunk = source.slice(i, i + 4);
     const settled = await Promise.allSettled(chunk.map(async song => {
-      const info = await handleSongUrl(song.id, { loggedIn: !!userCookie }, 'standard');
+      const info = await handleSongUrl(song.id, { loggedIn: !!getUserCookie() }, 'standard');
       return info && info.url ? song : null;
     }));
     settled.forEach((result, idx) => {
@@ -2249,7 +1929,7 @@ async function qqMusicRequest(payload, opts) {
     'Content-Type': 'application/json;charset=UTF-8',
     'Content-Length': Buffer.byteLength(body),
   };
-  if (opts.cookie && qqCookie) headers.Cookie = qqCookie;
+  if (opts.cookie && getQQCookie()) headers.Cookie = getQQCookie();
   const text = await requestText(QQ_MUSICU_URL, {
     method: 'POST',
     headers,
@@ -2286,7 +1966,7 @@ function normalizeQQProfile(body, cookieObj) {
     nickname: nick || (uin ? ('QQ ' + uin) : 'QQ 音乐'),
     avatar,
     vipType,
-    hasCookie: !!qqCookie,
+    hasCookie: !!getQQCookie(),
     playbackKeyReady: !!qqCookiePlaybackKey(cookieObj),
     profileSource: profileNick || profileAvatar ? 'qq-profile' : (cookieNick || avatar ? 'cookie' : 'fallback'),
   };
@@ -2296,7 +1976,7 @@ async function getQQLoginInfo() {
   const cookieObj = qqCookieObject();
   const uin = qqCookieUin(cookieObj);
   const musicKey = qqCookieMusicKey(cookieObj);
-  if (!uin || !musicKey) return { provider: 'qq', loggedIn: false, hasCookie: !!qqCookie };
+  if (!uin || !musicKey) return { provider: 'qq', loggedIn: false, hasCookie: !!getQQCookie() };
   const fallback = normalizeQQProfile(null, cookieObj);
   try {
     const u = new URL('https://c.y.qq.com/rsc/fcgi-bin/fcg_get_profile_homepage.fcg');
@@ -2313,7 +1993,7 @@ async function getQQLoginInfo() {
     u.searchParams.set('platform', 'yqq.json');
     u.searchParams.set('needNewCode', '0');
     const text = await requestText(u.toString(), {
-      headers: { ...QQ_HEADERS, Cookie: qqCookie },
+      headers: { ...QQ_HEADERS, Cookie: getQQCookie() },
     });
     const body = parseJSONText(text);
     const info = normalizeQQProfile(body, cookieObj);
@@ -2334,78 +2014,21 @@ async function qqGetJSON(targetUrl, params, opts) {
     if (params[k] != null) u.searchParams.set(k, String(params[k]));
   });
   const headers = { ...QQ_HEADERS, ...(opts.headers || {}) };
-  if (opts.cookie !== false && qqCookie) headers.Cookie = qqCookie;
+  if (opts.cookie !== false && getQQCookie()) headers.Cookie = getQQCookie();
   const text = await requestText(u.toString(), { headers });
   return parseJSONText(text);
 }
 
+function assertAllowedProxyTarget(value) {
+  return proxyTools.assertAllowedProxyTarget(value);
+}
 function audioProxyHeadersFor(audioUrl, range) {
-  const headers = { 'User-Agent': UA, Referer: 'https://music.163.com/' };
-  try {
-    const host = new URL(audioUrl).hostname.toLowerCase();
-    if (host.includes('qq.com') || host.includes('qpic.cn')) headers.Referer = 'https://y.qq.com/';
-  } catch (e) {}
-  if (range) headers.Range = range;
-  return headers;
+  return proxyTools.audioProxyHeadersFor(audioUrl, range, UA);
 }
+const audioContentTypeForUrl = proxyTools.audioContentTypeForUrl;
 
-function audioContentTypeForUrl(audioUrl, upstreamType) {
-  let pathname = '';
-  try { pathname = new URL(audioUrl).pathname.toLowerCase(); } catch (e) {}
-  if (/\.flac$/.test(pathname)) return 'audio/flac';
-  if (/\.mp3$/.test(pathname)) return 'audio/mpeg';
-  if (/\.(m4a|mp4)$/.test(pathname)) return 'audio/mp4';
-  if (/\.ogg$/.test(pathname)) return 'audio/ogg';
-  if (/\.wav$/.test(pathname)) return 'audio/wav';
-  return upstreamType || 'audio/mpeg';
-}
-
-function mapQQPlaylist(pl, kind) {
-  pl = pl || {};
-  const id = pl.dissid || pl.tid || pl.dirid || pl.id || pl.diss_id;
-  return {
-    provider: 'qq',
-    source: 'qq',
-    id: id ? String(id) : '',
-    name: pl.diss_name || pl.name || pl.title || '',
-    cover: pl.diss_cover || pl.logo || pl.picurl || pl.cover || '',
-    trackCount: pl.song_cnt || pl.songnum || pl.total_song_num || pl.song_count || 0,
-    playCount: pl.listen_num || pl.visitnum || pl.play_count || 0,
-    creator: pl.hostname || pl.nick || pl.creator || 'QQ 音乐',
-    subscribed: kind === 'collect',
-    specialType: 0,
-  };
-}
-
-function mapQQPlaylistTrack(raw) {
-  raw = raw || {};
-  const track = raw.songid || raw.songmid || raw.mid || raw.name ? raw : (raw.track_info || raw.songInfo || raw.songinfo || raw.song || {});
-  const album = track.album || {};
-  const artists = mapQQArtists(track.singer || track.singers || []);
-  const mid = track.mid || track.songmid || raw.mid || raw.songmid || '';
-  const albumMid = album.mid || track.albummid || raw.albummid || '';
-  return {
-    provider: 'qq',
-    source: 'qq',
-    type: 'qq',
-    id: mid || String(track.id || track.songid || raw.id || raw.songid || ''),
-    qqId: track.id || track.songid || raw.id || raw.songid || '',
-    mid,
-    songmid: mid,
-    mediaMid: (track.file && track.file.media_mid) || track.strMediaMid || track.media_mid || raw.strMediaMid || '',
-    name: track.name || track.songname || raw.songname || '',
-    artist: artists.map(a => a.name).join(' / ') || track.singername || raw.singername || '',
-    artists,
-    artistId: artists[0] && (artists[0].id || artists[0].mid),
-    artistMid: artists[0] && artists[0].mid,
-    album: album.name || album.title || track.albumname || raw.albumname || '',
-    albumMid,
-    cover: qqAlbumCover(albumMid, 300),
-    duration: (Number(track.interval || raw.interval) || 0) * 1000,
-    fee: track.pay && Number(track.pay.pay_play) ? 1 : 0,
-    playable: false,
-  };
-}
+const mapQQPlaylist = qqMusic.mapQQPlaylist;
+const mapQQPlaylistTrack = qqMusic.mapQQPlaylistTrack;
 
 async function handleQQUserPlaylists() {
   const info = await getQQLoginInfo();
@@ -2478,79 +2101,9 @@ async function handleQQPlaylistTracks(id) {
   return { loggedIn: true, provider: 'qq', playlist, tracks };
 }
 
-function qqAlbumCover(albumMid, size) {
-  if (!albumMid) return '';
-  const px = size || 300;
-  return 'https://y.qq.com/music/photo_new/T002R' + px + 'x' + px + 'M000' + albumMid + '.jpg?max_age=2592000';
-}
-
-function qqSingerAvatar(singerMid, size) {
-  if (!singerMid) return '';
-  const px = size || 300;
-  return 'https://y.qq.com/music/photo_new/T001R' + px + 'x' + px + 'M000' + singerMid + '.jpg?max_age=2592000';
-}
-
-function mapQQArtists(raw) {
-  return (raw || [])
-    .map(a => ({
-      id: a && a.id,
-      mid: a && a.mid,
-      name: (a && (a.name || a.title)) || '',
-    }))
-    .filter(a => a.name);
-}
-
-function mapQQSmartSong(item) {
-  item = item || {};
-  const mid = item.mid || item.songmid || item.id || '';
-  return {
-    provider: 'qq',
-    source: 'qq',
-    type: 'qq',
-    id: mid,
-    qqId: item.id || item.docid || '',
-    mid,
-    songmid: mid,
-    name: item.name || item.title || '',
-    artist: item.singer || '',
-    artists: item.singer ? [{ name: item.singer }] : [],
-    album: '',
-    cover: '',
-    duration: 0,
-    fee: 0,
-    playable: false,
-  };
-}
-
-function mapQQTrack(track, fallback) {
-  track = track || {};
-  fallback = fallback || {};
-  const album = track.album || {};
-  const artists = mapQQArtists(track.singer || []);
-  const mid = track.mid || fallback.mid || fallback.songmid || '';
-  const albumMid = album.mid || album.pmid || '';
-  return {
-    provider: 'qq',
-    source: 'qq',
-    type: 'qq',
-    id: mid,
-    qqId: track.id || fallback.qqId || fallback.id || '',
-    mid,
-    songmid: mid,
-    mediaMid: track.file && track.file.media_mid,
-    name: track.name || track.title || fallback.name || '',
-    artist: artists.map(a => a.name).join(' / ') || fallback.artist || '',
-    artists: artists.length ? artists : (fallback.artists || []),
-    artistId: artists[0] && (artists[0].id || artists[0].mid),
-    artistMid: artists[0] && artists[0].mid,
-    album: album.name || album.title || fallback.album || '',
-    albumMid,
-    cover: qqAlbumCover(albumMid, 300) || fallback.cover || '',
-    duration: (Number(track.interval) || 0) * 1000,
-    fee: track.pay && Number(track.pay.pay_play) ? 1 : 0,
-    playable: false,
-  };
-}
+const qqSingerAvatar = qqMusic.qqSingerAvatar;
+const mapQQSmartSong = qqMusic.mapQQSmartSong;
+const mapQQTrack = qqMusic.mapQQTrack;
 
 async function qqSmartboxSearch(keywords, limit) {
   const u = new URL(QQ_SMARTBOX_URL);
@@ -2744,6 +2297,34 @@ function mapQQComment(raw) {
   };
 }
 
+function parseSongCommentLimit(raw, fallback = 20) {
+  const value = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!value || value === '0' || value === 'all' || value === 'unlimited') {
+    return { unlimited: true, limit: 0 };
+  }
+  const parsed = parseInt(value, 10);
+  return { unlimited: false, limit: Number.isFinite(parsed) && parsed > 0 ? parsed : Math.max(1, fallback) };
+}
+
+function mapNeteaseComment(raw) {
+  raw = raw || {};
+  return {
+    id: raw.commentId,
+    content: raw.content || '',
+    likedCount: raw.likedCount || 0,
+    liked: raw.liked === true,
+    time: raw.time || 0,
+    user: raw.user ? { id: raw.user.userId, nickname: raw.user.nickname || '', avatar: raw.user.avatarUrl || '' } : null,
+  };
+}
+
+function pushUniqueSongComment(target, seen, comment) {
+  if (!comment || !comment.content) return;
+  const key = String(comment.id || '') || comment.content;
+  if (seen.has(key)) return;
+  seen.add(key);
+  target.push(comment);
+}
 async function handleQQSongComments(id, mid, limit, offset) {
   let topid = String(id || '').replace(/\D/g, '');
   if (!topid && mid) {
@@ -2755,9 +2336,13 @@ async function handleQQSongComments(id, mid, limit, offset) {
     }
   }
   if (!topid) return { provider: 'qq', error: 'Missing QQ song id', comments: [] };
-  const page = Math.max(0, Math.floor((offset || 0) / Math.max(1, limit || 20)));
+
+  const normalizedLimit = Math.floor(Number(limit) || 0);
+  const unlimited = normalizedLimit <= 0;
+  const pageSize = unlimited ? 50 : Math.max(1, normalizedLimit);
+  const firstPage = Math.max(0, Math.floor((offset || 0) / pageSize));
   const uin = qqCookieUin() || '0';
-  const body = await qqGetJSON('https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg', {
+  const fetchPage = (page, size) => qqGetJSON('https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg', {
     g_tk: '5381',
     loginUin: uin,
     hostUin: '0',
@@ -2774,8 +2359,34 @@ async function handleQQSongComments(id, mid, limit, offset) {
     cmd: '8',
     needmusiccrit: '0',
     pagenum: String(page),
-    pagesize: String(limit || 20),
+    pagesize: String(size),
   }, { headers: { Referer: 'https://y.qq.com/n/ryqq/songDetail/' + encodeURIComponent(mid || topid) } });
+
+  if (unlimited) {
+    const comments = [];
+    const seen = new Set();
+    let total = 0;
+    let hot = false;
+    let page = firstPage;
+    while (true) {
+      const body = await fetchPage(page, pageSize);
+      const hotList = page === 0 && body && body.hot_comment && Array.isArray(body.hot_comment.commentlist)
+        ? body.hot_comment.commentlist
+        : [];
+      const normalList = body && body.comment && Array.isArray(body.comment.commentlist)
+        ? body.comment.commentlist
+        : [];
+      if (hotList.length) hot = true;
+      total = Number(body && body.comment && (body.comment.commenttotal || body.comment.comment_total)) || total;
+      hotList.concat(normalList).forEach(raw => pushUniqueSongComment(comments, seen, mapQQComment(raw)));
+      if (!normalList.length || normalList.length < pageSize) break;
+      if (total && (page + 1) * pageSize >= total) break;
+      page += 1;
+    }
+    return { provider: 'qq', id: topid, total: total || comments.length, comments, hot, unlimited: true };
+  }
+
+  const body = await fetchPage(firstPage, pageSize);
   const hotList = body && body.hot_comment && body.hot_comment.commentlist;
   const normalList = body && body.comment && body.comment.commentlist;
   const raw = (offset === 0 && Array.isArray(hotList) && hotList.length) ? hotList : (normalList || []);
@@ -3002,31 +2613,31 @@ async function fetchMyPodcastItems(key, info, limit, offset) {
   limit = Math.max(8, Math.min(60, Number(limit) || 30));
   offset = Math.max(0, Number(offset) || 0);
   if (key === 'collect') {
-    const r = await dj_sublist({ limit, offset, cookie: userCookie, timestamp: Date.now() });
+    const r = await dj_sublist({ limit, offset, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['djRadios', 'djradios', 'radios', 'data']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'created') {
-    const r = await user_audio({ uid: info.userId, cookie: userCookie, timestamp: Date.now() });
+    const r = await user_audio({ uid: info.userId, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['data', 'djRadios', 'djradios', 'radios']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'paid') {
-    const r = await dj_paygift({ limit, offset, cookie: userCookie, timestamp: Date.now() });
+    const r = await dj_paygift({ limit, offset, cookie: getUserCookie(), timestamp: Date.now() });
     const raw = firstArrayFrom(r.body, ['data', 'djRadios', 'djradios', 'radios']);
     return { itemType: 'radio', items: raw.map(x => mapPodcastCollectionRadio(x, key)).filter(x => x.id) };
   }
   if (key === 'liked') {
     let raw = [];
     try {
-      const sati = await sati_resource_sub_list({ cookie: userCookie, timestamp: Date.now() });
+      const sati = await sati_resource_sub_list({ cookie: getUserCookie(), timestamp: Date.now() });
       raw = firstArrayFrom(sati.body, ['data', 'resources', 'list']);
     } catch (e) {
       console.warn('[MyPodcastLiked] sati sub list failed:', e.message);
     }
     if (!raw.length) {
       try {
-        const recent = await record_recent_voice({ limit, cookie: userCookie, timestamp: Date.now() });
+        const recent = await record_recent_voice({ limit, cookie: getUserCookie(), timestamp: Date.now() });
         raw = firstArrayFrom(recent.body, ['data', 'list', 'resources']);
       } catch (e) {
         console.warn('[MyPodcastLiked] recent voice fallback failed:', e.message);
@@ -3041,9 +2652,22 @@ async function fetchMyPodcastItems(key, info, limit, offset) {
 //   返回 { url, trial, level, br }
 //   trial=true 表示这是试听片段 (freeTrialInfo 非空)
 async function handleSongUrl(id, loginInfo, qualityPreference) {
-  console.log('[SongUrl] id:', id, 'logged-in:', !!userCookie);
+  const cookie = getUserCookie();
+  console.log('[SongUrl] id:', id, 'logged-in:', !!cookie);
   const requestedQuality = normalizeQualityPreference(qualityPreference);
   const svipReady = hasNeteaseSvip(loginInfo);
+  const sourceCache = neteaseAccountCache(loginInfo, cookie);
+  const sourceKey = `song:${String(id)}:${requestedQuality}:${svipReady ? 'svip' : 'standard'}`;
+  const cachedSource = sourceCache && sourceCache.get('source', sourceKey);
+  if (cachedSource !== undefined) return cachedSource;
+
+  function rememberSource(result) {
+    if (sourceCache && result && result.url) {
+      sourceCache.set('source', sourceKey, result, 60 * 1000);
+    }
+    return result;
+  }
+
   const qualities = qualityCandidatesFrom(requestedQuality, NETEASE_QUALITY_CANDIDATES)
     .filter(q => !q.svip || svipReady);
 
@@ -3056,9 +2680,9 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       // 优先用 v1 接口 (支持更高音质 level 字段)
       let result;
       try {
-        result = await song_url_v1({ id, level: q.level, cookie: userCookie });
+        result = await song_url_v1({ id, level: q.level, cookie });
       } catch (e) {
-        result = await song_url({ id, br: q.br, cookie: userCookie });
+        result = await song_url({ id, br: q.br, cookie });
       }
       const d = result.body && result.body.data && result.body.data[0];
       if (d) lastData = d;
@@ -3066,7 +2690,7 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       const freeTrial = d && d.freeTrialInfo;
       console.log('[SongUrl]', q.level, '->', url ? 'OK' : 'no url', freeTrial ? '(TRIAL)' : '');
       if (url && !freeTrial) {
-        return { url, trial: false, playable: true, level: q.level, quality: q.label, br: d.br, requestedQuality };
+        return rememberSource({ url, trial: false, playable: true, level: q.level, quality: q.label, br: d.br, requestedQuality });
       }
       if (url && freeTrial && !trialFallback) {
         trialFallback = {
@@ -3086,7 +2710,7 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
       console.log('[SongUrl]', q.level, 'failed:', err.message);
     }
   }
-  if (trialFallback) return trialFallback;
+  if (trialFallback) return rememberSource(trialFallback);
   const restriction = classifyNeteasePlaybackRestriction(lastData, loginInfo);
   return {
     url: null,
@@ -3103,19 +2727,6 @@ async function handleSongUrl(id, loginInfo, qualityPreference) {
 }
 
 // ---------- 业务: 登录态/用户信息 ----------
-function readCookieFromResponse(resp) {
-  const candidates = [
-    resp && resp.cookie,
-    resp && resp.body && resp.body.cookie,
-    resp && resp.body && resp.body.data && resp.body.data.cookie,
-    resp && resp.body && resp.body.data && resp.body.data.cookies,
-  ];
-  for (const candidate of candidates) {
-    const cookie = normalizeCookieHeader(candidate);
-    if (cookie) return cookie;
-  }
-  return '';
-}
 function firstPositiveNumberFrom(objects, keys) {
   for (const obj of objects) {
     if (!obj || typeof obj !== 'object') continue;
@@ -3204,981 +2815,595 @@ function normalizeLoginInfo(profile, account, extra) {
     ...vip,
   };
 }
-function isNeteaseAuthInvalidPayload(payload) {
-  const code = normalizeApiCode(payload);
-  if (code === 301 || code === 401) return true;
-  const msg = normalizeApiMessage(payload);
-  return /未登录|需要登录|请先登录|login/i.test(msg) && code >= 300;
+
+function applyNeteaseMembershipCache(info, cookie) {
+  const membershipCache = neteaseAccountCache(info, cookie);
+  if (!membershipCache) return info;
+  const key = 'profile';
+  const cached = membershipCache.get('membership', key);
+  if (cached && typeof cached === 'object') {
+    return { ...info, ...cached };
+  }
+  membershipCache.set('membership', key, {
+    vipType: info.vipType,
+    vipLevel: info.vipLevel,
+    isVip: info.isVip,
+    isSvip: info.isSvip,
+    vipLabel: info.vipLabel,
+  });
+  return info;
 }
-async function getLoginInfo() {
-  if (!userCookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+
+async function getLoginInfo(cookieSnapshot) {
+  const cookie = typeof cookieSnapshot === 'string'
+    ? cookieSnapshot
+    : getUserCookie();
+  if (!cookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
 
   // login_status 对二维码 cookie 的资料刷新通常更及时；失败时再降级到 user_account。
   try {
-    const st = await login_status({ cookie: userCookie, timestamp: Date.now() });
+    const st = await login_status({ cookie, timestamp: Date.now() });
     const body = st.body || {};
     const data = body.data || body;
     const info = normalizeLoginInfo(data.profile || body.profile, data.account || body.account, data);
-    if (info.loggedIn) return info;
+    if (info.loggedIn) return applyNeteaseMembershipCache(info, cookie);
   } catch (e) {
     console.warn('[Login] login_status failed:', e.message);
   }
 
   try {
-    const acc = await user_account({ cookie: userCookie, timestamp: Date.now() });
+    const acc = await user_account({ cookie, timestamp: Date.now() });
     const body = acc.body || {};
     const info = normalizeLoginInfo(body.profile, body.account, body);
-    if (info.loggedIn) return info;
-    if (isNeteaseAuthInvalidPayload(acc)) saveCookie('');
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+    if (info.loggedIn) return applyNeteaseMembershipCache(info, cookie);
+    return { loggedIn: false, hasCookie: !!cookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   } catch (e) {
     console.warn('[Login] account check failed:', e.message);
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+    return { loggedIn: false, hasCookie: !!cookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   }
 }
+
+async function loginNeteaseCredential(cookie) {
+  const normalized = normalizeCookieHeader(cookie) || rawCookieFallback(cookie);
+  return accountLifecycle.login(
+    'netease',
+    { cookie: normalized },
+    () => getLoginInfo(normalized),
+  );
+}
+
+function logoutNeteaseCredential() {
+  return accountLifecycle.logout('netease');
+}
+
+function loginQQCredential(cookie) {
+  return accountLifecycle.login(
+    'qq',
+    { cookie: normalizeQQCookieInput(cookie) },
+    getQQLoginInfo,
+  );
+}
+
+function logoutQQCredential() {
+  return accountLifecycle.logout('qq');
+}
+
+async function spotifyAccountFor(credential) {
+  const accessToken = credential
+    && typeof credential.accessToken === 'string'
+    ? credential.accessToken
+    : '';
+  if (!accessToken) return { loggedIn: false };
+  const profile = await requestJson('https://api.spotify.com/v1/me', {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'Mineradio/1.1 (Spotify account bridge)',
+    },
+  });
+  const images = Array.isArray(profile && profile.images)
+    ? profile.images
+    : [];
+  const product = String(profile && profile.product || '').toLowerCase();
+  return {
+    loggedIn: Boolean(profile && profile.id),
+    accountId: profile && profile.id,
+    nickname: profile && profile.display_name,
+    avatar: images.find(item => item && typeof item.url === 'string')?.url || '',
+    membership: {
+      vipLevel: product === 'premium' ? 'vip' : 'none',
+      isVip: product === 'premium',
+      isSvip: false,
+      known: Boolean(product),
+    },
+  };
+}
+
+const verifyKugouAccount = createKugouAccountVerifier({
+  requestJson,
+  userAgent: UA,
+});
+const verifyQishuiAccount = createQishuiAccountVerifier({ requestJson });
+
+async function loginPlatformCredential(provider, credential, method) {
+  if (provider === 'netease') {
+    return loginNeteaseCredential(credential && credential.cookie);
+  }
+  if (provider === 'qq') {
+    return loginQQCredential(credential && credential.cookie);
+  }
+  if (provider === 'kugou') {
+    const account = await verifyKugouAccount(credential);
+    if (!account.loggedIn || account.verified !== true) {
+      const error = new Error('Kugou account could not be verified');
+      error.code = 'PLATFORM_LOGIN_UNVERIFIABLE';
+      throw error;
+    }
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => account,
+    );
+  }
+  if (provider === 'qishui') {
+    const account = await verifyQishuiAccount(credential);
+    if (!account.loggedIn || account.verified !== true) {
+      const error = new Error('Qishui account could not be verified');
+      error.code = 'PLATFORM_LOGIN_UNVERIFIABLE';
+      throw error;
+    }
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => account,
+    );
+  }
+  if (provider === 'spotify' && (method === 'pkce' || method === 'external-window')) {
+    return accountLifecycle.login(
+      provider,
+      credential,
+      async () => spotifyAccountFor(credential),
+    );
+  }
+  const error = new Error('Unknown platform login provider');
+  error.code = 'PLATFORM_LOGIN_PROVIDER_UNKNOWN';
+  return Promise.reject(error);
+}
+
+function logoutPlatformCredential(provider) {
+  if (!['netease', 'qq', 'kugou', 'qishui', 'spotify'].includes(provider)) {
+    const error = new Error('Unknown platform login provider');
+    error.code = 'PLATFORM_LOGIN_PROVIDER_UNKNOWN';
+    return Promise.reject(error);
+  }
+  return accountLifecycle.logout(provider);
+}
+
+function mergePublishedAccount(provider, liveStatus) {
+  const published = platformAccountStates.get(provider);
+  if (liveStatus.loggedIn === true) return liveStatus;
+  if (published) return { provider, ...published };
+  const credential = providerCredential(provider);
+  if (Object.keys(credential).length > 0) {
+    return {
+      provider,
+      loggedIn: true,
+      accountId: credential.accountId || '',
+      nickname: '',
+      avatar: '',
+      membership: { known: false },
+    };
+  }
+  return liveStatus;
+}
+
+async function getPlatformAccountStatuses() {
+  const results = await Promise.allSettled([getLoginInfo(), getQQLoginInfo()]);
+  const netease = mergePublishedAccount(
+    'netease',
+    results[0].status === 'fulfilled'
+      ? results[0].value
+      : { provider: 'netease', loggedIn: false },
+  );
+  try {
+    const reporting = await reportingAccountResolver('netease');
+    const accountId = String(netease.accountId ?? netease.userId ?? '');
+    if (
+      netease.loggedIn === true
+      && reporting.loggedIn === true
+      && reporting.accountId === accountId
+      && /^[a-f0-9]{32}\.[a-f0-9]{64}$/.test(reporting.reportingBinding || '')
+    ) {
+      netease.reportingBinding = reporting.reportingBinding;
+    }
+  } catch (_) {}
+  return {
+    netease,
+    qq: mergePublishedAccount('qq', results[1].status === 'fulfilled'
+      ? results[1].value
+      : { provider: 'qq', loggedIn: false }),
+    kugou: mergePublishedAccount('kugou', { provider: 'kugou', loggedIn: false }),
+    qishui: mergePublishedAccount('qishui', { provider: 'qishui', loggedIn: false }),
+    spotify: mergePublishedAccount('spotify', { provider: 'spotify', loggedIn: false }),
+  };
+}
+
+function appVersionPayload() {
+  return {
+    name: APP_PACKAGE.name || 'mineradio',
+    productName: APP_PACKAGE.productName || 'Mineradio',
+    version: APP_VERSION,
+    update: {
+      provider: UPDATE_CONFIG.provider,
+      configured: UPDATE_CONFIG.configured,
+      owner: UPDATE_CONFIG.owner,
+      repo: UPDATE_CONFIG.repo,
+      channel: UPDATE_CONFIG.channel,
+      preview: UPDATE_CONFIG.preview,
+      manifestOverride: !!UPDATE_CONFIG.manifest,
+    },
+  };
+}
+
+const appStatusRoutes = createAppStatusRoutes({
+  sendJSON,
+  appVersionPayload,
+  getLoginInfo,
+});
+const platformSearchAdapters = {
+  netease: createLegacySearchAdapter({
+    provider: 'netease',
+    search: handleSearch,
+    supportsOffset: true,
+    playbackAvailable: true,
+  }),
+  qq: createLegacySearchAdapter({
+    provider: 'qq',
+    search: handleQQSearch,
+    maxFetch: 80,
+    playbackAvailable: true,
+  }),
+  kugou: createKugouSearchAdapter({
+    requestJson,
+    userAgent: UA,
+  }),
+  qishui: createQishuiSearchAdapter({
+    requestJson,
+  }),
+  spotify: createSpotifySearchAdapter({
+    requestJson,
+    getCredential: () => {
+      const snapshot = credentialSession.readWithRevision('spotify');
+      return snapshot
+        ? { ...snapshot.credential, sessionRevision: snapshot.revision }
+        : {};
+    },
+    persistCredential: (credential, previous) => credentialSession.replaceIfRevision(
+      'spotify',
+      previous && previous.sessionRevision,
+      credential,
+    ),
+  }),
+};
+const runPlatformSearch = createSearchAggregator({
+  providers: platformSearchAdapters,
+  timeoutMs: 8000,
+});
+const neteaseLibraryAdapter = createNeteaseLibraryAdapter({
+  album,
+  albumDetailDynamic: album_detail_dynamic,
+  albumSub: album_sub,
+  playlistSubscribe: playlist_subscribe,
+  commentLike: comment_like,
+  // In NeteaseCloudMusicApi v4 `comment` writes; `comment_new` reads.
+  commentCreate: comment,
+  mapSongRecord,
+});
+const neteaseLibrary = Object.freeze({
+  ...neteaseLibraryAdapter,
+  async getAlbumDetail(input = {}) {
+    const result = await neteaseLibraryAdapter.getAlbumDetail(input);
+    const info = await getLoginInfo(input.cookie);
+    const collectionCache = neteaseAccountCache(info, input.cookie);
+    if (!collectionCache || !result.album) return result;
+
+    const key = `album:${result.album.id}`;
+    const cached = collectionCache.get('collection', key);
+    if (cached && typeof cached.collected === 'boolean') {
+      return {
+        ...result,
+        album: { ...result.album, collected: cached.collected },
+      };
+    }
+    collectionCache.set('collection', key, {
+      collected: result.album.collected === true,
+    });
+    return result;
+  },
+});
+const platformSearchRoutes = createPlatformSearchRoutes({
+  sendJSON,
+  search: runPlatformSearch,
+});
+const platformRoutes = createPlatformRoutes({
+  sendJSON,
+  getAccountStatuses: getPlatformAccountStatuses,
+  readRequestBody,
+  loginCredential: loginPlatformCredential,
+  logoutCredential: logoutPlatformCredential,
+  implementationRegistry,
+  featureFlags: platformFeatureFlags,
+});
+const listenJournal = createListenJournal({
+  filePath: LISTEN_SYNC_FILE,
+});
+const listenBindingSecret = loadOrCreateReportingBindingSecret(
+  LISTEN_BINDING_SECRET_FILE,
+);
+const reportingAccountResolver = createReportingAccountResolver({
+  accountBindingSecret: listenBindingSecret,
+  getCredential: provider => providerCredential(provider),
+  getLiveAccount: async (provider, credential) => {
+    if (provider === 'netease') {
+      const cookie = credential && typeof credential.cookie === 'string'
+        ? credential.cookie
+        : '';
+      return getLoginInfo(cookie);
+    }
+    return { loggedIn: false };
+  },
+});
+let listenReporter = null;
+function createListenReportingRuntime() {
+  return createListenReporter({
+    accountBindingSecret: listenBindingSecret,
+    registry: implementationRegistry,
+    journal: listenJournal,
+    accountResolver: reportingAccountResolver,
+    providerAdapters: {
+      netease: createNeteaseScrobbleAdapter({
+        scrobble,
+      }),
+    },
+  });
+}
+function ensureListenReporter() {
+  if (!listenReporter) listenReporter = createListenReportingRuntime();
+  return listenReporter;
+}
+const listenRoutes = createListenRoutes({
+  sendJSON,
+  reporter: {
+    report(body) {
+      return ensureListenReporter().report(body);
+    },
+  },
+});
+const weatherRadioRoutes = createWeatherRadioRoutes({
+  sendJSON,
+  buildWeatherRadio,
+  fetchIpWeatherLocation,
+});
+const weatherFullRoutes = createWeatherFullRoutes({
+  sendJSON,
+  buildFullWeather,
+});
+const updateRoutes = createUpdateRoutes({
+  sendJSON,
+  fetchLatestUpdateInfo,
+  localUpdateFallback,
+  updateConfigured: UPDATE_CONFIG.configured,
+  startUpdateDownloadJob,
+  startUpdatePatchJob,
+  publicUpdateJob,
+  updateDownloadJobs,
+});
+const proxyRoutes = createProxyRoutes({
+  port: currentServerPort,
+  userAgent: UA,
+  corsHeadersForOrigin,
+  assertAllowedProxyTarget,
+  audioProxyHeadersFor,
+  audioContentTypeForUrl,
+  fetchImpl: fetch,
+});
+const beatmapCacheRoutes = createBeatmapCacheRoutes({
+  sendJSON,
+  beatCacheRootInfo,
+  readBeatMapCache,
+  writeBeatMapCache,
+  readRequestBody,
+});
+const discoverRoutes = createDiscoverRoutes({
+  sendJSON,
+  handleDiscoverHome,
+});
+const qqRoutes = createQQRoutes({
+  sendJSON,
+  readRequestBody,
+  normalizeQQCookieInput,
+  parseCookieString,
+  qqCookieUin,
+  qqCookieMusicKey,
+  loginCredential: loginQQCredential,
+  logoutCredential: logoutQQCredential,
+  getQQLoginInfo,
+  handleQQSearch,
+  handleQQSongUrl,
+  handleQQLyric,
+  handleQQUserPlaylists,
+  handleQQPlaylistTracks,
+  handleQQArtistDetail,
+  parseSongCommentLimit,
+  handleQQSongComments,
+});
+const foliaLyricRoutes = createFoliaLyricRoutes({
+  sendJSON,
+  fetchImpl: fetch,
+  handleQQSearch,
+  handleQQLyric,
+});
+const foliaThemeRoutes = createFoliaThemeRoutes({
+  sendJSON,
+  readRequestBody,
+  fetchImpl: fetch,
+});
+const podcastRoutes = createPodcastRoutes({
+  sendJSON,
+  getUserCookie,
+  cloudsearch,
+  dj_hot,
+  dj_detail,
+  dj_program,
+  mapPodcastRadio,
+  mapPodcastProgram,
+  getLoginInfo,
+  fetchMyPodcastItems,
+  podcastCollectionMeta,
+  assertAllowedProxyTarget,
+  analyzePodcastDjStream,
+  analyzePodcastDjIntro,
+  userAgent: UA,
+});
+const neteaseRoutes = createNeteaseRoutes({
+  sendJSON,
+  readRequestBody,
+  normalizeCookieHeader,
+  parseCookieString,
+  loginCredential: loginNeteaseCredential,
+  logoutCredential: logoutNeteaseCredential,
+  getUserCookie,
+  getLoginInfo,
+  handleSearch,
+  handleSongUrl,
+  readCookieFromResponse,
+  normalizeLoginInfo,
+  login_qr_key,
+  login_qr_create,
+  login_qr_check,
+  logout,
+  user_playlist,
+  requireLogin,
+  song_like_check,
+  likelist,
+  like_song,
+  playlist_create,
+  playlist_tracks,
+  playlist_track_add,
+  lyric_new,
+  lyric,
+  comment_music,
+  parseSongCommentLimit,
+  mapNeteaseComment,
+  pushUniqueSongComment,
+  artist_detail,
+  artist_songs,
+  artist_top_song,
+  mapSongRecord,
+  playlist_track_all,
+  playlist_detail,
+  normalizeApiCode,
+  normalizeApiMessage,
+  neteaseLibrary,
+  invalidateAccountCache: invalidateNeteaseAccountCache,
+});
 
 // ====================================================================
 //  HTTP Server
 // ====================================================================
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost:' + PORT);
+server = http.createServer(async (req, res) => {
+  const port = currentServerPort();
+  const url = new URL(req.url, 'http://localhost:' + port);
   const pn = url.pathname;
+  res.mineradioRequest = req;
 
-  if (pn === '/api/app/version') {
-    sendJSON(res, {
-      name: APP_PACKAGE.name || 'mineradio',
-      productName: APP_PACKAGE.productName || 'Mineradio',
-      version: APP_VERSION,
-      update: {
-        provider: UPDATE_CONFIG.provider,
-        configured: UPDATE_CONFIG.configured,
-        owner: UPDATE_CONFIG.owner,
-        repo: UPDATE_CONFIG.repo,
-        preview: UPDATE_CONFIG.preview,
-        manifestOverride: !!UPDATE_CONFIG.manifest,
-      },
-    });
-    return;
-  }
-
-  if (pn === '/api/update/latest') {
-    try {
-      sendJSON(res, await fetchLatestUpdateInfo());
-    } catch (err) {
-      sendJSON(res, {
-        ...localUpdateFallback(err.message || 'Update check failed', { configured: UPDATE_CONFIG.configured }),
-        error: err.message || 'Update check failed',
-      });
-    }
-    return;
-  }
-
-  if (pn === '/api/update/download') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdateDownloadJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdateDownload]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_DOWNLOAD_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/download/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
-    return;
-  }
-
-  if (pn === '/api/update/patch') {
-    try {
-      const info = await fetchLatestUpdateInfo();
-      const job = startUpdatePatchJob(info);
-      sendJSON(res, job, job.ok ? 200 : 400);
-    } catch (err) {
-      console.error('[UpdatePatch]', err);
-      sendJSON(res, { ok: false, error: err.message || 'UPDATE_PATCH_START_FAILED' }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/update/patch/status') {
-    const id = url.searchParams.get('id') || '';
-    const job = id
-      ? updateDownloadJobs.get(id)
-      : Array.from(updateDownloadJobs.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).find(item => item.mode === 'patch');
-    sendJSON(res, publicUpdateJob(job), job ? 200 : 404);
-    return;
-  }
-
-  if (pn === '/api/beatmap/cache/status') {
-    const info = beatCacheRootInfo();
-    sendJSON(res, {
-      enabled: info.allowed && info.available,
-      dir: info.dir,
-      drive: info.drive,
-      reason: !info.allowed ? 'C_DRIVE_DISABLED' : (!info.available ? 'TARGET_DRIVE_UNAVAILABLE' : ''),
-      mode: info.allowed && info.available ? 'disk' : 'memory-only',
-    });
-    return;
-  }
-
-  if (pn === '/api/beatmap/cache') {
-    if (req.method === 'GET') {
-      const key = url.searchParams.get('key') || '';
-      try {
-        const entry = readBeatMapCache(key);
-        sendJSON(res, entry
-          ? { ok: true, hit: true, key: entry.key || key, map: entry.map, meta: entry.meta || {}, savedAt: entry.savedAt || 0 }
-          : { ok: true, hit: false, key });
-      } catch (err) {
-        const info = err.info || beatCacheRootInfo();
-        sendJSON(res, {
-          ok: false,
-          hit: false,
-          enabled: false,
-          mode: 'memory-only',
-          key,
-          reason: err.code || err.message || 'BEAT_CACHE_READ_FAILED',
-          dir: info.dir,
-        });
-      }
+  if (pn.startsWith('/api/') && req.method === 'OPTIONS') {
+    const origin = req.headers.origin || '';
+    if (!isAllowedCorsOrigin(origin, port)) {
+      sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
       return;
     }
+    res.writeHead(204, {
+      ...corsHeadersForOrigin(origin, port),
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '600',
+    });
+    res.end();
+    return;
+  }
 
-    if (req.method === 'POST') {
-      try {
-        const body = await readRequestBody(req);
-        sendJSON(res, writeBeatMapCache(body));
-      } catch (err) {
-        const info = err.info || beatCacheRootInfo();
-        sendJSON(res, {
-          ok: false,
-          enabled: false,
-          mode: 'memory-only',
-          reason: err.code || err.message || 'BEAT_CACHE_WRITE_FAILED',
-          dir: info.dir,
-        });
-      }
-      return;
-    }
+  if (pn.startsWith('/api/') && !isAllowedRequestOrigin(
+    req.headers.origin || '',
+    port,
+    req.method,
+  )) {
+    sendJSON(res, { ok: false, error: 'ORIGIN_NOT_ALLOWED' }, 403);
+    return;
+  }
 
+  if (!isMethodAllowedForRoute(pn, req.method)) {
     sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
     return;
   }
 
-  if (pn === '/api/discover/home') {
-    try {
-      sendJSON(res, await handleDiscoverHome());
-    } catch (err) {
-      console.error('[DiscoverHome]', err);
-      sendJSON(res, { error: err.message, loggedIn: false, dailySongs: [], playlists: [], podcasts: [] }, 500);
-    }
+  if (await appStatusRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/weather/radio') {
-    try {
-      const data = await buildWeatherRadio({
-        city: url.searchParams.get('city') || url.searchParams.get('q') || '',
-        lat: url.searchParams.get('lat'),
-        lon: url.searchParams.get('lon'),
-        timezone: url.searchParams.get('timezone') || '',
-      });
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[WeatherRadio]', err);
-      sendJSON(res, {
-        ok: false,
-        error: err.message,
-        weather: null,
-        radio: { title: '天气电台', subtitle: '天气暂时没有回来，可以先听今日推荐。', seedQueries: [], songs: [] },
-      }, 500);
-    }
+  if (await platformRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/weather/ip-location') {
-    try {
-      sendJSON(res, { ok: true, location: await fetchIpWeatherLocation() });
-    } catch (err) {
-      console.error('[WeatherIpLocation]', err);
-      sendJSON(res, { ok: false, error: err.message, location: null }, 500);
-    }
+  if (await platformSearchRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  // ---------- 搜索 ----------
-  if (pn === '/api/search') {
-    try {
-      const kw    = url.searchParams.get('keywords') || '';
-      const limit = parseInt(url.searchParams.get('limit') || '20');
-      const songs = await handleSearch(kw, limit);
-      sendJSON(res, { songs });
-    } catch (err) { console.error('[Search]', err); sendJSON(res, { error: err.message, songs: [] }, 500); }
+  if (await listenRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/search') {
-    try {
-      const kw = url.searchParams.get('keywords') || '';
-      const limit = Math.max(4, Math.min(12, parseInt(url.searchParams.get('limit') || '8', 10) || 8));
-      const songs = await handleQQSearch(kw, limit);
-      sendJSON(res, { provider: 'qq', songs });
-    } catch (err) {
-      console.error('[QQSearch]', err);
-      sendJSON(res, { provider: 'qq', error: err.message, songs: [] }, 500);
-    }
+  if (await neteaseRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/song/url') {
-    try {
-      const mid = url.searchParams.get('mid') || url.searchParams.get('id') || '';
-      const mediaMid = url.searchParams.get('mediaMid') || url.searchParams.get('media_mid') || '';
-      const quality = url.searchParams.get('quality') || '';
-      const info = await handleQQSongUrl(mid, mediaMid, quality);
-      sendJSON(res, info);
-    } catch (err) {
-      console.error('[QQSongUrl]', err);
-      sendJSON(res, { provider: 'qq', url: '', playable: false, error: err.message }, 500);
-    }
+  if (await qqRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/lyric') {
-    try {
-      const mid = url.searchParams.get('mid') || url.searchParams.get('songmid') || '';
-      const id = url.searchParams.get('id') || url.searchParams.get('qqId') || '';
-      if (!mid && !id) { sendJSON(res, { provider: 'qq', error: 'Missing QQ song mid or id', lyric: '' }, 400); return; }
-      const data = await handleQQLyric(mid, id);
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[QQLyric]', err);
-      sendJSON(res, { provider: 'qq', error: err.message, lyric: '' }, 500);
-    }
+  if (await foliaLyricRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  // ---------- 歌曲URL ----------
-  if (pn === '/api/qq/login/status') {
-    try {
-      const info = await getQQLoginInfo();
-      sendJSON(res, info);
-    } catch (err) {
-      console.error('[QQLoginStatus]', err);
-      sendJSON(res, { provider: 'qq', loggedIn: false, error: err.message }, 500);
-    }
+  if (await foliaThemeRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/login/cookie') {
-    try {
-      const body = await readRequestBody(req);
-      const raw = body.cookie || body.data || body.text || '';
-      const normalized = normalizeQQCookieInput(raw);
-      const obj = parseCookieString(normalized);
-      if (!qqCookieUin(obj) || !qqCookieMusicKey(obj)) {
-        sendJSON(res, { provider: 'qq', loggedIn: false, error: 'INVALID_QQ_COOKIE', message: 'QQ cookie 缺少 uin 或有效登录票据' }, 400);
-        return;
-      }
-      saveQQCookie(normalized);
-      const info = await getQQLoginInfo();
-      sendJSON(res, { ...info, saved: true });
-    } catch (err) {
-      console.error('[QQLoginCookie]', err);
-      sendJSON(res, { provider: 'qq', loggedIn: false, error: err.message }, 500);
-    }
+  if (await podcastRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/logout') {
-    saveQQCookie('');
-    sendJSON(res, { provider: 'qq', ok: true, loggedIn: false });
+  if (await weatherRadioRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/user/playlists') {
-    try {
-      const data = await handleQQUserPlaylists();
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[QQUserPlaylists]', err);
-      sendJSON(res, { provider: 'qq', loggedIn: false, error: err.message, playlists: [] }, 500);
-    }
+  if (await weatherFullRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/playlist/tracks') {
-    try {
-      const id = url.searchParams.get('id') || url.searchParams.get('disstid') || '';
-      const data = await handleQQPlaylistTracks(id);
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[QQPlaylistTracks]', err);
-      sendJSON(res, { provider: 'qq', error: err.message, tracks: [] }, 500);
-    }
+  if (await updateRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/artist/detail') {
-    try {
-      const mid = url.searchParams.get('mid') || url.searchParams.get('singermid') || '';
-      const limit = Math.max(10, Math.min(80, parseInt(url.searchParams.get('limit') || '36', 10) || 36));
-      if (!mid) {
-        sendJSON(res, { provider: 'qq', error: 'MISSING_SINGER_MID', artist: null, songs: [] }, 400);
-        return;
-      }
-      const data = await handleQQArtistDetail(mid, limit);
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[QQArtistDetail]', err);
-      sendJSON(res, { provider: 'qq', error: err.message, artist: null, songs: [] }, 500);
-    }
+  if (await proxyRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/qq/song/comments') {
-    try {
-      const id = url.searchParams.get('id') || url.searchParams.get('qqId') || '';
-      const mid = url.searchParams.get('mid') || url.searchParams.get('songmid') || '';
-      const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
-      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      const data = await handleQQSongComments(id, mid, limit, offset);
-      sendJSON(res, data);
-    } catch (err) {
-      console.error('[QQSongComments]', err);
-      sendJSON(res, { provider: 'qq', error: err.message, comments: [] }, 500);
-    }
+  if (await beatmapCacheRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
-  if (pn === '/api/podcast/search') {
-    try {
-      const kw = String(url.searchParams.get('keywords') || '').trim();
-      const limit = Math.max(6, Math.min(30, parseInt(url.searchParams.get('limit') || '18', 10) || 18));
-      if (!kw) { sendJSON(res, { podcasts: [] }); return; }
-      const r = await cloudsearch({ keywords: kw, type: 1009, limit, cookie: userCookie, timestamp: Date.now() });
-      const result = (r.body && r.body.result) || {};
-      const raw = result.djRadios || result.djradios || result.radios || [];
-      const podcasts = raw.map(mapPodcastRadio).filter(p => p.id);
-      sendJSON(res, { podcasts, total: result.djRadiosCount || result.djradiosCount || podcasts.length });
-    } catch (err) {
-      console.error('[PodcastSearch]', err);
-      sendJSON(res, { error: err.message, podcasts: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/podcast/hot') {
-    try {
-      const limit = Math.max(6, Math.min(30, parseInt(url.searchParams.get('limit') || '18', 10) || 18));
-      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      const r = await dj_hot({ limit, offset, cookie: userCookie, timestamp: Date.now() });
-      const body = r.body || {};
-      const raw = body.djRadios || body.djradios || body.radios || body.data || [];
-      const podcasts = (Array.isArray(raw) ? raw : []).map(mapPodcastRadio).filter(p => p.id);
-      sendJSON(res, { podcasts, more: !!body.hasMore });
-    } catch (err) {
-      console.error('[PodcastHot]', err);
-      sendJSON(res, { error: err.message, podcasts: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/podcast/detail') {
-    try {
-      const rid = url.searchParams.get('id') || url.searchParams.get('rid');
-      if (!rid) { sendJSON(res, { error: 'Missing podcast id' }, 400); return; }
-      const r = await dj_detail({ rid, cookie: userCookie, timestamp: Date.now() });
-      const body = r.body || {};
-      const radio = mapPodcastRadio(body.data || body.djRadio || body.radio || body);
-      sendJSON(res, { podcast: radio });
-    } catch (err) {
-      console.error('[PodcastDetail]', err);
-      sendJSON(res, { error: err.message }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/podcast/programs') {
-    try {
-      const rid = url.searchParams.get('id') || url.searchParams.get('rid');
-      if (!rid) { sendJSON(res, { error: 'Missing podcast id', programs: [] }, 400); return; }
-      const limit = Math.max(10, Math.min(60, parseInt(url.searchParams.get('limit') || '30', 10) || 30));
-      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      const r = await dj_program({ rid, limit, offset, asc: false, cookie: userCookie, timestamp: Date.now() });
-      const body = r.body || {};
-      const raw = body.programs || (body.data && (body.data.list || body.data.programs)) || [];
-      const radio = raw[0] && raw[0].radio ? mapPodcastRadio(raw[0].radio) : { id: rid, rid };
-      const programs = (Array.isArray(raw) ? raw : [])
-        .map(p => mapPodcastProgram(p, radio))
-        .filter(p => p.id && p.name);
-      sendJSON(res, { radio, programs, more: !!body.more, total: body.count || programs.length });
-    } catch (err) {
-      console.error('[PodcastPrograms]', err);
-      sendJSON(res, { error: err.message, programs: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/podcast/my') {
-    try {
-      const info = await getLoginInfo();
-      if (!info.loggedIn || !info.userId) {
-        const empty = ['collect', 'created', 'liked'].map(k => podcastCollectionMeta(k, []));
-        sendJSON(res, { loggedIn: false, collections: empty });
-        return;
-      }
-      const keys = ['collect', 'created', 'liked'];
-      const collections = await Promise.all(keys.map(async key => {
-        try {
-          const data = await fetchMyPodcastItems(key, info, 12, 0);
-          return podcastCollectionMeta(key, data.items || []);
-        } catch (e) {
-          console.warn('[MyPodcast]', key, e.message);
-          return podcastCollectionMeta(key, []);
-        }
-      }));
-      sendJSON(res, { loggedIn: true, collections });
-    } catch (err) {
-      console.error('[MyPodcast]', err);
-      sendJSON(res, { error: err.message, collections: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/podcast/my/items') {
-    try {
-      const info = await getLoginInfo();
-      if (!info.loggedIn || !info.userId) { sendJSON(res, { loggedIn: false, items: [] }); return; }
-      const key = String(url.searchParams.get('key') || 'collect');
-      const limit = parseInt(url.searchParams.get('limit') || '36', 10) || 36;
-      const offset = parseInt(url.searchParams.get('offset') || '0', 10) || 0;
-      const data = await fetchMyPodcastItems(key, info, limit, offset);
-      sendJSON(res, { loggedIn: true, key, ...podcastCollectionMeta(key, data.items || []), itemType: data.itemType, items: data.items || [] });
-    } catch (err) {
-      console.error('[MyPodcastItems]', err);
-      sendJSON(res, { error: err.message, items: [] }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/song/url') {
-    try {
-      const sid = url.searchParams.get('id');
-      const quality = url.searchParams.get('quality') || '';
-      const loginInfo = await getLoginInfo();
-      const info = await handleSongUrl(sid, loginInfo, quality);
-      sendJSON(res, {
-        ...info,
-        loggedIn: loginInfo.loggedIn,
-        vipType: loginInfo.vipType || 0,
-        vipLevel: loginInfo.vipLevel || 'none',
-        isVip: !!loginInfo.isVip,
-        isSvip: !!loginInfo.isSvip,
-        vipLabel: loginInfo.vipLabel || '无VIP',
-      });
-    } catch (err) { console.error('[SongUrl]', err); sendJSON(res, { error: err.message }, 500); }
-    return;
-  }
-
-  if (pn === '/api/login/cookie') {
-    try {
-      const body = await readRequestBody(req);
-      const raw = body.cookie || body.data || body.text || '';
-      const normalized = normalizeCookieHeader(raw);
-      const obj = parseCookieString(normalized);
-      if (!obj.MUSIC_U) {
-        sendJSON(res, { loggedIn: false, error: 'INVALID_NETEASE_COOKIE', message: '网易云 cookie 缺少 MUSIC_U' }, 400);
-        return;
-      }
-      saveCookie(normalized);
-      let info = await getLoginInfo();
-      if (!info.loggedIn && userCookie) {
-        info = {
-          loggedIn: true,
-          pendingProfile: true,
-          nickname: '网易云用户',
-          avatar: '',
-          vipType: 0,
-          vipLevel: 'none',
-          isVip: false,
-          isSvip: false,
-          vipLabel: '无VIP',
-        };
-      }
-      sendJSON(res, { ...info, saved: true, hasCookie: !!userCookie });
-    } catch (err) {
-      console.error('[LoginCookie]', err);
-      sendJSON(res, { loggedIn: false, error: err.message }, 500);
-    }
-    return;
-  }
-
-  // ---------- 登录: QR Key ----------
-  // ---------- 播客 DJ 长音频后端离线锁拍 ----------
-  if (pn === '/api/podcast/dj-beatmap') {
-    try {
-      const audioUrl = url.searchParams.get('url');
-      const durationSec = Math.max(0, Number(url.searchParams.get('duration') || 0) || 0);
-      if (!audioUrl || !/^https?:\/\//i.test(audioUrl)) {
-        sendJSON(res, { error: 'Invalid audio url' }, 400);
-        return;
-      }
-      console.log('[PodcastDjBeatmap] start', Math.round(durationSec || 0) + 's');
-      const started = Date.now();
-      const introSec = Math.max(0, Number(url.searchParams.get('intro') || 0) || 0);
-      const map = introSec
-        ? await analyzePodcastDjIntro(audioUrl, { durationSec, introSec, userAgent: UA })
-        : await analyzePodcastDjStream(audioUrl, { durationSec, userAgent: UA });
-      console.log('[PodcastDjBeatmap] done beats:', map.visualBeatCount || 0, 'ms:', Date.now() - started, 'decode:', map.decode || {});
-      sendJSON(res, { ok: true, map });
-    } catch (err) {
-      console.error('[PodcastDjBeatmap]', err);
-      sendJSON(res, { ok: false, error: err.message || String(err) }, 500);
-    }
-    return;
-  }
-
-  if (pn === '/api/login/qr/key') {
-    try {
-      const r = await login_qr_key({ timestamp: Date.now() });
-      const key = r.body && r.body.data && r.body.data.unikey;
-      sendJSON(res, { key });
-    } catch (err) { sendJSON(res, { error: err.message }, 500); }
-    return;
-  }
-
-  // ---------- 登录: QR 二维码图片 ----------
-  if (pn === '/api/login/qr/create') {
-    try {
-      const key = url.searchParams.get('key');
-      const r = await login_qr_create({ key, qrimg: true, timestamp: Date.now() });
-      const d = r.body && r.body.data;
-      sendJSON(res, { img: d && d.qrimg, url: d && d.qrurl });
-    } catch (err) { sendJSON(res, { error: err.message }, 500); }
-    return;
-  }
-
-  // ---------- 登录: 轮询扫码状态 ----------
-  if (pn === '/api/login/qr/check') {
-    try {
-      const key = url.searchParams.get('key');
-      let r = await login_qr_check({ key, noCookie: true, timestamp: Date.now() });
-      let body = r.body || {};
-      let code = Number(body.code || r.code);
-      let msg  = body.message || r.message || '';
-      let cookie = readCookieFromResponse(r);
-      if (code === 803 && !cookie) {
-        try {
-          const retry = await login_qr_check({ key, timestamp: Date.now() });
-          const retryCookie = readCookieFromResponse(retry);
-          if (retryCookie) {
-            r = retry;
-            body = retry.body || body;
-            code = Number(body.code || retry.code || code);
-            msg = body.message || retry.message || msg;
-            cookie = retryCookie;
-          }
-        } catch (retryErr) {
-          console.warn('[Login] qr cookie retry failed:', retryErr.message);
-        }
-      }
-      // 803 = 授权成功, 802 = 已扫待确认, 801 = 等待扫码, 800 = 二维码过期
-      if (code === 803) {
-        if (cookie) saveCookie(cookie);
-        let info = await getLoginInfo();
-        if (!info.loggedIn) {
-          const profile = body.profile || (body.data && body.data.profile) || {};
-          info = normalizeLoginInfo(profile, body.account || (body.data && body.data.account), body.data || body);
-        }
-        if (!info.loggedIn && cookie) {
-          info = {
-            loggedIn: true,
-            pendingProfile: true,
-            nickname: (body.nickname || (body.profile && body.profile.nickname) || '网易云用户'),
-            avatar: body.avatarUrl || (body.profile && body.profile.avatarUrl) || '',
-            vipType: 0,
-            vipLevel: 'none',
-            isVip: false,
-            isSvip: false,
-            vipLabel: '无VIP',
-          };
-        }
-        sendJSON(res, { code, message: msg, ...info, hasCookie: !!cookie });
-        return;
-      }
-      sendJSON(res, { code, message: msg, nickname: body.nickname, avatar: body.avatarUrl });
-    } catch (err) { sendJSON(res, { error: err.message }, 500); }
-    return;
-  }
-
-  // ---------- 登录态查询 ----------
-  if (pn === '/api/login/status') {
-    const info = await getLoginInfo();
-    sendJSON(res, info);
-    return;
-  }
-
-  // ---------- 登出 ----------
-  if (pn === '/api/logout') {
-    try { await logout({ cookie: userCookie }); } catch (e) {}
-    saveCookie('');
-    sendJSON(res, { ok: true });
-    return;
-  }
-
-  // ---------- 用户歌单 ----------
-  if (pn === '/api/user/playlists') {
-    try {
-      const info = await getLoginInfo();
-      if (!info.loggedIn || !info.userId) { sendJSON(res, { loggedIn: false, playlists: [] }); return; }
-      const limit = Math.max(12, Math.min(100, parseInt(url.searchParams.get('limit') || '60', 10) || 60));
-      const r = await user_playlist({ uid: info.userId, limit, cookie: userCookie, timestamp: Date.now() });
-      const list = ((r.body && r.body.playlist) || []).map(pl => ({
-        id: pl.id,
-        name: pl.name,
-        cover: pl.coverImgUrl || '',
-        trackCount: pl.trackCount || 0,
-        playCount: pl.playCount || 0,
-        creator: (pl.creator && pl.creator.nickname) || '',
-        subscribed: !!pl.subscribed,
-        specialType: pl.specialType || 0,
-      }));
-      sendJSON(res, { loggedIn: true, userId: info.userId, playlists: list });
-    } catch (err) {
-      console.error('[UserPlaylists]', err);
-      sendJSON(res, { error: err.message, loggedIn: false, playlists: [] }, 500);
-    }
-    return;
-  }
-
-  // ---------- 红心状态 ----------
-  if (pn === '/api/song/like/check') {
-    try {
-      const info = await requireLogin(res);
-      if (!info) return;
-      const ids = String(url.searchParams.get('ids') || url.searchParams.get('id') || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-      if (!ids.length) { sendJSON(res, { error: 'Missing song id', liked: {}, ids: [] }, 400); return; }
-      let likedIds = [];
-      try {
-        if (typeof song_like_check === 'function') {
-          const checked = await song_like_check({ ids: JSON.stringify(ids.map(Number).filter(Boolean)), cookie: userCookie, timestamp: Date.now() });
-          const data = (checked.body && (checked.body.data || checked.body.ids)) || checked.body || {};
-          if (Array.isArray(data)) likedIds = data.map(String);
-          else if (data && typeof data === 'object') {
-            ids.forEach(id => {
-              if (data[id] || data[String(id)] || data[Number(id)]) likedIds.push(String(id));
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[LikeCheck] direct check failed:', e.message);
-      }
-      if (!likedIds.length) {
-        const r = await likelist({ uid: info.userId, cookie: userCookie, timestamp: Date.now() });
-        likedIds = ((r.body && r.body.ids) || []).map(String);
-      }
-      const set = new Set(likedIds);
-      const liked = {};
-      ids.forEach(id => { liked[id] = set.has(String(id)); });
-      sendJSON(res, { loggedIn: true, ids, liked });
-    } catch (err) {
-      console.error('[LikeCheck]', err);
-      sendJSON(res, { error: err.message }, 500);
-    }
-    return;
-  }
-
-  // ---------- 红心/取消红心 ----------
-  if (pn === '/api/song/like') {
-    try {
-      const info = await requireLogin(res);
-      if (!info) return;
-      const body = req.method === 'POST' ? await readRequestBody(req) : {};
-      const id = body.id || url.searchParams.get('id');
-      const nextLike = String(body.like != null ? body.like : (url.searchParams.get('like') || 'true')) !== 'false';
-      if (!id) { sendJSON(res, { error: 'Missing song id' }, 400); return; }
-      const r = await like_song({ id, like: String(nextLike), cookie: userCookie, timestamp: Date.now() });
-      const code = (r.body && r.body.code) || r.code || 200;
-      sendJSON(res, { loggedIn: true, id, liked: nextLike, code, body: r.body || r });
-    } catch (err) {
-      console.error('[Like]', err);
-      sendJSON(res, { error: err.message }, 500);
-    }
-    return;
-  }
-
-  // ---------- 创建歌单 ----------
-  if (pn === '/api/playlist/create') {
-    try {
-      const info = await requireLogin(res);
-      if (!info) return;
-      const body = req.method === 'POST' ? await readRequestBody(req) : {};
-      const name = String(body.name || url.searchParams.get('name') || '').trim();
-      const privacy = String(body.privacy || url.searchParams.get('privacy') || '0');
-      if (!name) { sendJSON(res, { error: 'Missing playlist name' }, 400); return; }
-      const r = await playlist_create({ name, privacy, cookie: userCookie, timestamp: Date.now() });
-      const created = (r.body && (r.body.playlist || r.body.data)) || {};
-      sendJSON(res, { loggedIn: true, playlist: created, body: r.body || r });
-    } catch (err) {
-      console.error('[PlaylistCreate]', err);
-      sendJSON(res, { error: err.message }, 500);
-    }
-    return;
-  }
-
-  // ---------- 收藏歌曲到歌单 ----------
-  if (pn === '/api/playlist/add-song') {
-    try {
-      const info = await requireLogin(res);
-      if (!info) return;
-      const body = req.method === 'POST' ? await readRequestBody(req) : {};
-      const pid = body.pid || url.searchParams.get('pid');
-      const id = body.id || body.ids || url.searchParams.get('id') || url.searchParams.get('ids');
-      if (!pid || !id) { sendJSON(res, { error: 'Missing playlist id or song id' }, 400); return; }
-      const attempts = [];
-      let finalBody = null;
-      let finalCode = 0;
-      let finalMessage = '';
-      let success = false;
-
-      const primary = await playlist_tracks({ op: 'add', pid, tracks: String(id), cookie: userCookie, timestamp: Date.now() });
-      finalBody = primary.body || primary;
-      finalCode = normalizeApiCode(primary);
-      finalMessage = normalizeApiMessage(primary);
-      success = finalCode === 200 && !(finalBody && finalBody.error);
-      attempts.push({ api: 'playlist_tracks', code: finalCode, message: finalMessage, body: finalBody });
-
-      if (!success && typeof playlist_track_add === 'function') {
-        try {
-          const fallback = await playlist_track_add({ pid, ids: String(id), cookie: userCookie, timestamp: Date.now() });
-          finalBody = fallback.body || fallback;
-          finalCode = normalizeApiCode(fallback);
-          finalMessage = normalizeApiMessage(fallback);
-          success = finalCode === 200 && !(finalBody && finalBody.error);
-          attempts.push({ api: 'playlist_track_add', code: finalCode, message: finalMessage, body: finalBody });
-        } catch (fallbackErr) {
-          const errBody = fallbackErr.body || fallbackErr.response || {};
-          finalBody = errBody;
-          finalCode = normalizeApiCode(errBody);
-          finalMessage = normalizeApiMessage(errBody) || fallbackErr.message || '';
-          attempts.push({ api: 'playlist_track_add', code: finalCode, message: finalMessage, body: errBody });
-        }
-      }
-
-      if (!success) {
-        sendJSON(res, { loggedIn: true, pid, id, success: false, code: finalCode, error: finalMessage || 'PLAYLIST_ADD_FAILED', attempts }, finalCode === 401 ? 401 : 409);
-        return;
-      }
-      sendJSON(res, { loggedIn: true, pid, id, success: true, code: finalCode, body: finalBody, attempts });
-    } catch (err) {
-      console.error('[PlaylistAddSong]', err);
-      sendJSON(res, { error: err.message }, 500);
-    }
-    return;
-  }
-
-  // ---------- 歌词 ----------
-  if (pn === '/api/lyric') {
-    try {
-      const id = url.searchParams.get('id');
-      if (!id) { sendJSON(res, { error: 'Missing song id', lyric: '' }, 400); return; }
-      let body = {};
-      let source = 'lyric';
-      try {
-        if (typeof lyric_new === 'function') {
-          const nr = await lyric_new({ id, cookie: userCookie, timestamp: Date.now() });
-          body = nr.body || {};
-          source = 'lyric_new';
-        }
-      } catch (errNew) {
-        console.warn('[LyricNew]', errNew.message);
-      }
-      if (!((body.lrc && body.lrc.lyric) || (body.yrc && body.yrc.lyric))) {
-        const r = await lyric({ id, cookie: userCookie, timestamp: Date.now() });
-        body = r.body || body || {};
-        source = 'lyric';
-      }
-      sendJSON(res, {
-        lyric: (body.lrc && body.lrc.lyric) || '',
-        tlyric: (body.tlyric && body.tlyric.lyric) || '',
-        yrc: (body.yrc && body.yrc.lyric) || '',
-        source,
-      });
-    } catch (err) {
-      console.error('[Lyric]', err);
-      sendJSON(res, { error: err.message, lyric: '' }, 500);
-    }
-    return;
-  }
-
-  // ---------- 歌曲评论 ----------
-  if (pn === '/api/song/comments') {
-    try {
-      const id = url.searchParams.get('id');
-      const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
-      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      if (!id) { sendJSON(res, { error: 'Missing song id', comments: [] }, 400); return; }
-      const r = await comment_music({ id, limit, offset, cookie: userCookie, timestamp: Date.now() });
-      const body = r.body || r || {};
-      const raw = body.hotComments && offset === 0 ? body.hotComments : (body.comments || []);
-      const comments = (raw || []).map(c => ({
-        id: c.commentId,
-        content: c.content || '',
-        likedCount: c.likedCount || 0,
-        time: c.time || 0,
-        user: c.user ? { id: c.user.userId, nickname: c.user.nickname || '', avatar: c.user.avatarUrl || '' } : null,
-      })).filter(c => c.content);
-      sendJSON(res, { id, total: body.total || 0, comments, hot: !!(body.hotComments && offset === 0), body });
-    } catch (err) {
-      console.error('[SongComments]', err);
-      sendJSON(res, { error: err.message, comments: [] }, 500);
-    }
-    return;
-  }
-
-  // ---------- 歌手主页 / 热门歌曲 ----------
-  if (pn === '/api/artist/detail') {
-    try {
-      const id = url.searchParams.get('id');
-      const limit = Math.max(10, Math.min(80, parseInt(url.searchParams.get('limit') || '30', 10) || 30));
-      if (!id) { sendJSON(res, { error: 'Missing artist id', songs: [] }, 400); return; }
-      let detailBody = {};
-      try {
-        const detail = await artist_detail({ id, cookie: userCookie, timestamp: Date.now() });
-        detailBody = detail.body || detail || {};
-      } catch (e) {
-        console.warn('[ArtistDetail] detail failed:', e.message);
-      }
-      let rawSongs = [];
-      try {
-        const list = await artist_songs({ id, order: 'hot', limit, offset: 0, cookie: userCookie, timestamp: Date.now() });
-        const b = list.body || list || {};
-        rawSongs = (b.songs || (b.data && b.data.songs) || []);
-      } catch (e) {
-        console.warn('[ArtistSongs] hot failed:', e.message);
-      }
-      if (!rawSongs.length) {
-        const top = await artist_top_song({ id, cookie: userCookie, timestamp: Date.now() });
-        const b = top.body || top || {};
-        rawSongs = b.songs || [];
-      }
-      const artist = detailBody.artist || (detailBody.data && (detailBody.data.artist || detailBody.data)) || {};
-      const songs = rawSongs.map(mapSongRecord).filter(s => s.id).slice(0, limit);
-      sendJSON(res, {
-        id,
-        artist: {
-          id: artist.id || id,
-          name: artist.name || artist.artistName || '',
-          avatar: artist.avatar || artist.cover || artist.picUrl || artist.img1v1Url || '',
-          brief: artist.briefDesc || artist.description || artist.desc || '',
-          musicSize: artist.musicSize || artist.songSize || 0,
-          albumSize: artist.albumSize || 0,
-        },
-        songs,
-        body: detailBody,
-      });
-    } catch (err) {
-      console.error('[ArtistDetail]', err);
-      sendJSON(res, { error: err.message, songs: [] }, 500);
-    }
-    return;
-  }
-
-  // ---------- 歌单曲目详情 ----------
-  if (pn === '/api/playlist/tracks') {
-    try {
-      const id = url.searchParams.get('id');
-      if (!id) { sendJSON(res, { error: 'Missing playlist id', tracks: [] }, 400); return; }
-
-      let playlistMeta = { id, name: '', cover: '', trackCount: 0 };
-      let rawTracks = [];
-
-      // 新版本 NeteaseCloudMusicApi 通常提供 playlist_track_all；旧版本退回 playlist_detail。
-      if (typeof playlist_track_all === 'function') {
-        try {
-          const all = await playlist_track_all({ id, limit: 500, offset: 0, cookie: userCookie, timestamp: Date.now() });
-          rawTracks = (all.body && (all.body.songs || all.body.tracks)) || [];
-        } catch (err) {
-          console.warn('[PlaylistTracks] playlist_track_all failed, fallback to detail:', err.message);
-        }
-      }
-
-      if (!rawTracks.length && typeof playlist_detail === 'function') {
-        const detail = await playlist_detail({ id, s: 0, cookie: userCookie, timestamp: Date.now() });
-        const pl = (detail.body && detail.body.playlist) || {};
-        playlistMeta = { id: pl.id || id, name: pl.name || '', cover: pl.coverImgUrl || '', trackCount: pl.trackCount || 0 };
-        rawTracks = pl.tracks || [];
-      }
-
-      const tracks = rawTracks.map(mapSongRecord).filter(t => t.id);
-
-      if (!playlistMeta.trackCount) playlistMeta.trackCount = tracks.length;
-      sendJSON(res, { playlist: playlistMeta, tracks });
-    } catch (err) {
-      console.error('[PlaylistTracks]', err);
-      sendJSON(res, { error: err.message, tracks: [] }, 500);
-    }
-    return;
-  }
-
-  // ---------- 封面代理 (带 CORS 头, 给 canvas 提取像素用) ----------
-  if (pn === '/api/cover') {
-    try {
-      const coverUrl = url.searchParams.get('url');
-      // URL 校验: 必须是 http(s) 开头, 否则直接 404 (不要让 fetch 抛错)
-      if (!coverUrl || !/^https?:\/\//i.test(coverUrl)) {
-        res.writeHead(400, { 'Access-Control-Allow-Origin': '*' });
-        res.end('Invalid cover url');
-        return;
-      }
-      const resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' } });
-      const ct  = resp.headers.get('content-type') || 'image/jpeg';
-      const cl  = resp.headers.get('content-length');
-      const hdr = {
-        'Content-Type': ct,
-        'Access-Control-Allow-Origin': '*',
-        'Cross-Origin-Resource-Policy': 'cross-origin',
-        'Cache-Control': 'public, max-age=86400',
-      };
-      if (cl) hdr['Content-Length'] = cl;
-      res.writeHead(resp.status, hdr);
-      const reader = resp.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
-    } catch (err) { console.error('[Cover]', err); res.writeHead(500); res.end(); }
-    return;
-  }
-
-  // ---------- 音频代理 (支持 Range) ----------
-  if (pn === '/api/audio') {
-    try {
-      const audioUrl = url.searchParams.get('url');
-      if (!audioUrl) { res.writeHead(400); res.end('Missing url'); return; }
-      const range = req.headers.range || '';
-      const hdr = audioProxyHeadersFor(audioUrl, range);
-      const up = await fetch(audioUrl, { headers: hdr });
-      const out = {
-        'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
-        'Access-Control-Allow-Origin': '*',
-        'Accept-Ranges': 'bytes',
-      };
-      const cl = up.headers.get('content-length'); if (cl) out['Content-Length'] = cl;
-      const cr = up.headers.get('content-range');  if (cr) out['Content-Range']  = cr;
-      res.writeHead(up.status, out);
-      const reader = up.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
-    } catch (err) { console.error('[Audio]', err); res.writeHead(500); res.end(); }
+  if (await discoverRoutes.handleRoute(pn, req, res, url)) {
     return;
   }
 
@@ -4193,11 +3418,31 @@ const server = http.createServer(async (req, res) => {
   serveStatic(res, filePath);
 });
 
-server.listen(PORT, HOST, () => {
+server.on('listening', () => {
+  ensureListenReporter();
+});
+
+server.on('listening', () => {
+  const port = currentServerPort();
   console.log('======================================================');
-  console.log(' 粒子音乐可视化 v2  →  http://localhost:' + PORT);
-  console.log(' 登录态: ' + (userCookie ? '已登录(cookie已加载)' : '未登录'));
+  console.log(' 粒子音乐可视化 v2  →  http://localhost:' + port);
+  console.log(' 登录态: ' + (getUserCookie() ? '已登录(安全会话已加载)' : '未登录'));
   console.log('======================================================');
+});
+
+server.ready = listenOnAvailablePort(server, {
+  host: HOST,
+  preferredPort: PREFERRED_PORT,
+  maxAttempts: 32,
+});
+server.ready.catch((error) => {
+  console.error('[Server] Failed to bind a loopback port:', error && error.message || error);
+  if (require.main === module) process.exitCode = 1;
+});
+
+server.on('close', () => {
+  if (listenReporter) listenReporter.destroy();
+  listenReporter = null;
 });
 
 module.exports = server;

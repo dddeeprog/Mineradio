@@ -1,0 +1,496 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const CREDENTIAL_SCHEMA = 'mineradio-provider-credentials-v1';
+const SUPPORTED_CREDENTIAL_PROVIDERS = Object.freeze([
+  'netease',
+  'qq',
+  'kugou',
+  'qishui',
+  'spotify',
+]);
+const SUPPORTED_PROVIDER_SET = new Set(SUPPORTED_CREDENTIAL_PROVIDERS);
+const MIGRATION_ID_PATTERN = /^[a-f0-9]{64}$/;
+
+function createCredentialStoreError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function createCorruptError() {
+  return createCredentialStoreError(
+    'CREDENTIAL_STORE_CORRUPT',
+    'Credential store data is corrupt',
+  );
+}
+
+function isPlainObject(value) {
+  if (value == null || typeof value !== 'object') return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function createInvalidCredentialError() {
+  return createCredentialStoreError(
+    'CREDENTIAL_STORE_INVALID_CREDENTIAL',
+    'Credential must be a JSON-safe plain object',
+  );
+}
+
+function cloneJsonSafeArray(value, activeObjects) {
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes('length')) {
+    throw createInvalidCredentialError();
+  }
+
+  const clone = new Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor
+      || !descriptor.enumerable
+      || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw createInvalidCredentialError();
+    }
+    clone[index] = cloneJsonSafeValue(descriptor.value, activeObjects);
+  }
+  return clone;
+}
+
+function cloneJsonSafeObject(value, activeObjects) {
+  const clone = Object.create(Object.getPrototypeOf(value));
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (typeof key !== 'string'
+      || !descriptor
+      || !descriptor.enumerable
+      || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw createInvalidCredentialError();
+    }
+    Object.defineProperty(clone, key, {
+      configurable: true,
+      enumerable: true,
+      value: cloneJsonSafeValue(descriptor.value, activeObjects),
+      writable: true,
+    });
+  }
+  return clone;
+}
+
+function cloneJsonSafeValue(value, activeObjects) {
+  if (value === null
+    || typeof value === 'string'
+    || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw createInvalidCredentialError();
+    return value;
+  }
+  if (typeof value !== 'object' || activeObjects.has(value)) {
+    throw createInvalidCredentialError();
+  }
+
+  activeObjects.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return cloneJsonSafeArray(value, activeObjects);
+    }
+    if (!isPlainObject(value)) throw createInvalidCredentialError();
+    return cloneJsonSafeObject(value, activeObjects);
+  } finally {
+    activeObjects.delete(value);
+  }
+}
+
+function cloneCredential(value) {
+  try {
+    if (!isPlainObject(value)) throw createInvalidCredentialError();
+    return cloneJsonSafeValue(value, new Set());
+  } catch (_error) {
+    throw createInvalidCredentialError();
+  }
+}
+
+function assertSupportedProvider(provider) {
+  if (!SUPPORTED_PROVIDER_SET.has(provider)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_UNSUPPORTED_PROVIDER',
+      'Unsupported credential provider',
+    );
+  }
+}
+
+function createAtomicTemporaryPath(filePath) {
+  const resolvedFile = path.resolve(filePath);
+  const suffix = `${process.pid}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+  return path.join(
+    path.dirname(resolvedFile),
+    `.${path.basename(resolvedFile)}.${suffix}.tmp`,
+  );
+}
+
+function writeFileAtomic(filePath, value, options = {}) {
+  if (!Buffer.isBuffer(value)) {
+    throw new TypeError('Atomic credential writes require a Buffer');
+  }
+
+  const fileSystem = options.fileSystem || fs;
+  const resolvedFile = path.resolve(filePath);
+  const temporaryFile = createAtomicTemporaryPath(resolvedFile);
+  let descriptor = null;
+
+  try {
+    descriptor = fileSystem.openSync(temporaryFile, 'wx', 0o600);
+    fileSystem.writeFileSync(descriptor, value);
+    fileSystem.fsyncSync(descriptor);
+    fileSystem.closeSync(descriptor);
+    descriptor = null;
+    fileSystem.renameSync(temporaryFile, resolvedFile);
+  } catch (error) {
+    if (descriptor != null) {
+      try {
+        fileSystem.closeSync(descriptor);
+      } catch (_closeError) {
+        // Preserve the original write error.
+      }
+    }
+    try {
+      fileSystem.unlinkSync(temporaryFile);
+    } catch (_cleanupError) {
+      // The temporary file may not have been created.
+    }
+    throw error;
+  }
+}
+
+function readFile(filePath) {
+  return fs.readFileSync(filePath);
+}
+
+function removeFile(filePath) {
+  fs.unlinkSync(filePath);
+}
+
+function discardCredentialStoreFile(options = {}) {
+  const remove = options.removeFile || removeFile;
+  try {
+    remove(options.filePath);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_REMOVE_FAILED',
+      'Credential store data could not be removed',
+    );
+  }
+}
+
+function encryptionIsAvailable(safeStorage) {
+  if (!safeStorage || typeof safeStorage.isEncryptionAvailable !== 'function') {
+    return false;
+  }
+  try {
+    return safeStorage.isEncryptionAvailable() === true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function emptyProviders() {
+  return Object.create(null);
+}
+
+function isValidAccountId(accountId) {
+  return accountId == null
+    || typeof accountId === 'string'
+    || typeof accountId === 'number';
+}
+
+function isValidUpdatedAt(updatedAt) {
+  return typeof updatedAt === 'string' || typeof updatedAt === 'number';
+}
+
+function readMigrationId(options) {
+  if (options === undefined) return null;
+  if (!isPlainObject(options)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+  const keys = Reflect.ownKeys(options);
+  const descriptor = Object.getOwnPropertyDescriptor(options, 'migrationId');
+  if (keys.length !== 1
+    || keys[0] !== 'migrationId'
+    || !descriptor
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+    || !MIGRATION_ID_PATTERN.test(descriptor.value)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+  return descriptor.value;
+}
+
+function assertMigrationId(migrationId) {
+  if (!MIGRATION_ID_PATTERN.test(migrationId)) {
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_INVALID_MIGRATION_ID',
+      'Credential migration marker is invalid',
+    );
+  }
+}
+
+function validateEnvelope(envelope) {
+  if (!isPlainObject(envelope)
+    || envelope.schema !== CREDENTIAL_SCHEMA
+    || !isPlainObject(envelope.providers)) {
+    throw createCorruptError();
+  }
+
+  const envelopeKeys = Object.keys(envelope);
+  if (envelopeKeys.length !== 2
+    || !envelopeKeys.includes('schema')
+    || !envelopeKeys.includes('providers')) {
+    throw createCorruptError();
+  }
+
+  const providers = emptyProviders();
+  for (const [provider, record] of Object.entries(envelope.providers)) {
+    if (!SUPPORTED_PROVIDER_SET.has(provider)
+      || !isPlainObject(record)
+      || !isPlainObject(record.credential)
+      || !isValidAccountId(record.accountId)
+      || !isValidUpdatedAt(record.updatedAt)) {
+      throw createCorruptError();
+    }
+
+    const recordKeys = Object.keys(record);
+    const hasMigrationId = recordKeys.includes('migrationId');
+    if ((recordKeys.length !== 3 && recordKeys.length !== 4)
+      || (recordKeys.length === 4 && !hasMigrationId)
+      || !recordKeys.includes('credential')
+      || !recordKeys.includes('accountId')
+      || !recordKeys.includes('updatedAt')
+      || (hasMigrationId && !MIGRATION_ID_PATTERN.test(record.migrationId))) {
+      throw createCorruptError();
+    }
+
+    providers[provider] = {
+      credential: cloneCredential(record.credential),
+      accountId: record.accountId,
+      updatedAt: record.updatedAt,
+    };
+    if (hasMigrationId) providers[provider].migrationId = record.migrationId;
+  }
+  return providers;
+}
+
+function readEncryptedProviders(filePath, safeStorage, read) {
+  let encrypted;
+  try {
+    encrypted = read(filePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return emptyProviders();
+    throw createCredentialStoreError(
+      'CREDENTIAL_STORE_READ_FAILED',
+      'Credential store could not be read',
+    );
+  }
+
+  if (!Buffer.isBuffer(encrypted) || encrypted.length === 0) throw createCorruptError();
+
+  try {
+    const decrypted = safeStorage.decryptString(Buffer.from(encrypted));
+    if (typeof decrypted !== 'string') throw new Error('invalid decrypted value');
+    return validateEnvelope(JSON.parse(decrypted));
+  } catch (_error) {
+    throw createCorruptError();
+  }
+}
+
+function accountIdFromCredential(credential) {
+  const { accountId } = credential;
+  return isValidAccountId(accountId) ? (accountId ?? null) : null;
+}
+
+function copyProviders(providers) {
+  const copy = emptyProviders();
+  for (const [provider, record] of Object.entries(providers)) {
+    copy[provider] = record;
+  }
+  return copy;
+}
+
+function createCredentialStore(options = {}) {
+  const filePath = options.filePath;
+  const safeStorage = options.safeStorage;
+  const read = options.readFile || readFile;
+  const atomicWrite = options.writeFileAtomic || writeFileAtomic;
+  const remove = options.removeFile || removeFile;
+  const now = options.now || (() => new Date().toISOString());
+  const persistenceAvailable = encryptionIsAvailable(safeStorage);
+  const mode = persistenceAvailable ? 'encrypted' : 'memory-only';
+  let providers = persistenceAvailable
+    ? readEncryptedProviders(filePath, safeStorage, read)
+    : emptyProviders();
+
+  function persist(nextProviders) {
+    let encrypted;
+    try {
+      encrypted = safeStorage.encryptString(JSON.stringify({
+        schema: CREDENTIAL_SCHEMA,
+        providers: nextProviders,
+      }));
+    } catch (_error) {
+      throw createCredentialStoreError(
+        'CREDENTIAL_STORE_ENCRYPT_FAILED',
+        'Credential store data could not be encrypted',
+      );
+    }
+
+    if (!Buffer.isBuffer(encrypted)) {
+      throw createCredentialStoreError(
+        'CREDENTIAL_STORE_ENCRYPT_FAILED',
+        'Credential store data could not be encrypted',
+      );
+    }
+
+    try {
+      atomicWrite(filePath, encrypted);
+    } catch (_error) {
+      throw createCredentialStoreError(
+        'CREDENTIAL_STORE_WRITE_FAILED',
+        'Credential store data could not be persisted',
+      );
+    }
+  }
+
+  function removePersistedFile() {
+    discardCredentialStoreFile({ filePath, removeFile: remove });
+  }
+
+  return {
+    get(provider) {
+      assertSupportedProvider(provider);
+      const record = providers[provider];
+      return record ? cloneCredential(record.credential) : null;
+    },
+
+    set(provider, credential, options) {
+      assertSupportedProvider(provider);
+      const migrationId = readMigrationId(options);
+      const credentialCopy = cloneCredential(credential);
+      let updatedAt;
+      try {
+        updatedAt = now();
+      } catch (_error) {
+        throw createCredentialStoreError(
+          'CREDENTIAL_STORE_TIME_FAILED',
+          'Credential update time could not be created',
+        );
+      }
+      if (!isValidUpdatedAt(updatedAt)) {
+        throw createCredentialStoreError(
+          'CREDENTIAL_STORE_TIME_FAILED',
+          'Credential update time could not be created',
+        );
+      }
+
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      const nextProviders = copyProviders(currentProviders);
+      nextProviders[provider] = {
+        credential: credentialCopy,
+        accountId: accountIdFromCredential(credentialCopy),
+        updatedAt,
+      };
+      if (migrationId) nextProviders[provider].migrationId = migrationId;
+      if (persistenceAvailable) persist(nextProviders);
+      providers = nextProviders;
+
+      return {
+        persisted: persistenceAvailable,
+        mode,
+      };
+    },
+
+    hasMigration(provider, migrationId) {
+      assertSupportedProvider(provider);
+      assertMigrationId(migrationId);
+      if (!persistenceAvailable) return false;
+      providers = readEncryptedProviders(filePath, safeStorage, read);
+      return providers[provider]?.migrationId === migrationId;
+    },
+
+    delete(provider) {
+      assertSupportedProvider(provider);
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      if (!currentProviders[provider]) {
+        providers = currentProviders;
+        return false;
+      }
+
+      const nextProviders = copyProviders(currentProviders);
+      delete nextProviders[provider];
+      if (persistenceAvailable) {
+        if (Object.keys(nextProviders).length === 0) {
+          removePersistedFile();
+        } else {
+          persist(nextProviders);
+        }
+      }
+      providers = nextProviders;
+      return true;
+    },
+
+    clear() {
+      const currentProviders = persistenceAvailable
+        ? readEncryptedProviders(filePath, safeStorage, read)
+        : providers;
+      if (Object.keys(currentProviders).length === 0) {
+        providers = currentProviders;
+        return false;
+      }
+      if (persistenceAvailable) removePersistedFile();
+      providers = emptyProviders();
+      return true;
+    },
+
+    snapshot() {
+      return {
+        schema: CREDENTIAL_SCHEMA,
+        mode,
+        persistenceAvailable,
+        providers: SUPPORTED_CREDENTIAL_PROVIDERS
+          .filter(provider => providers[provider])
+          .map(provider => ({
+            provider,
+            accountId: providers[provider].accountId,
+            updatedAt: providers[provider].updatedAt,
+            hasCredential: true,
+          })),
+      };
+    },
+  };
+}
+
+module.exports = {
+  CREDENTIAL_SCHEMA,
+  SUPPORTED_CREDENTIAL_PROVIDERS,
+  createCredentialStore,
+  discardCredentialStoreFile,
+  writeFileAtomic,
+};

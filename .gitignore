@@ -2,6 +2,7 @@
 node_modules/
 
 # Build output
+build/.generated/
 dist/
 dist-*/
 out/
@@ -33,6 +34,7 @@ desktop.ini
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.worktrees/
 
 # Historical local experiment files
 public/index.*.html

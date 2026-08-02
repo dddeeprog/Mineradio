@@ -1,0 +1,359 @@
+(function(root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.MineradioContentShelfState = api;
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function() {
+  function normalizeDetailView(value) {
+    return value === 'record' ? 'record' : 'list';
+  }
+
+  function resolveDetailOrientation(shelfMode, detailView) {
+    if (normalizeDetailView(detailView) !== 'record') return 'list';
+    return shelfMode === 'stage' ? 'stage' : 'side';
+  }
+
+  function detailChromeKind(contentKind, detailView) {
+    return contentKind === 'playlist' && normalizeDetailView(detailView) === 'record' ? 'toolbar' : 'panel';
+  }
+
+  function recordStageStep(stageXStep) {
+    var step = Number(stageXStep);
+    if (!isFinite(step)) return 0;
+    return step * 0.98 / 2.05;
+  }
+
+  function recordToolbarLayout(orientation) {
+    return 'fab-stack';
+  }
+
+  function recordCardLayout() {
+    return {
+      canvasW: 620,
+      canvasH: 760,
+      worldW: 0.98,
+      worldH: 1.2,
+      coverX: 0,
+      coverY: 0,
+      coverSize: 620,
+      textX: 34,
+      titleY: 676,
+      artistY: 718,
+    };
+  }
+
+  function normalizeShelfViewportLock(value) {
+    return !(value === false || value === 0 || value === '0' || value === 'false' || value === 'off');
+  }
+
+  function shelfMotionBinding(viewportLockEnabled) {
+    return normalizeShelfViewportLock(viewportLockEnabled) ? 'locked' : 'dynamic';
+  }
+
+  function shouldBindShelfToPresetCamera(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shouldBindShelfToBackgroundMotion(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shouldUsePresetShelfLayout(viewportLockEnabled) {
+    return !normalizeShelfViewportLock(viewportLockEnabled);
+  }
+
+  function shelfRenderCameraMode(viewportLockEnabled) {
+    return normalizeShelfViewportLock(viewportLockEnabled) ? 'reference' : 'main';
+  }
+
+  function resolveShelfLayoutPreset(viewportLockEnabled, preset) {
+    if (normalizeShelfViewportLock(viewportLockEnabled)) return 0;
+    var id = Math.floor(Number(preset));
+    return isFinite(id) && id >= 0 ? id : 0;
+  }
+
+  var SHELF_REFERENCE_CAMERA_ORBITS = [
+    { theta: 0, phi: 0.08, radius: 6.6 },
+    { theta: 0, phi: 0.03, radius: 6.2 },
+    { theta: 0, phi: 0.15, radius: 7.0 },
+    { theta: 0, phi: 0.05, radius: 8.0 },
+    { theta: 0, phi: 0.04, radius: 6.5 },
+    { theta: -0.52, phi: 0.34, radius: 9.4 },
+    { theta: 0.18, phi: 0.10, radius: 7.4 },
+  ];
+
+  function shelfReferenceCameraOrbit(viewportLockEnabled, preset) {
+    var id = resolveShelfLayoutPreset(viewportLockEnabled, preset);
+    var ref = SHELF_REFERENCE_CAMERA_ORBITS[id] || SHELF_REFERENCE_CAMERA_ORBITS[0];
+    return { theta: ref.theta, phi: ref.phi, radius: ref.radius };
+  }
+
+  function shelfBeatMotion(state) {
+    state = state || {};
+    function positive(value, max) {
+      var n = Number(value);
+      if (!isFinite(n) || n <= 0) return 0;
+      return Math.min(max, n);
+    }
+    var bass = positive(state.bass, 1.2);
+    var beatPulse = positive(state.beatPulse, 1.4);
+    var beatPunch = positive(state.beatPunch, 1.6);
+    var scale = 1 + Math.min(0.055, bass * 0.014 + beatPulse * 0.024 + beatPunch * 0.012);
+    var y = Math.min(0.045, bass * 0.004 + beatPulse * 0.028 + beatPunch * 0.012);
+    var z = Math.min(0.035, bass * 0.003 + beatPulse * 0.018 + beatPunch * 0.010);
+    var rotZ = Math.min(0.012, beatPulse * 0.006 + beatPunch * 0.004);
+    return { scale: scale, y: y, z: z, rotZ: rotZ };
+  }
+
+  function playlistShelfCardAction(itemType, isCenter) {
+    if (!isCenter) return 'scroll';
+    if (itemType === 'playlist' || itemType === 'podcastCollection') return 'openContent';
+    if (itemType === 'queue') return 'playQueue';
+    return 'none';
+  }
+
+  function recordShelfCardAction(isCenter, playable) {
+    if (!isCenter) return 'scroll';
+    return playable ? 'play' : 'none';
+  }
+
+  function stageShelfControlsLift(controlsVisible, viewportHeight, viewportLockEnabled) {
+    if (!controlsVisible && viewportLockEnabled !== true) return 0;
+    var h = Number(viewportHeight);
+    if (!isFinite(h)) h = 1080;
+    if (h <= 700) return 0.34;
+    if (h <= 860) return 0.42;
+    return 0.5;
+  }
+
+  function isShelfViewportProjectionSafe(x, y, z) {
+    var nx = Number(x);
+    var ny = Number(y);
+    var nz = Number(z);
+    if (!isFinite(nx) || !isFinite(ny) || !isFinite(nz)) return false;
+    return Math.abs(nx) <= 1.75 && Math.abs(ny) <= 1.75 && nz >= -1.2 && nz <= 1.2;
+  }
+
+  var SHELF_CONTROL_BOUNDS = {
+    shelfSize: { min: 0.45, max: 1.9 },
+    shelfGap: { min: 0.55, max: 1.7 },
+    shelfOffsetX: { min: -2.4, max: 2.4 },
+    shelfOffsetY: { min: -1.8, max: 1.8 },
+    shelfOffsetZ: { min: -1.8, max: 1.8 },
+    shelfAngleY: { min: -50, max: 50 },
+  };
+
+  function shelfControlBounds(key) {
+    var bounds = SHELF_CONTROL_BOUNDS[key];
+    return bounds ? { min: bounds.min, max: bounds.max } : { min: 0, max: 1 };
+  }
+
+  function shouldCaptureShelfViewportAnchor(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
+    if (state.splashActive || state.splashRevealing || state.warmupActive) return false;
+    if (state.presetTransitionActive) return false;
+    if (state.cameraReady === false) return false;
+    var now = Number(state.now);
+    var warmupUntil = Number(state.warmupUntil);
+    if (isFinite(now) && isFinite(warmupUntil) && now < warmupUntil) return false;
+    return true;
+  }
+
+  function shouldSnapShelfControlsLift(state) {
+    state = state || {};
+    return normalizeShelfViewportLock(state.viewportLockEnabled) && state.snapPending === true;
+  }
+
+  function canRevealBottomControlsForShelf(source, state) {
+    state = state || {};
+    if (state.homeControlsLocked) return false;
+    if (source === 'handle' || source === 'force') return true;
+    return !(state.shelfPinnedOpen || state.shelfContentOpen || state.suppressActive);
+  }
+
+  function shouldApplyStartupStarfieldPreview(state) {
+    state = state || {};
+    if (state.splashActive && state.ignoreSplash !== true) return false;
+    if (state.immersiveMode || state.playing || state.audioActive) return false;
+    if (state.shelfPinnedOpen || state.shelfContentOpen) return false;
+    if (Number(state.currentIdx) >= 0) return false;
+    if (Number(state.playQueueLength) > 0) return false;
+    var shelfMode = String(state.shelfMode || 'off');
+    if (shelfMode === 'stage') return false;
+    if (shelfMode === 'side' && state.shelfAlwaysVisible !== false) return false;
+    return true;
+  }
+
+  function shouldResetShelfAnchorForPlaybackVisual(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+    if (state.hasReusableAnchor === true) return false;
+    if (state.presetChanged === true) return true;
+    return !!(state.startupPreviewActive || state.homeWallpaperPreviewActive || state.homeVisualPresetActive);
+  }
+
+  function shouldResetShelfAnchorForContentClose(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+    if (state.reason === 'shelf-mode-reset') return true;
+    return state.hasReusableAnchor !== true;
+  }
+
+  function shouldResetShelfAnchorForContentOpen(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return true;
+    if (state.reason === 'shelf-mode-reset') return true;
+    return state.hasReusableAnchor !== true;
+  }
+
+  function shouldPreserveShelfViewportAnchorOnReset(state) {
+    state = state || {};
+    if (!normalizeShelfViewportLock(state.viewportLockEnabled)) return false;
+    if (state.hasReusableAnchor !== true) return false;
+    var reason = String(state.reason || '');
+    if (/^(disabled|splash-end|startup-starfield-skip|viewport-resize|shelf-viewport-lock-toggle)$/.test(reason)) return false;
+    return true;
+  }
+
+  function shelfViewportScaleFactor(currentDistance, currentFov, anchorDistance, anchorFov) {
+    var cd = Math.abs(Number(currentDistance));
+    var ad = Math.abs(Number(anchorDistance));
+    var cf = Number(currentFov);
+    var af = Number(anchorFov);
+    if (!isFinite(cd) || !isFinite(ad) || !isFinite(cf) || !isFinite(af) || cd <= 0 || ad <= 0) return 1;
+    var currentSpan = cd * Math.tan(cf * Math.PI / 360);
+    var anchorSpan = ad * Math.tan(af * Math.PI / 360);
+    if (!isFinite(currentSpan) || !isFinite(anchorSpan) || anchorSpan <= 0) return 1;
+    return currentSpan / anchorSpan;
+  }
+
+  function shelfParallaxValue(value, viewportLockEnabled) {
+    var n = Number(value);
+    if (!isFinite(n)) return 0;
+    return Math.max(-1, Math.min(1, n));
+  }
+
+  function shouldContentShelfHandleWheel(hitState) {
+    hitState = hitState || {};
+    return !!(hitState.rowHit || hitState.rowScreenHit || hitState.chromeHit || hitState.chromeScreenHit);
+  }
+
+  function isPlayableTrack(track) {
+    if (!track) return false;
+    if (!track.id) return false;
+    if (track.noCopyrightRcmd) return false;
+    if (track.playable === false) return false;
+    return true;
+  }
+
+  function playableIndexFromContentIndex(tracks, index) {
+    var items = Array.isArray(tracks) ? tracks : [];
+    var target = Number(index);
+    if (!isFinite(target) || target < 0 || target >= items.length) return -1;
+    if (!isPlayableTrack(items[target])) return -1;
+
+    var playableIndex = -1;
+    for (var i = 0; i <= target; i += 1) {
+      if (isPlayableTrack(items[i])) playableIndex += 1;
+    }
+    return playableIndex;
+  }
+
+  function contentIndexFromPlayableIndex(tracks, playableIndex) {
+    var items = Array.isArray(tracks) ? tracks : [];
+    var target = Number(playableIndex);
+    if (!isFinite(target) || target < 0) return -1;
+
+    var current = -1;
+    for (var i = 0; i < items.length; i += 1) {
+      if (!isPlayableTrack(items[i])) continue;
+      current += 1;
+      if (current === target) return i;
+    }
+    return -1;
+  }
+
+  function clampContentIndex(total, index) {
+    var count = Number(total);
+    if (!isFinite(count) || count <= 0) return 0;
+    var value = Number(index);
+    if (!isFinite(value)) value = 0;
+    value = Math.round(value);
+    return Math.max(0, Math.min(count - 1, value));
+  }
+
+  var CONTENT_LIST_PROFILES = {
+    search: { itemSize: 61, maxNodes: 18, overscan: 3 },
+    recommendation: { itemSize: 176, maxNodes: 12, overscan: 2 },
+    playlist: { itemSize: 66, maxNodes: 18, overscan: 3 },
+    album: { itemSize: 62, maxNodes: 18, overscan: 3 },
+    comment: { itemSize: 86, maxNodes: 16, overscan: 2 },
+  };
+
+  function contentListStableKey(kind, item, index) {
+    kind = CONTENT_LIST_PROFILES[kind] ? kind : 'search';
+    item = item || {};
+    var provider = String(item.provider || item.source || '').trim();
+    var id = item.id != null && String(item.id).trim()
+      ? String(item.id).trim()
+      : (item.sourceId != null && String(item.sourceId).trim()
+        ? String(item.sourceId).trim()
+        : (item.key != null && String(item.key).trim() ? String(item.key).trim() : ''));
+    if (id) return kind + ':' + (provider ? provider + ':' : '') + id;
+    return kind + ':index:' + Math.max(0, Math.floor(Number(index) || 0));
+  }
+
+  function contentListViewportProfile(kind, overrides) {
+    var base = CONTENT_LIST_PROFILES[kind] || CONTENT_LIST_PROFILES.search;
+    overrides = overrides || {};
+    function bounded(value, fallback, min, max) {
+      var number = Number(value);
+      if (!isFinite(number)) number = fallback;
+      return Math.max(min, Math.min(max, Math.floor(number)));
+    }
+    return {
+      itemSize: bounded(overrides.itemSize, base.itemSize, 32, 240),
+      maxNodes: bounded(overrides.maxNodes, base.maxNodes, 6, base.maxNodes),
+      overscan: bounded(overrides.overscan, base.overscan, 0, 6),
+    };
+  }
+
+  return {
+    clampContentIndex: clampContentIndex,
+    contentListStableKey: contentListStableKey,
+    contentListViewportProfile: contentListViewportProfile,
+    contentIndexFromPlayableIndex: contentIndexFromPlayableIndex,
+    detailChromeKind: detailChromeKind,
+    isShelfViewportProjectionSafe: isShelfViewportProjectionSafe,
+    normalizeDetailView: normalizeDetailView,
+    normalizeShelfViewportLock: normalizeShelfViewportLock,
+    playableIndexFromContentIndex: playableIndexFromContentIndex,
+    playlistShelfCardAction: playlistShelfCardAction,
+    recordCardLayout: recordCardLayout,
+    recordShelfCardAction: recordShelfCardAction,
+    recordStageStep: recordStageStep,
+    recordToolbarLayout: recordToolbarLayout,
+    resolveShelfLayoutPreset: resolveShelfLayoutPreset,
+    resolveDetailOrientation: resolveDetailOrientation,
+    shelfReferenceCameraOrbit: shelfReferenceCameraOrbit,
+    shelfControlBounds: shelfControlBounds,
+    shelfBeatMotion: shelfBeatMotion,
+    shelfMotionBinding: shelfMotionBinding,
+    shelfParallaxValue: shelfParallaxValue,
+    shelfViewportScaleFactor: shelfViewportScaleFactor,
+    canRevealBottomControlsForShelf: canRevealBottomControlsForShelf,
+    shouldBindShelfToPresetCamera: shouldBindShelfToPresetCamera,
+    shouldBindShelfToBackgroundMotion: shouldBindShelfToBackgroundMotion,
+    shouldUsePresetShelfLayout: shouldUsePresetShelfLayout,
+    shelfRenderCameraMode: shelfRenderCameraMode,
+    shouldApplyStartupStarfieldPreview: shouldApplyStartupStarfieldPreview,
+    shouldCaptureShelfViewportAnchor: shouldCaptureShelfViewportAnchor,
+    shouldContentShelfHandleWheel: shouldContentShelfHandleWheel,
+    shouldResetShelfAnchorForContentOpen: shouldResetShelfAnchorForContentOpen,
+    shouldResetShelfAnchorForContentClose: shouldResetShelfAnchorForContentClose,
+    shouldResetShelfAnchorForPlaybackVisual: shouldResetShelfAnchorForPlaybackVisual,
+    shouldPreserveShelfViewportAnchorOnReset: shouldPreserveShelfViewportAnchorOnReset,
+    shouldSnapShelfControlsLift: shouldSnapShelfControlsLift,
+    stageShelfControlsLift: stageShelfControlsLift,
+  };
+});
