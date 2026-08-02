@@ -268,3 +268,29 @@ test('native WorkerW script validates numeric handles and contains a verified Pr
   assert.match(source, /parentKind/);
   assert.doesNotMatch(source, /C:\\private/);
 });
+
+test('native WorkerW script passes true null titles to Win32 window lookup', () => {
+  const source = buildWorkerWAttachScript({
+    hwnd: '1234',
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+  });
+
+  assert.match(source, /\$nullString = \[NullString\]::Value/);
+  assert.match(source, /FindWindow\("Progman", \$nullString\)/);
+  assert.match(source, /FindWindowEx\(\$top, \[IntPtr\]::Zero, "SHELLDLL_DefView", \$nullString\)/);
+  assert.match(source, /FindWindowEx\(\[IntPtr\]::Zero, \$top, "WorkerW", \$nullString\)/);
+});
+
+test('Progman fallback places wallpaper above the shell background and below desktop icons', () => {
+  const source = buildWorkerWAttachScript({
+    hwnd: '1234',
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+  });
+
+  assert.match(source, /\$script:shellView = \[IntPtr\]::Zero/);
+  assert.match(source, /\$script:shellView = \$shellView/);
+  assert.match(source, /\$insertAfter = \[IntPtr\]::new\(\[Int64\]1\)/);
+  assert.match(source, /\$parentKind -eq "progman" -and \$script:shellView -ne \[IntPtr\]::Zero/);
+  assert.match(source, /\$insertAfter = \$script:shellView/);
+  assert.match(source, /SetWindowPos\(\$target, \$insertAfter,/);
+});

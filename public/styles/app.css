@@ -69,6 +69,16 @@ body.desktop-shell.desktop-fullscreen #top-right{top:24px}
 #custom-bg-video{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;opacity:var(--custom-bg-video-opacity,0);filter:none;transform:scale(1.002);transition:opacity .35s ease;pointer-events:none;background:#000}
 #custom-bg::before{content:'';position:absolute;inset:-1px;background-image:var(--custom-bg-image,none);background-size:cover;background-position:center;opacity:var(--custom-bg-image-opacity,0);filter:none;transform:scale(1.002);transition:opacity .35s ease,background-image .35s ease;pointer-events:none}
 #custom-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.06),rgba(0,0,0,.16));opacity:var(--custom-bg-overlay-opacity,0);pointer-events:none}
+#wallpaper-engine-layer{position:fixed;inset:0;z-index:0;overflow:hidden;background:#000;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .38s cubic-bezier(.16,1,.3,1),visibility 0s linear .38s;contain:strict}
+#wallpaper-engine-layer.ready{opacity:1;visibility:visible;transition-delay:0s}
+#wallpaper-engine-layer::after{content:'';position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;background:radial-gradient(ellipse at 50% 48%,rgba(0,0,0,.46) 0%,rgba(0,0,0,.30) 32%,rgba(0,0,0,.12) 64%,rgba(0,0,0,.08) 100%),linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.08) 42%,rgba(0,0,0,.22));transition:opacity .28s ease}
+#wallpaper-engine-layer.ready::after{opacity:1}
+#wallpaper-engine-image,#wallpaper-engine-video{position:absolute;inset:0;z-index:0;width:100%;height:100%;object-fit:cover;object-position:center;opacity:0;pointer-events:none;background:#000;transition:opacity .24s ease}
+#wallpaper-engine-layer.image-ready #wallpaper-engine-image,#wallpaper-engine-layer.video-ready #wallpaper-engine-video{opacity:1}
+#wallpaper-engine-layer.engine-ready #wallpaper-engine-video{object-fit:fill}
+body.desktop-shell #wallpaper-engine-layer,body.desktop-shell #wallpaper-engine-image,body.desktop-shell #wallpaper-engine-video{border-radius:34px;clip-path:inset(0 round 34px)}
+body.desktop-shell.desktop-maximized #wallpaper-engine-layer,body.desktop-shell.desktop-maximized #wallpaper-engine-image,body.desktop-shell.desktop-maximized #wallpaper-engine-video,body.desktop-shell.desktop-fullscreen #wallpaper-engine-layer,body.desktop-shell.desktop-fullscreen #wallpaper-engine-image,body.desktop-shell.desktop-fullscreen #wallpaper-engine-video,body.desktop-shell.desktop-wallpaper-mode #wallpaper-engine-layer,body.desktop-shell.desktop-wallpaper-mode #wallpaper-engine-image,body.desktop-shell.desktop-wallpaper-mode #wallpaper-engine-video,html:fullscreen body.desktop-shell #wallpaper-engine-layer,html:fullscreen body.desktop-shell #wallpaper-engine-image,html:fullscreen body.desktop-shell #wallpaper-engine-video{border-radius:0!important;clip-path:none!important}
+body.wallpaper-engine-active #custom-bg,body.wallpaper-engine-active #album-bg{opacity:0!important}
 body.custom-background-override #custom-bg::after{background:linear-gradient(180deg,rgba(0,0,0,.018),rgba(0,0,0,.045))}
 body.custom-background-override.custom-background-flat #custom-bg::after{opacity:0!important}
 body.custom-background-video #custom-bg::before{opacity:0!important}
@@ -1059,6 +1069,41 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .modal-btn:hover{background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.3)}
 .modal-btn.primary{background:rgba(244,210,138,0.14);border-color:rgba(244,210,138,0.50);color:var(--champagne)}
 .modal-btn.primary:hover{background:rgba(244,210,138,0.24)}
+.wallpaper-engine-library-modal{width:min(1040px,94vw);max-width:none;height:min(760px,88vh);padding:22px;display:flex;flex-direction:column;text-align:left;overflow:hidden;border-radius:8px;border-color:rgba(119,198,255,.18);background:radial-gradient(circle at 12% -12%,rgba(74,164,255,.12),transparent 34%),linear-gradient(180deg,rgba(17,20,27,.98),rgba(8,9,13,.97))}
+.wallpaper-engine-library-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex:0 0 auto}
+.wallpaper-engine-library-head h2{margin:4px 0 0;font-size:20px;font-weight:760;letter-spacing:0;color:rgba(255,255,255,.96)}
+.wallpaper-engine-kicker{color:rgba(114,199,255,.76);font:700 9px/1.2 'JetBrains Mono',monospace;letter-spacing:1.45px}
+.wallpaper-engine-close{width:34px;height:34px;display:grid;place-items:center;flex:0 0 auto;padding:0;border:1px solid rgba(255,255,255,.13);border-radius:50%;background:rgba(255,255,255,.035);color:rgba(255,255,255,.74);font:21px/1 inherit;cursor:pointer}
+.wallpaper-engine-close:hover{background:rgba(255,255,255,.09);color:#fff}
+.wallpaper-engine-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;margin-top:18px;flex:0 0 auto}
+#wallpaper-engine-search{height:34px;min-width:0;padding:0 12px;border:1px solid rgba(255,255,255,.11);border-radius:8px;outline:none;color:rgba(255,255,255,.88);background:rgba(255,255,255,.045);font-family:inherit}
+#wallpaper-engine-search:focus{border-color:rgba(113,199,255,.42);box-shadow:0 0 0 3px rgba(72,166,255,.08)}
+.wallpaper-engine-toolbar .fx-mini-btn{height:34px;padding:0 12px;white-space:nowrap}
+.wallpaper-engine-library-status{min-height:17px;margin:11px 1px 8px;color:rgba(255,255,255,.50);font-size:11px;flex:0 0 auto}
+.wallpaper-engine-library-status.loading::before{content:'';display:inline-block;width:8px;height:8px;margin-right:7px;border:1px solid rgba(124,207,255,.28);border-top-color:rgba(124,207,255,.95);border-radius:50%;animation:wallpaper-engine-spin .7s linear infinite}
+@keyframes wallpaper-engine-spin{to{transform:rotate(360deg)}}
+.wallpaper-engine-manual-roots{display:flex;gap:6px;flex-wrap:wrap;min-height:0;margin-bottom:8px;flex:0 0 auto}
+.wallpaper-engine-root-chip{display:inline-flex;align-items:center;gap:6px;max-width:240px;height:24px;padding:0 5px 0 9px;border:1px solid rgba(117,198,255,.13);border-radius:999px;background:rgba(69,143,213,.07);color:rgba(215,239,255,.58);font-size:10px}
+.wallpaper-engine-root-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wallpaper-engine-root-chip button{width:18px;height:18px;padding:0;border:0;border-radius:50%;background:transparent;color:rgba(255,255,255,.48);cursor:pointer}
+.wallpaper-engine-root-chip button:hover{color:#fff;background:rgba(255,255,255,.08)}
+.wallpaper-engine-grid{min-height:0;flex:1 1 auto;overflow:auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:max-content;align-content:start;gap:12px;padding:2px 5px 10px 1px;overscroll-behavior:contain}
+.wallpaper-engine-card{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;padding:0;border:1px solid rgba(255,255,255,.10);border-radius:8px;background:linear-gradient(145deg,rgba(31,43,58,.92),rgba(7,9,13,.98));color:#fff;cursor:pointer;font-family:inherit;text-align:left;transition:border-color .2s ease,transform .2s ease,box-shadow .2s ease}
+.wallpaper-engine-card:hover,.wallpaper-engine-card:focus-visible{transform:translateY(-2px);border-color:rgba(122,204,255,.34);box-shadow:0 16px 34px rgba(0,0,0,.30);outline:none}
+.wallpaper-engine-card.active{border-color:rgba(132,211,255,.66);box-shadow:0 0 0 1px rgba(132,211,255,.18),0 14px 34px rgba(14,92,159,.24)}
+.wallpaper-engine-card-preview,.wallpaper-engine-card-placeholder{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:linear-gradient(145deg,#172132,#07090d)}
+.wallpaper-engine-card-placeholder{display:grid;place-items:center;color:rgba(213,239,255,.42);font:800 18px/1 'JetBrains Mono',monospace}
+.wallpaper-engine-card-preview{opacity:0;transition:opacity .28s ease,transform .28s ease}
+.wallpaper-engine-card-preview.loaded{opacity:1}
+.wallpaper-engine-card:hover .wallpaper-engine-card-preview{transform:scale(1.025)}
+.wallpaper-engine-card-meta{position:absolute;inset:auto 0 0;z-index:2;padding:28px 10px 9px;background:linear-gradient(transparent,rgba(0,0,0,.90));color:rgba(255,255,255,.95);font-size:11px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallpaper-engine-card-meta small{display:block;margin-top:3px;color:rgba(255,255,255,.55);font-size:9px;font-weight:500}
+.wallpaper-engine-card-kind{position:absolute;top:7px;right:7px;z-index:3;height:22px;display:flex;align-items:center;padding:0 7px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(4,6,9,.66);backdrop-filter:blur(8px);color:rgba(228,245,255,.72);font-size:8.5px;font-weight:760;letter-spacing:.06em;text-transform:uppercase}
+.wallpaper-engine-empty{grid-column:1/-1;min-height:210px;display:grid;place-items:center;text-align:center;color:rgba(255,255,255,.38);font-size:12px}
+@media (max-width:980px){.wallpaper-engine-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:720px){.wallpaper-engine-library-modal{width:96vw;height:92vh;padding:16px}.wallpaper-engine-toolbar{grid-template-columns:1fr 1fr}.wallpaper-engine-toolbar #wallpaper-engine-search{grid-column:1/-1}.wallpaper-engine-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.wallpaper-engine-grid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){#wallpaper-engine-layer,#wallpaper-engine-image,#wallpaper-engine-video,.wallpaper-engine-card{transition-duration:.01ms!important}.wallpaper-engine-library-status.loading::before{animation-duration:1.4s}}
 @media (max-width: 720px){.dual-login-modal{padding:22px}.platform-login-center{grid-template-columns:1fr}.platform-login-detail{padding:12px}.platform-login-provider-row{min-height:56px}.user-platform-tabs{flex-wrap:wrap;border-radius:8px}.user-platform-tabs button{flex:1 1 30%}.account-modal-actions{grid-template-columns:1fr}}
 .performance-diagnostics-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0 10px}
 .performance-diagnostics-entry .fx-mini-btn{min-width:82px}
@@ -1299,7 +1344,7 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 /* ============================================================ */
 /*  控制台 — 简化版                                              */
 /* ============================================================ */
-#fx-panel{position:fixed;z-index:18;right:-460px;bottom:92px;width:min(444px,calc(100vw - 48px));max-height:min(650px,calc(100vh - 132px));overflow:auto;overscroll-behavior:contain;background:var(--glass-bg);border:1px solid rgba(0,245,212,0.16);border-radius:20px;padding:18px 18px 20px;backdrop-filter:blur(44px) saturate(1.34);-webkit-backdrop-filter:blur(44px) saturate(1.34);box-shadow:var(--glass-shadow);opacity:0;transition:right .55s cubic-bezier(.16,1,.3,1),opacity .45s cubic-bezier(.16,1,.3,1),transform .55s cubic-bezier(.16,1,.3,1);pointer-events:none;transform:translateY(18px) scale(.97);scrollbar-width:thin;scrollbar-color:rgba(0,245,212,.22) transparent}
+#fx-panel{position:fixed;z-index:18;isolation:isolate;right:-460px;bottom:92px;width:min(444px,calc(100vw - 48px));max-height:min(650px,calc(100vh - 132px));overflow:auto;overscroll-behavior:contain;background:var(--glass-bg);border:1px solid rgba(0,245,212,0.16);border-radius:20px;padding:0 18px 20px;backdrop-filter:blur(44px) saturate(1.34);-webkit-backdrop-filter:blur(44px) saturate(1.34);box-shadow:var(--glass-shadow);opacity:0;transition:right .55s cubic-bezier(.16,1,.3,1),opacity .45s cubic-bezier(.16,1,.3,1),transform .55s cubic-bezier(.16,1,.3,1);pointer-events:none;transform:translateY(18px) scale(.97);scrollbar-width:thin;scrollbar-color:rgba(0,245,212,.22) transparent}
 #fx-panel.show, #fx-panel.peek{right:24px;opacity:1;pointer-events:auto;transform:translateY(0)}
 #fx-panel.show{animation:fx-panel-in .56s cubic-bezier(.16,1,.3,1)}
 #fx-panel.closing{animation:fx-panel-out .26s cubic-bezier(.5,0,.7,1)}
@@ -1327,7 +1372,8 @@ body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:126px}
 body.desktop-shell.diy-mode #bottom-bar,
 body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,calc(100vw - 72px))}
 @media (max-height:760px){
-  body.desktop-shell.diy-mode #fx-panel{top:56px;bottom:116px;width:min(410px,calc(100vw - 48px));padding:14px}
+  body.desktop-shell.diy-mode #fx-panel{top:56px;bottom:116px;width:min(410px,calc(100vw - 48px));padding:0 14px 14px}
+  body.desktop-shell.diy-mode #fx-panel > .fx-head{margin:0 -14px 14px;padding:14px 14px 12px}
   body.desktop-shell.diy-mode #fx-fab{bottom:22px}
   body.desktop-shell.diy-mode #fx-fab-hide-btn{bottom:35px}
   body.desktop-shell.diy-mode.controls-visible #fx-fab{bottom:112px}
@@ -1341,6 +1387,7 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 @keyframes fx-panel-in{0%{opacity:0;transform:translateX(32px) translateY(18px) scale(.96);filter:blur(8px)}100%{opacity:1;transform:translateX(0) translateY(0) scale(1);filter:blur(0)}}
 @keyframes fx-panel-out{0%{opacity:1;transform:translateX(0) translateY(0) scale(1);filter:blur(0)}100%{opacity:0;transform:translateX(24px) translateY(12px) scale(.97);filter:blur(6px)}}
 .fx-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;padding-bottom:13px;border-bottom:1px solid rgba(255,255,255,.065)}
+#fx-panel > .fx-head{position:sticky;top:0;z-index:20;margin:0 -18px 16px;padding:18px 18px 13px;border-radius:19px 19px 0 0;background:rgb(10,12,15);box-shadow:0 12px 24px rgba(0,0,0,.16)}
 .fx-head-main{min-width:0}
 .fx-head-actions{display:flex;align-items:center;gap:7px;margin-left:12px;flex:0 0 auto}
 .fx-head-actions .fx-mini-btn{width:auto;min-width:58px;height:28px;padding:0 10px;flex:0 0 auto;border-radius:9px}
@@ -1410,6 +1457,11 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .lyric-color-row.visual-tint-row{grid-template-columns:42px 1fr 58px 58px}
 .lyric-color-row.image-pick-row{grid-template-columns:64px 1fr 68px}
 .lyric-color-row.image-pick-row .fx-mini-btn{min-width:0;display:flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 8px;line-height:1}
+.wallpaper-engine-row{grid-template-columns:42px minmax(0,1fr);border-color:rgba(107,196,255,.14);background:linear-gradient(135deg,rgba(65,142,255,.075),rgba(255,255,255,.022))}
+.wallpaper-engine-mark{width:42px;height:32px;display:grid;place-items:center;border:1px solid rgba(121,201,255,.28);border-radius:8px;background:linear-gradient(145deg,rgba(41,147,255,.58),rgba(56,76,138,.30));color:rgba(239,249,255,.96);font:800 11px/1 'JetBrains Mono',monospace;letter-spacing:.7px;box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 8px 22px rgba(19,97,171,.16)}
+.wallpaper-engine-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.wallpaper-engine-actions .fx-mini-btn{min-width:0;height:28px;padding:0 7px;font-size:10.5px;white-space:nowrap}
+.wallpaper-engine-actions .fx-mini-btn:disabled{opacity:.34;cursor:default}
 .lyric-color-picker{width:42px;height:32px;padding:0;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.045);cursor:pointer;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 10px 22px rgba(0,0,0,.18);transition:border-color .18s,box-shadow .18s,transform .18s;pointer-events:none}
 .lyric-color-picker:hover{border-color:rgba(var(--fc-accent-rgb),.34);box-shadow:0 0 0 1px rgba(var(--fc-accent-rgb),.12),0 10px 24px rgba(0,0,0,.22)}
 .lyric-color-picker::-webkit-color-swatch-wrapper{padding:0}
@@ -2095,7 +2147,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 }
 .fx-panel-back-btn.show{display:flex}
 .fx-panel-back-btn:hover{background:rgba(255,255,255,.10);border-color:rgba(var(--fc-accent-rgb),.24);color:#fff;transform:translateX(-1px)}
-.fx-panel-home{display:none}
+.fx-panel-home{display:none;position:relative;z-index:0}
 .fx-panel-home.active{display:block}
 #fx-panel.fx-view-back .fx-panel-home.active{animation:fxPanelHomeIn .22s cubic-bezier(.22,.61,.36,1) both}
 .fx-panel-home-list{display:grid;grid-template-columns:1fr;gap:12px}
@@ -2143,7 +2195,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 .fx-panel-home-btn:hover .fx-panel-home-icon{border-color:rgba(255,255,255,.24);background:rgba(var(--fc-accent-rgb),.13);color:rgba(255,255,255,.95);transform:scale(1.03)}
 .fx-panel-home-btn:hover .fx-panel-home-arrow{transform:translateX(2px);color:rgba(255,255,255,.82)}
 #fx-panel .fx-panel-tabs{display:none}
-.fx-tab-page{display:none}
+.fx-tab-page{display:none;position:relative;z-index:0}
 .fx-tab-page.active{display:block}
 #fx-panel.fx-view-forward .fx-tab-page.active{animation:fxPanelPageIn .22s cubic-bezier(.22,.61,.36,1) both}
 #fx-panel.fx-view-forward .fx-title,#fx-panel.fx-view-back .fx-title,#fx-panel.fx-view-forward .fx-sub,#fx-panel.fx-view-back .fx-sub{animation:fxPanelHeaderIn .18s ease both}

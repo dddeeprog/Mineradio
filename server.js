@@ -5,6 +5,9 @@
 //  - 试听检测 (freeTrialInfo) + 全 quality 探测
 //  - 所有受保护 API 都会带上已登录用户的 cookie
 // ====================================================================
+const { installProcessOutputGuards } = require('./server/process-stream-safety');
+installProcessOutputGuards();
+
 const {
   search,
   cloudsearch,

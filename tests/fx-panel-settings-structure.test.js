@@ -61,6 +61,15 @@ test('visual settings panel animates between home and category pages', () => {
   assert.match(appCss, /prefers-reduced-motion:\s*reduce/);
 });
 
+test('visual settings sticky header completely owns the panel top while scrolling', () => {
+  assert.match(appCss, /#fx-panel\{[^}]*isolation:isolate[^}]*padding:0 18px 20px/);
+  assert.match(appCss, /#fx-panel > \.fx-head\{[^}]*top:0[^}]*z-index:20[^}]*margin:0 -18px 16px[^}]*background:rgb\(10,12,15\)/);
+  assert.match(appCss, /\.fx-panel-home\{display:none;position:relative;z-index:0\}/);
+  assert.match(appCss, /\.fx-tab-page\{display:none;position:relative;z-index:0\}/);
+  assert.match(appCss, /body\.desktop-shell\.diy-mode #fx-panel\{[^}]*padding:0 14px 14px/);
+  assert.match(appCss, /body\.desktop-shell\.diy-mode #fx-panel > \.fx-head\{margin:0 -14px 14px/);
+});
+
 test('visual settings home renders icon card rows with staggered motion', () => {
   assert.match(indexHtml, /function\s+fxPanelHomeIconSvg\s*\(\s*icon\s*\)/);
   assert.match(indexHtml, /className\s*=\s*'fx-panel-home-icon'/);

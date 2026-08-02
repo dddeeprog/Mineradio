@@ -85,6 +85,14 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   setWallpaperMode: (enabled, payload) => ipcRenderer.invoke('mineradio-wallpaper-set-enabled', !!enabled, payload || {}),
   updateWallpaperMode: (payload) => ipcRenderer.invoke('mineradio-wallpaper-update', payload || {}),
   getWallpaperStatus: () => ipcRenderer.invoke('mineradio-wallpaper-get-status'),
+  listWallpaperEngineProjects: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-list', payload || {}),
+  chooseWallpaperEngineDirectory: () => ipcRenderer.invoke('mineradio-wallpaper-engine-choose-directory'),
+  chooseWallpaperEngineProjectFile: () => ipcRenderer.invoke('mineradio-wallpaper-engine-choose-project-file'),
+  removeWallpaperEngineDirectory: (rootId) => ipcRenderer.invoke('mineradio-wallpaper-engine-remove-directory', rootId),
+  getWallpaperEngineRuntimeStatus: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-runtime-status', payload || {}),
+  startWallpaperEngineScene: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-start-scene', payload || {}),
+  parkWallpaperEngineScene: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-park-scene', payload || {}),
+  stopWallpaperEngineScene: (payload) => ipcRenderer.invoke('mineradio-wallpaper-engine-stop-scene', payload || {}),
   getSystemResourceState: () => ipcRenderer.invoke('mineradio-system-resource-get-state'),
   onWallpaperRuntimeState: (callback) => {
     if (typeof callback !== 'function') return () => {};

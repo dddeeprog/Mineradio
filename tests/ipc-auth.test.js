@@ -52,6 +52,23 @@ test('platform credentials and local library ipc channels are main-window only',
   }
 });
 
+test('Wallpaper Engine project and Scene channels are main-window only', () => {
+  for (const channel of [
+    'mineradio-wallpaper-engine-list',
+    'mineradio-wallpaper-engine-choose-directory',
+    'mineradio-wallpaper-engine-choose-project-file',
+    'mineradio-wallpaper-engine-remove-directory',
+    'mineradio-wallpaper-engine-runtime-status',
+    'mineradio-wallpaper-engine-start-scene',
+    'mineradio-wallpaper-engine-park-scene',
+    'mineradio-wallpaper-engine-stop-scene',
+  ]) {
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/', 34567), true);
+    assert.equal(isAllowedIpcSender(channel, 'http://127.0.0.1:34567/wallpaper.html', 34567), false);
+    assert.equal(isAllowedIpcSender(channel, 'https://example.com/', 34567), false);
+  }
+});
+
 test('overlay ipc channels reject main and remote senders', () => {
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/desktop-lyrics.html', 34567), true);
   assert.equal(isAllowedIpcSender('mineradio-desktop-lyrics-move-by', 'http://127.0.0.1:34567/', 34567), false);

@@ -294,14 +294,13 @@
       if (mode === 'suspended' || mode === 'released') targetFps = 1;
       else if (mode === 'background') targetFps = 15;
       else if (system.pressure === 'critical' || system.thermalState === 'critical' || system.speedLimit < 50) targetFps = 24;
-      else if (input.focused === false || effectiveQualityRank === 0 || system.thermalState === 'serious') targetFps = 30;
-      else if (effectiveQualityRank === 1 || system.onBattery || system.speedLimit < 80) targetFps = system.onBattery ? 45 : 60;
+      else if (input.focused === false) targetFps = 30;
 
-      var configuredWallpaperFps = boundedInteger(input.wallpaperFrameRate, 30, 1, 60);
+      var configuredWallpaperFps = boundedInteger(input.wallpaperFrameRate, 60, 1, 60);
       var wallpaperFps = configuredWallpaperFps;
       if (hardStop) wallpaperFps = 1;
       else if (deepBackground || criticalResourcesLatched) wallpaperFps = Math.min(configuredWallpaperFps, 12);
-      else if (targetFps > 0) wallpaperFps = Math.min(configuredWallpaperFps, Math.max(12, targetFps));
+      else if (input.focused === false || targetFps > 0) wallpaperFps = Math.min(configuredWallpaperFps, Math.max(12, targetFps));
 
       var desired = desiredReleasedResources(input, hardStop, releaseBackground);
       var transitions = resourceTransitions(input, desired);

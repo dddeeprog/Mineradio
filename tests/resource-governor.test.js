@@ -52,6 +52,28 @@ test('foreground keeps requested quality without owning a second frame scheduler
   assert.equal(typeof governor.start, 'undefined');
 });
 
+test('foreground keeps VSync and selected wallpaper rate while eco quality reduces budgets', () => {
+  const { createResourceGovernor } = loadGovernor();
+  const governor = createResourceGovernor({ recoveryHoldMs: 3000 });
+
+  const decision = governor.update(activeInput({
+    now: 100,
+    frameP95Ms: 38,
+    system: {
+      pressure: 'normal',
+      onBattery: false,
+      thermalState: 'nominal',
+      speedLimit: 68,
+    },
+  }));
+
+  assert.equal(decision.mode, 'constrained');
+  assert.equal(decision.qualityTier, 'eco');
+  assert.equal(decision.targetFps, 0);
+  assert.equal(decision.wallpaperFps, 60);
+  assert.equal(decision.cacheProfile, 'eco');
+});
+
 test('hidden auto mode releases resources in order and restores them once in reverse order', () => {
   const { createResourceGovernor } = loadGovernor();
   const governor = createResourceGovernor({ recoveryHoldMs: 3000 });
@@ -199,6 +221,9 @@ test('renderer wiring uses the governor from the existing animation owner', () =
   assert.match(index, /<script src="resource-governor\.js"><\/script>/);
   assert.match(index, /resourceGovernor\.recordFrame\(/);
   assert.match(index, /syncResourceGovernor\(/);
+  assert.match(index, /var resourceGovernorLastQualityTier = ''/);
+  assert.match(index, /var qualityChanged = resourceGovernorLastQualityTier !== decision\.qualityTier/);
+  assert.match(index, /if \(qualityChanged && typeof applyRendererPowerMode === 'function'\) applyRendererPowerMode\(\);/);
   assert.match(index, /cancelCuefieldAutoMix\([^)]*resource/);
   assert.match(index, /cancelNextTrackPreload\([^)]*resource/);
   assert.match(index, /nativeLyricRuntime\.setResourcePolicy/);

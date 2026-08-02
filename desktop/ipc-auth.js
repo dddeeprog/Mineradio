@@ -36,6 +36,14 @@ const MAIN_CHANNELS = new Set([
   'mineradio-wallpaper-set-enabled',
   'mineradio-wallpaper-update',
   'mineradio-wallpaper-get-status',
+  'mineradio-wallpaper-engine-list',
+  'mineradio-wallpaper-engine-choose-directory',
+  'mineradio-wallpaper-engine-choose-project-file',
+  'mineradio-wallpaper-engine-remove-directory',
+  'mineradio-wallpaper-engine-runtime-status',
+  'mineradio-wallpaper-engine-start-scene',
+  'mineradio-wallpaper-engine-park-scene',
+  'mineradio-wallpaper-engine-stop-scene',
 ]);
 
 const OVERLAY_CHANNELS = new Set([

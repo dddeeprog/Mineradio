@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu, safeStorage, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, protocol, Tray, Menu, safeStorage, powerMonitor, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
@@ -24,6 +24,11 @@ const {
 } = require('./spotify-pkce');
 const { assertAllowedIpcSender } = require('./ipc-auth');
 const { WallpaperRuntime } = require('./wallpaper-runtime');
+const {
+  WallpaperEngineLibrary,
+  registerWallpaperEngineScheme,
+} = require('./wallpaper-engine-library');
+const { WallpaperEngineRuntime } = require('./wallpaper-engine-runtime');
 const {
   createDesktopWallpaperFeatureGate,
 } = require('./runtime-feature-gate');
@@ -68,6 +73,7 @@ let desktopLyricsMousePollerBuffer = '';
 let desktopLyricsHotBounds = null;
 let desktopLyricsLastMiddleAt = 0;
 let wallpaperRuntime = null;
+let wallpaperEngineRuntime = null;
 let systemMemoryPollTimer = null;
 let systemResourceMonitoringStarted = false;
 const systemMemoryState = createSystemMemoryState({ recoveryHoldMs: 15000 });
@@ -80,6 +86,8 @@ let mainWindowStateTimer = null;
 let tray = null;
 let closeToTrayEnabled = true;
 let appQuitting = false;
+let appShutdownPrepared = false;
+let appShutdownPromise = null;
 const registeredGlobalHotkeys = new Map();
 
 const WINDOWED_ASPECT = 16 / 9;
@@ -94,6 +102,10 @@ const APP_ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico');
 const DESKTOP_SHELL_SETTINGS_FILE = 'desktop-shell-settings.json';
 const DESKTOP_UI_STATE_FILE = 'desktop-ui-state.json';
 const APP_PATHS = configureStableAppPaths(app, { identity: APP_IDENTITY });
+const wallpaperEngineLibrary = new WallpaperEngineLibrary({
+  userDataPath: APP_PATHS.userData,
+  configPath: path.join(APP_PATHS.userData, 'wallpaper-engine-library.json'),
+});
 const LEGACY_APP_DATA_ROOTS = Object.freeze(APP_IDENTITY.channel === 'stable'
   ? [
     path.resolve(__dirname, '..'),
@@ -128,6 +140,7 @@ protocol.registerSchemesAsPrivileged([{
     corsEnabled: true,
   },
 }]);
+registerWallpaperEngineScheme(protocol);
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 const QQ_LOGIN_COOKIE_PRIORITY = [
@@ -282,6 +295,18 @@ function stopSystemResourceMonitoring() {
   systemResourceMonitoringStarted = false;
 }
 
+async function prepareAppShutdown() {
+  unregisterMineradioGlobalHotkeys();
+  stopSystemResourceMonitoring();
+  closeOverlayWindows();
+  const disposals = [];
+  if (wallpaperRuntime) disposals.push(Promise.resolve().then(() => wallpaperRuntime.dispose()));
+  if (wallpaperEngineRuntime) disposals.push(Promise.resolve().then(() => wallpaperEngineRuntime.dispose()));
+  await Promise.allSettled(disposals);
+  wallpaperEngineLibrary.dispose();
+  if (localServer && localServer.close) localServer.close();
+}
+
 function sendGlobalHotkeyAction(action) {
   if (!mainWindow || mainWindow.isDestroyed() || !action) return;
   mainWindow.webContents.send('mineradio-global-hotkey', { action });
@@ -429,6 +454,31 @@ function handleIpc(channel, handler) {
     assertAllowedIpcSender(event, channel, mainServerPort);
     return handler(event, ...args);
   });
+}
+
+function ensureWallpaperEngineRuntime() {
+  if (!wallpaperEngineRuntime) {
+    wallpaperEngineRuntime = new WallpaperEngineRuntime({
+      library: wallpaperEngineLibrary,
+      desktopCapturer,
+      nativeTempPath: path.join(APP_PATHS.platformCacheDirectory, 'wallpaper-engine-native'),
+    });
+  }
+  return wallpaperEngineRuntime;
+}
+
+function wallpaperEngineError(error, fallback) {
+  return {
+    ok: false,
+    error: String(error && (error.code || error.message) || fallback),
+  };
+}
+
+async function withWallpaperEngineRuntimeStatus(snapshot, force = false) {
+  return {
+    ...snapshot,
+    runtime: await ensureWallpaperEngineRuntime().probe(force === true),
+  };
 }
 
 function localFileContentType(filePath) {
@@ -1781,8 +1831,9 @@ handleIpc('mineradio-open-update-installer', async (_event, filePath) => {
 
 handleIpc('mineradio-restart-app', async () => {
   try {
+    if (wallpaperEngineRuntime) await wallpaperEngineRuntime.dispose();
     app.relaunch();
-    app.exit(0);
+    app.quit();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message || 'RESTART_FAILED' };
@@ -1907,6 +1958,118 @@ handleIpc('mineradio-wallpaper-get-status', async () => {
     status: runtime ? runtime.getStatus('requested') : { enabled: false, active: false, phase: 'disabled' },
     diagnostics: runtime ? runtime.getDiagnostics() : { events: [] },
   };
+});
+
+handleIpc('mineradio-wallpaper-engine-list', async (_event, payload = {}) => {
+  try {
+    const force = payload && payload.force === true;
+    const snapshot = await wallpaperEngineLibrary.list({ force });
+    return await withWallpaperEngineRuntimeStatus(snapshot, force);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_LIBRARY_SCAN_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-choose-directory', async (event) => {
+  try {
+    const result = await dialog.showOpenDialog(getSenderWindow(event), {
+      title: '选择 Wallpaper Engine 项目目录',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.addManualRoot(result.filePaths[0]),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_DIRECTORY_IMPORT_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-choose-project-file', async (event) => {
+  try {
+    const result = await dialog.showOpenDialog(getSenderWindow(event), {
+      title: '选择 Wallpaper Engine 项目',
+      properties: ['openFile'],
+      filters: [{ name: 'Wallpaper Engine 项目', extensions: ['json', 'pkg', 'pak'] }],
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.addManualProjectFile(result.filePaths[0]),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_PROJECT_IMPORT_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-remove-directory', async (_event, rootId) => {
+  try {
+    const id = String(rootId || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(id)) return { ok: false, error: 'WALLPAPER_ENGINE_ROOT_ID_INVALID' };
+    return await withWallpaperEngineRuntimeStatus(
+      await wallpaperEngineLibrary.removeManualRoot(id),
+    );
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_DIRECTORY_REMOVE_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-runtime-status', async (_event, payload = {}) => {
+  try {
+    const runtime = ensureWallpaperEngineRuntime();
+    return {
+      ok: true,
+      engine: await runtime.probe(payload && payload.force === true),
+      session: runtime.getStatus(),
+    };
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_RUNTIME_STATUS_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-start-scene', async (event, payload = {}) => {
+  try {
+    const id = String(payload && payload.id || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(id)) return { ok: false, error: 'WALLPAPER_SCENE_ID_INVALID' };
+    const owner = getSenderWindow(event) || mainWindow;
+    const bounds = owner && typeof owner.getContentBounds === 'function'
+      ? owner.getContentBounds()
+      : { x: 0, y: 0, width: 1280, height: 720 };
+    return await ensureWallpaperEngineRuntime().start(id, {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      fps: clampNumber(payload && payload.fps, 15, 120, 60),
+    });
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_START_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-park-scene', async (_event, payload = {}) => {
+  try {
+    const sessionId = String(payload && payload.sessionId || payload || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(sessionId)) return { ok: false, error: 'WALLPAPER_ENGINE_SESSION_ID_INVALID' };
+    return await ensureWallpaperEngineRuntime().parkActiveWindow(sessionId);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_PARK_FAILED');
+  }
+});
+
+handleIpc('mineradio-wallpaper-engine-stop-scene', async (_event, payload = {}) => {
+  try {
+    const sessionId = String(payload && payload.sessionId || '').trim().toLowerCase();
+    if (sessionId && !/^[a-f0-9]{24}$/.test(sessionId)) {
+      return { ok: false, error: 'WALLPAPER_ENGINE_SESSION_ID_INVALID' };
+    }
+    return await ensureWallpaperEngineRuntime().stop(sessionId);
+  } catch (error) {
+    return wallpaperEngineError(error, 'WALLPAPER_ENGINE_SCENE_STOP_FAILED');
+  }
 });
 
 function configureLocalServerEnvironment(port) {
@@ -2041,6 +2204,7 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     await initializePlatformCredentialRuntime();
     registerLocalFileProtocol();
+    await wallpaperEngineLibrary.installProtocol(protocol);
     applySavedDesktopShellSettings();
     createTray();
     screen.on('display-metrics-changed', () => {
@@ -2075,12 +2239,16 @@ if (!gotSingleInstanceLock) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     appQuitting = true;
-    unregisterMineradioGlobalHotkeys();
-    stopSystemResourceMonitoring();
-    closeOverlayWindows();
-    if (wallpaperRuntime) wallpaperRuntime.dispose().catch(() => {});
-    if (localServer && localServer.close) localServer.close();
+    if (appShutdownPrepared) return;
+    event.preventDefault();
+    if (appShutdownPromise) return;
+    appShutdownPromise = prepareAppShutdown()
+      .catch((error) => console.error('[Desktop] Shutdown cleanup failed:', error && error.message || error))
+      .finally(() => {
+        appShutdownPrepared = true;
+        app.quit();
+      });
   });
 }

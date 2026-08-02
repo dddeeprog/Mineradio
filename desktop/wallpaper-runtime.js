@@ -89,16 +89,19 @@ public static class MineradioWallpaperNative {
 }
 "@
 }
-$progman = [MineradioWallpaperNative]::FindWindow("Progman", $null)
+$nullString = [NullString]::Value
+$progman = [MineradioWallpaperNative]::FindWindow("Progman", $nullString)
 if ($progman -eq [IntPtr]::Zero) { throw "WALLPAPER_PROGMAN_NOT_FOUND" }
 $sendResult = [IntPtr]::Zero
 [MineradioWallpaperNative]::SendMessageTimeout($progman, 0x052C, [IntPtr]::Zero, [IntPtr]::Zero, 0, 1000, [ref]$sendResult) | Out-Null
 $script:workerw = [IntPtr]::Zero
+$script:shellView = [IntPtr]::Zero
 $callback = [MineradioWallpaperNative+EnumWindowsProc]{
   param([IntPtr]$top, [IntPtr]$state)
-  $shellView = [MineradioWallpaperNative]::FindWindowEx($top, [IntPtr]::Zero, "SHELLDLL_DefView", $null)
+  $shellView = [MineradioWallpaperNative]::FindWindowEx($top, [IntPtr]::Zero, "SHELLDLL_DefView", $nullString)
   if ($shellView -ne [IntPtr]::Zero) {
-    $candidate = [MineradioWallpaperNative]::FindWindowEx([IntPtr]::Zero, $top, "WorkerW", $null)
+    $script:shellView = $shellView
+    $candidate = [MineradioWallpaperNative]::FindWindowEx([IntPtr]::Zero, $top, "WorkerW", $nullString)
     if ($candidate -ne [IntPtr]::Zero) { $script:workerw = $candidate }
   }
   return $true
@@ -126,7 +129,11 @@ $origin = New-Object MineradioWallpaperNative+POINT
 $origin.X = ${bounds.x}
 $origin.Y = ${bounds.y}
 if (-not [MineradioWallpaperNative]::ScreenToClient($parent, [ref]$origin)) { throw "WALLPAPER_WORKERW_BOUNDS_FAILED" }
-if (-not [MineradioWallpaperNative]::SetWindowPos($target, [IntPtr]::new([Int64]1), $origin.X, $origin.Y, ${bounds.width}, ${bounds.height}, 0x0030)) { throw "WALLPAPER_WORKERW_POSITION_FAILED" }
+$insertAfter = [IntPtr]::new([Int64]1)
+if ($parentKind -eq "progman" -and $script:shellView -ne [IntPtr]::Zero) {
+  $insertAfter = $script:shellView
+}
+if (-not [MineradioWallpaperNative]::SetWindowPos($target, $insertAfter, $origin.X, $origin.Y, ${bounds.width}, ${bounds.height}, 0x0030)) { throw "WALLPAPER_WORKERW_POSITION_FAILED" }
 $className = New-Object System.Text.StringBuilder 128
 [MineradioWallpaperNative]::GetClassName($parent, $className, $className.Capacity) | Out-Null
 [pscustomobject]@{

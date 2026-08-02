@@ -1253,6 +1253,51 @@ test('media readiness stops immediately when its playback attempt is cancelled',
   expect(outcome).toBe('PLAYBACK_ATTEMPT_STALE');
 });
 
+test('media readiness does not restart an audio element that is already loading', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof window.waitForPlaybackMediaReady === 'function');
+
+  const result = await page.evaluate(async () => {
+    const listeners = new Map();
+    let loadCalls = 0;
+    const media = {
+      readyState: 0,
+      networkState: HTMLMediaElement.NETWORK_LOADING,
+      error: null,
+      addEventListener(type, listener) {
+        const values = listeners.get(type) || [];
+        values.push(listener);
+        listeners.set(type, values);
+      },
+      removeEventListener(type, listener) {
+        const values = listeners.get(type) || [];
+        listeners.set(type, values.filter(value => value !== listener));
+      },
+      load() {
+        loadCalls += 1;
+        (listeners.get('abort') || []).slice().forEach(listener => listener());
+      },
+    };
+    const waiting = window.waitForPlaybackMediaReady(media, 9000).then(
+      () => 'ready',
+      error => error && error.code || 'error'
+    );
+    setTimeout(() => {
+      media.readyState = 1;
+      (listeners.get('loadedmetadata') || []).slice().forEach(listener => listener());
+    }, 0);
+    return {
+      outcome: await waiting,
+      loadCalls,
+    };
+  });
+
+  expect(result).toEqual({
+    outcome: 'ready',
+    loadCalls: 0,
+  });
+});
+
 test('the outgoing media keeps playing until graph output and incoming playback are confirmed', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (
