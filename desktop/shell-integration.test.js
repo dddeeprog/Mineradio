@@ -20,6 +20,7 @@ test('desktop shell helpers and checks are wired', () => {
   assert.match(main, /require\('\.\/overlay-state'\)/);
   assert.match(packageJson, /node --check desktop\/shell-state\.js/);
   assert.match(packageJson, /node --check desktop\/overlay-state\.js/);
+  assert.match(packageJson, /node --check desktop\/eisland-bridge-lifecycle\.js/);
 
   assert.match(preload, /restorePersistentUiState\(\)/);
   assert.match(preload, /getTraySettings:\s*\(\) => ipcRenderer\.invoke\('mineradio-tray-get-settings'\)/);

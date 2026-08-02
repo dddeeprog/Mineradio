@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { Readable } = require('stream');
+const { randomBytes, randomUUID } = require('node:crypto');
 const {
   configureStableAppPaths,
   resolveDesktopBuildIdentity,
@@ -54,6 +55,10 @@ const {
   normalizeDesktopLyricsOpacity,
   shouldIgnoreDesktopLyricsMouse,
 } = require('./overlay-state');
+const { createPlayerBridge } = require('./player-bridge');
+const { createEislandBridgeServer } = require('./eisland-bridge-server');
+const { createBridgeDiscoveryPublisher } = require('./eisland-bridge-discovery');
+const { createEislandBridgeLifecycle } = require('./eisland-bridge-lifecycle');
 
 let mainWindow = null;
 let localServer = null;
@@ -88,6 +93,8 @@ let closeToTrayEnabled = true;
 let appQuitting = false;
 let appShutdownPrepared = false;
 let appShutdownPromise = null;
+let createWindowPromise = null;
+let eislandBridgeLifecycle = null;
 const registeredGlobalHotkeys = new Map();
 
 const WINDOWED_ASPECT = 16 / 9;
@@ -300,6 +307,7 @@ async function prepareAppShutdown() {
   stopSystemResourceMonitoring();
   closeOverlayWindows();
   const disposals = [];
+  if (eislandBridgeLifecycle) disposals.push(Promise.resolve().then(() => eislandBridgeLifecycle.stop()));
   if (wallpaperRuntime) disposals.push(Promise.resolve().then(() => wallpaperRuntime.dispose()));
   if (wallpaperEngineRuntime) disposals.push(Promise.resolve().then(() => wallpaperEngineRuntime.dispose()));
   await Promise.allSettled(disposals);
@@ -455,6 +463,21 @@ function handleIpc(channel, handler) {
     return handler(event, ...args);
   });
 }
+
+ipcMain.on('mineradio-eisland-bridge-state', (event, snapshot) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-state', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererState(snapshot);
+});
+
+ipcMain.on('mineradio-eisland-bridge-heartbeat', (event, snapshot) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-heartbeat', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererHeartbeat(snapshot);
+});
+
+ipcMain.on('mineradio-eisland-bridge-command-complete', (event, receipt) => {
+  assertAllowedIpcSender(event, 'mineradio-eisland-bridge-command-complete', mainServerPort);
+  if (eislandBridgeLifecycle) eislandBridgeLifecycle.receiveRendererCommandReceipt(receipt);
+});
 
 function ensureWallpaperEngineRuntime() {
   if (!wallpaperEngineRuntime) {
@@ -2083,8 +2106,19 @@ function configureLocalServerEnvironment(port) {
   process.env.MINERADIO_LOCAL_METADATA_DIR = APP_PATHS.localMetadataDirectory;
 }
 
-async function createWindow() {
+function createWindow() {
+  if (createWindowPromise) return createWindowPromise;
+  if (mainWindow && !mainWindow.isDestroyed()) return Promise.resolve(mainWindow);
+  createWindowPromise = createWindowInternal().finally(() => {
+    createWindowPromise = null;
+  });
+  return createWindowPromise;
+}
+
+async function createWindowInternal() {
+  if (appQuitting) return null;
   await initializePlatformCredentialRuntime();
+  if (appQuitting) return null;
   htmlFullscreenActive = false;
   windowFullscreenActive = false;
   if (!localServer) {
@@ -2092,6 +2126,7 @@ async function createWindow() {
     localServer = require(path.join(__dirname, '..', 'server.js'));
   }
   await waitForServer(localServer);
+  if (appQuitting) return null;
   const port = localServer.address().port;
   mainServerPort = port;
   process.env.PORT = String(port);
@@ -2142,6 +2177,7 @@ async function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    if (appQuitting || !mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.show();
     sendWindowState(mainWindow);
   });
@@ -2188,6 +2224,12 @@ async function createWindow() {
   });
 
   await mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  if (appQuitting) {
+    const window = mainWindow;
+    if (window && !window.isDestroyed()) window.destroy();
+    return null;
+  }
+  return mainWindow;
 }
 
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
@@ -2196,9 +2238,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!focusMainWindow()) {
-      app.whenReady().then(() => createWindow()).catch((e) => console.error('Second instance window restore failed:', e));
-    }
+    focusMainWindow();
   });
 
   app.whenReady().then(async () => {
@@ -2227,7 +2267,21 @@ if (!gotSingleInstanceLock) {
     powerMonitor.on('thermal-state-change', (details) => sampleSystemResourceState({ thermalState: details && details.state }));
     powerMonitor.on('speed-limit-change', (details) => sampleSystemResourceState({ speedLimit: details && details.limit }));
     startSystemResourceMonitoring();
-    await createWindow();
+    eislandBridgeLifecycle = createEislandBridgeLifecycle({
+      appData: app.getPath('appData'),
+      createBridgeDiscoveryPublisher,
+      createBridgeServer: createEislandBridgeServer,
+      createInstanceId: randomUUID,
+      createPlayerBridge,
+      createToken: () => randomBytes(32).toString('base64url'),
+      getMainWindow: () => mainWindow,
+      isPrimaryInstance: () => gotSingleInstanceLock,
+      pid: process.pid,
+      quit: () => app.quit(),
+    });
+    await eislandBridgeLifecycle.start({ createWindow });
+  }).catch((error) => {
+    console.error('Mineradio startup failed:', error);
   });
 
   app.on('activate', () => {

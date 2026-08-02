@@ -16,6 +16,7 @@
 <script src="performance.js"></script>
 <script src="resource-governor.js"></script>
 <script src="runtime-feature-state.js"></script>
+<script src="eisland-bridge-runtime.js"></script>
 <script src="playlist-state.js"></script>
 <script src="content-shelf-state.js"></script>
 <script src="content-list-controller.js"></script>
@@ -1246,6 +1247,83 @@ var dualAccountMode = false;
 var loginStatusChecked = false, loginStatusCheckFailed = false;
 var qrPollTimer = null, qrKey = null;
 var volumeTween = null, trackSwitchToken = 0;
+var eislandBridgeTransitionGate = null;
+var eislandBridgeLyricsLifecycle = null;
+function getEislandBridgeTransitionGate() {
+  if (
+    !eislandBridgeTransitionGate
+    && window.MineradioEislandBridgeRuntime
+    && typeof window.MineradioEislandBridgeRuntime.createEislandBridgeTransitionGate === 'function'
+  ) {
+    eislandBridgeTransitionGate = window.MineradioEislandBridgeRuntime.createEislandBridgeTransitionGate();
+  }
+  return eislandBridgeTransitionGate;
+}
+function getEislandBridgeTransitionState() {
+  var gate = getEislandBridgeTransitionGate();
+  return gate && typeof gate.getState === 'function'
+    ? gate.getState()
+    : { failed: false, pending: false, token: null };
+}
+function getEislandBridgeLyricsLifecycle() {
+  if (
+    !eislandBridgeLyricsLifecycle
+    && window.MineradioEislandBridgeRuntime
+    && typeof window.MineradioEislandBridgeRuntime.createEislandBridgeLyricsLifecycle === 'function'
+  ) {
+    eislandBridgeLyricsLifecycle = window.MineradioEislandBridgeRuntime.createEislandBridgeLyricsLifecycle();
+  }
+  return eislandBridgeLyricsLifecycle;
+}
+function getEislandBridgeLyricsLifecycleState() {
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  return lifecycle && typeof lifecycle.getState === 'function'
+    ? lifecycle.getState()
+    : { status: 'unavailable', token: null };
+}
+function beginEislandBridgeLyricsLifecycle(token) {
+  if (Number(token) !== Number(trackSwitchToken)) return false;
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  var began = !!(lifecycle && typeof lifecycle.begin === 'function' && lifecycle.begin(token));
+  if (began) publishEislandBridgePlayerEvent('lyricsloading');
+  return began;
+}
+function completeEislandBridgeLyricsLifecycle(token, hasLyrics) {
+  if (Number(token) !== Number(trackSwitchToken)) return false;
+  var lifecycle = getEislandBridgeLyricsLifecycle();
+  var completed = !!(lifecycle && typeof lifecycle.complete === 'function' && lifecycle.complete(token, hasLyrics));
+  if (completed) publishEislandBridgePlayerEvent('lyrics');
+  return completed;
+}
+function hasEislandBridgeRealLyrics(lines) {
+  return Array.isArray(lines) && lines.some(function(line){
+    return line && !line.fallback && String(line.text || '').trim() && !isNoLyricText(line.text);
+  });
+}
+function beginEislandBridgeTrackTransition(token) {
+  var gate = getEislandBridgeTransitionGate();
+  var began = !!(gate && typeof gate.begin === 'function' && gate.begin(token));
+  if (began) beginEislandBridgeLyricsLifecycle(token);
+  return began;
+}
+function settleEislandBridgeTrackTransition(token, succeeded) {
+  var gate = getEislandBridgeTransitionGate();
+  if (!gate) return !!succeeded;
+  var settled = succeeded
+    ? typeof gate.complete === 'function' && gate.complete(token)
+    : typeof gate.fail === 'function' && gate.fail(token);
+  if (settled) publishEislandBridgePlayerEvent(succeeded ? 'trackchange' : 'transitionfailed');
+  return !!succeeded;
+}
+function recoverEislandBridgeTrackTransition(token) {
+  var audioToken = Number(audio && audio._mineradioBridgeTrackToken);
+  var currentToken = Number(token);
+  if (!Number.isSafeInteger(audioToken) || audioToken !== currentToken) return false;
+  var gate = getEislandBridgeTransitionGate();
+  if (!gate || typeof gate.recover !== 'function' || !gate.recover(token)) return false;
+  publishEislandBridgePlayerEvent('play');
+  return true;
+}
 var audioFadeTimer = null, audioElementFadeFrame = 0, audioFadeSerial = 0;
 var AUDIO_FADE_IN_MS = 460;
 var AUDIO_FADE_OUT_MS = 420;
@@ -24133,6 +24211,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
   closeGsapModal(document.getElementById('local-beat-modal'));
   beatMapToken++;
   var token = trackSwitchToken;
+  beginEislandBridgeTrackTransition(token);
   var firstVisualPlay = !firstPlayDone;
   markPlayPhase('track-setup');
   var song = safePlaybackStep('hydrate-song', function(){
@@ -24223,6 +24302,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
         var localLyricSource = localLyricState.lines.length ? localLyricState.timingSource : 'fallback';
         setOriginalLyricsState(localLyricLines, localLyricState.hasNativeKaraoke, localLyricSource);
         applyPreferredLyricsForCurrent(true);
+        completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
       });
       safePlaybackStep('local-cover', function(){
         var localCover = getCustomCoverForSong(song);
@@ -24239,6 +24319,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
       assertPlaybackAttemptCurrent(attempt, 'local-audio-output');
       audio.muted = true;
       audio.volume = 0;
+      audio._mineradioBridgeTrackToken = token;
       updatePlaybackProgressUi();
       bindPlaybackMediaLifecycle(audio, song, idx, token, true);
       scheduleAudioResumePosition(audio, opts.resumeAt, token);
@@ -24274,7 +24355,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
       safePlaybackStep('local-shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
       await completePreparedAudioHandoff(outgoingAudio, audio, opts, prepared, attempt);
       assertPlaybackAttemptCurrent(attempt, 'local-handoff-complete');
-      return {
+      var localCommitResult = {
         song: song,
         media: audio,
         previousMedia: outgoingAudio,
@@ -24282,6 +24363,8 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
         playbackContext: playbackContext,
         firstVisualPlay: firstVisualPlay,
       };
+      settleEislandBridgeTrackTransition(token, true);
+      return localCommitResult;
     }
     var isQQPlayback = prepared.playbackProvider === 'qq';
     var requestedQuality = normalizePlaybackQuality(prepared.requestedQuality || opts.qualityOverride || playbackQuality);
@@ -24318,6 +24401,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
     assertPlaybackAttemptCurrent(attempt, 'online-audio-output');
     audio.muted = true;
     audio.volume = 0;
+    audio._mineradioBridgeTrackToken = token;
     var proxyAudioUrl = prepared.mediaUrl || ('/api/audio?url=' + encodeURIComponent(data.url));
     updatePlaybackProgressUi();
     bindPlaybackMediaLifecycle(audio, song, idx, token, false);
@@ -24403,6 +24487,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
         var podcastLyricLines = withLyricFallback([]);
         setOriginalLyricsState(podcastLyricLines, false, 'fallback');
         applyPreferredLyricsForCurrent(true);
+        completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
       });
     } else {
       safePlaybackStep('lyrics-fetch-start', function(){ fetchLyric(song, token); });
@@ -24413,7 +24498,7 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
     safePlaybackStep('shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
     await completePreparedAudioHandoff(outgoingAudio, audio, opts, prepared, attempt);
     assertPlaybackAttemptCurrent(attempt, 'online-handoff-complete');
-    return {
+    var onlineCommitResult = {
       song: song,
       media: audio,
       previousMedia: outgoingAudio,
@@ -24422,12 +24507,15 @@ async function commitPreparedPlayback(idx, opts, prepared, attempt) {
       playbackContext: playbackContext,
       firstVisualPlay: firstVisualPlay,
     };
+    settleEislandBridgeTrackTransition(token, true);
+    return onlineCommitResult;
   } catch (err) {
     console.error('Play failed:', { phase: playPhase, error: err }, err);
     throw err;
   }
   } catch (setupErr) {
     console.error('Play setup failed:', { phase: playPhase, error: setupErr }, setupErr);
+    settleEislandBridgeTrackTransition(token, false);
     throw setupErr;
   }
 }
@@ -24511,22 +24599,26 @@ function setPlayIcon(p) {
     : '<path d="M8 5v14l11-7z"/>';
 }
 function nextTrack() {
-  if (!playQueue.length) return;
+  if (!playQueue.length) return Promise.resolve(false);
   cancelCuefieldAutoMix('manual-skip');
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   var targetIdx = playMode === 'shuffle'
     ? Math.floor(Math.random() * playQueue.length)
     : (currentIdx + 1) % playQueue.length;
-  Promise.resolve(playQueueAt(targetIdx, { manualSkip:true })).finally(forcePlaybackControlsInteractive);
+  return Promise.resolve(playQueueAt(targetIdx, { manualSkip:true }))
+    .then(function(result){ return !!(result && result.ok); })
+    .finally(forcePlaybackControlsInteractive);
 }
 function prevTrack() {
-  if (!playQueue.length) return;
+  if (!playQueue.length) return Promise.resolve(false);
   cancelCuefieldAutoMix('manual-skip');
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   var targetIdx = (currentIdx - 1 + playQueue.length) % playQueue.length;
-  Promise.resolve(playQueueAt(targetIdx, { manualSkip:true })).finally(forcePlaybackControlsInteractive);
+  return Promise.resolve(playQueueAt(targetIdx, { manualSkip:true }))
+    .then(function(result){ return !!(result && result.ok); })
+    .finally(forcePlaybackControlsInteractive);
 }
 function shuffleQueue() {
   var activeSong = currentIdx >= 0 && currentIdx < playQueue.length
@@ -24833,6 +24925,7 @@ function clearPlayerControlFocusState(reason) {
 //  歌词
 // ============================================================
 async function fetchLyric(songOrId, token) {
+  beginEislandBridgeLyricsLifecycle(token);
   try {
     var song = (songOrId && typeof songOrId === 'object') ? songOrId : null;
     var provider = songProviderKey(song);
@@ -24856,6 +24949,7 @@ async function fetchLyric(songOrId, token) {
     setOriginalLyricsState(lines, hasNativeKaraoke, timingSource);
     resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
+    completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
     if (emptyHomeActive) renderHomeWeatherHero(true);
   } catch (e) {
     if (token !== trackSwitchToken) return;
@@ -24863,6 +24957,7 @@ async function fetchLyric(songOrId, token) {
     setOriginalLyricsState(fallbackLines, false, 'fallback');
     resetFoliaLyricMatchForSong();
     applyPreferredLyricsForCurrent(true);
+    completeEislandBridgeLyricsLifecycle(token, hasEislandBridgeRealLyrics(lyricsLines));
     if (emptyHomeActive) renderHomeWeatherHero(true);
   }
 }
@@ -25896,6 +25991,9 @@ function bindPlaybackProgressEvents(audioEl) {
   audioEl._mineradioProgressBound = true;
   ['loadedmetadata', 'durationchange', 'timeupdate', 'seeked', 'play', 'pause', 'emptied'].forEach(function(name){
     audioEl.addEventListener(name, updatePlaybackProgressUi);
+  });
+  ['loadedmetadata', 'timeupdate', 'play', 'pause', 'ended', 'seeked', 'ratechange'].forEach(function(name){
+    audioEl.addEventListener(name, function(){ publishEislandBridgePlayerEvent(name); });
   });
   audioEl.addEventListener('timeupdate', function(){ savePlaybackSessionDebounced('timeupdate'); });
   audioEl.addEventListener('timeupdate', function(){ maybeAdvanceGaplessPlayback(audioEl); });
@@ -33316,8 +33414,80 @@ function animate() {
   updateSonicTopographyRuntime(dt);
   renderSceneWithShelfOverlay();
 }
+var eislandBridgeRuntime = null;
+var cleanupEislandBridgeCommand = null;
+function getEislandBridgePlayer() {
+  var transition = getEislandBridgeTransitionState();
+  return {
+    audio: audio,
+    bridgeTransitionFailed: !!transition.failed,
+    bridgeTransitionPending: !!transition.pending,
+    currentIdx: currentIdx,
+    currentLocalSong: currentLocalSong,
+    lyricsLifecycle: getEislandBridgeLyricsLifecycleState(),
+    lyricsLines: lyricsLines,
+    playQueue: playQueue,
+    trackSwitchToken: trackSwitchToken,
+    play: function() {
+      if (transition.failed) {
+        var failedAudioToken = Number(audio && audio._mineradioBridgeTrackToken);
+        if (audio && audio.src && Number.isSafeInteger(failedAudioToken) && failedAudioToken === trackSwitchToken) {
+          return attemptAudioPlay({ manual: true });
+        }
+        if (playQueue.length && currentIdx >= 0) return playQueueAt(currentIdx, { manual: true }).then(function(result){ return !!(result && result.ok); });
+        return Promise.resolve(false);
+      }
+      if (audio && audio.src) return attemptAudioPlay({ manual: true });
+      if (playQueue.length && currentIdx >= 0) return playQueueAt(currentIdx, { manual: true }).then(function(result){ return !!(result && result.ok); });
+      return Promise.resolve(false);
+    },
+    pause: function() {
+      if (!audio || audio.paused || audio.ended) return Promise.resolve(false);
+      return fadeOutAndPauseAudio();
+    },
+    nextTrack: nextTrack,
+    prevTrack: prevTrack,
+  };
+}
+function publishEislandBridgePlayerEvent(eventName) {
+  if (!eislandBridgeRuntime || typeof eislandBridgeRuntime.publishPlayerEvent !== 'function') return false;
+  return eislandBridgeRuntime.publishPlayerEvent(eventName);
+}
+function stopEislandBridgeRuntime() {
+  if (cleanupEislandBridgeCommand) cleanupEislandBridgeCommand();
+  cleanupEislandBridgeCommand = null;
+  if (eislandBridgeRuntime && typeof eislandBridgeRuntime.stop === 'function') eislandBridgeRuntime.stop();
+  eislandBridgeRuntime = null;
+}
+function initializeEislandBridgeRuntime() {
+  var bridge = window.eislandBridge;
+  if (
+    !bridge
+    || typeof bridge.publishState !== 'function'
+    || typeof bridge.publishHeartbeat !== 'function'
+    || typeof bridge.onCommand !== 'function'
+    || typeof bridge.completeCommand !== 'function'
+    || !window.MineradioEislandBridgeRuntime
+    || typeof window.MineradioEislandBridgeRuntime.createEislandBridgeRuntime !== 'function'
+  ) return false;
+  stopEislandBridgeRuntime();
+  eislandBridgeRuntime = window.MineradioEislandBridgeRuntime.createEislandBridgeRuntime({
+    getPlayer: getEislandBridgePlayer,
+    publishHeartbeat: function(snapshot) { bridge.publishHeartbeat(snapshot); },
+    publishState: function(snapshot) { bridge.publishState(snapshot); },
+    completeCommand: function(receipt) { bridge.completeCommand(receipt); },
+  });
+  cleanupEislandBridgeCommand = bridge.onCommand(function(request) {
+    if (!eislandBridgeRuntime) return null;
+    return eislandBridgeRuntime.handleCommand(request);
+  });
+  eislandBridgeRuntime.start();
+  return true;
+}
+window.addEventListener('beforeunload', stopEislandBridgeRuntime);
 initNativeLyricRuntime();
 initSonicTopographyRuntime();
+initializeEislandBridgeRuntime();
 animate();
 </script>
 </body>

@@ -44,6 +44,9 @@ const MAIN_CHANNELS = new Set([
   'mineradio-wallpaper-engine-start-scene',
   'mineradio-wallpaper-engine-park-scene',
   'mineradio-wallpaper-engine-stop-scene',
+  'mineradio-eisland-bridge-state',
+  'mineradio-eisland-bridge-heartbeat',
+  'mineradio-eisland-bridge-command-complete',
 ]);
 
 const OVERLAY_CHANNELS = new Set([
