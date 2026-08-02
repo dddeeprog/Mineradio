@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
-const canonicalOwner = 'English-worse';
+const canonicalOwner = 'dddeeprog';
 const canonicalRepo = 'Mineradio';
 const canonicalRepoSlug = `${canonicalOwner}/${canonicalRepo}`;
 
@@ -32,9 +32,9 @@ test('release owner is consistent across package metadata and docs', () => {
 
   assert.deepEqual(pkg.repository, {
     type: 'git',
-    url: 'https://github.com/English-worse/Mineradio.git',
+    url: 'https://github.com/dddeeprog/Mineradio.git',
   });
-  assert.equal(pkg.homepage, 'https://github.com/English-worse/Mineradio');
+  assert.equal(pkg.homepage, 'https://github.com/dddeeprog/Mineradio');
   assert.equal(publish.owner, canonicalOwner);
   assert.equal(publish.repo, canonicalRepo);
   assert.equal(betaPublish.owner, canonicalOwner);

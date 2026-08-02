@@ -101,11 +101,19 @@ test('search, login, and playback assembly live outside the monolithic page scri
 
 test('release workflow explicitly disables electron-builder publishing', () => {
   const release = fs.readFileSync(path.join(repoRoot, 'RELEASE.md'), 'utf8');
+  const packageMetadata = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+  );
 
   assert.match(release, /--publish never/);
   assert.match(release, /不会自动上传|不得自动上传/);
   assert.match(release, /仅.*人工上传|人工.*仅上传/);
-  assert.match(release, /Mineradio-1\.1\.0-Setup\.exe\.mineradio-attestation\.json/);
+  assert.match(
+    release,
+    new RegExp(
+      `Mineradio-${packageMetadata.version.replace(/\./g, '\\.')}\\-Setup\\.exe\\.mineradio-attestation\\.json`,
+    ),
+  );
   assert.doesNotMatch(release, /Setup\.exe\.blockmap.*(?:可选|上传)/i);
   assert.doesNotMatch(release, /SHA256SUMS.*(?:建议|上传)/i);
 });

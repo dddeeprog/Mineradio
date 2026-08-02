@@ -80,17 +80,25 @@ test('desktop credentials initialize after ready and before the local server', (
   const projectRoot = path.join(__dirname, '..');
   const main = fs.readFileSync(path.join(projectRoot, 'desktop', 'main.js'), 'utf8');
   const readyBlock = main.slice(main.indexOf('app.whenReady().then(async () => {'));
-  const initializeAt = readyBlock.indexOf('await initializePlatformCredentialRuntime()');
-  const createWindowAt = readyBlock.indexOf('await createWindow()');
-  const serverRequireAt = main.indexOf("require(path.join(__dirname, '..', 'server.js'))");
+  const createWindow = main.slice(
+    main.indexOf('async function createWindowInternal()'),
+    main.indexOf("if (process.platform === 'win32')"),
+  );
+  const initializeAt = createWindow.indexOf('await initializePlatformCredentialRuntime()');
+  const serverRequireAt = createWindow.indexOf("require(path.join(__dirname, '..', 'server.js'))");
+  const bridgeStartAt = readyBlock.indexOf('await eislandBridgeLifecycle.start({ createWindow })');
 
   assert.match(main, /\bsafeStorage\b/);
   assert.match(main, /require\('\.\/platform-credential-runtime'\)/);
   assert.match(main, /platformCredentialRuntimePromise = null;\s*throw error;/);
   assert.notEqual(initializeAt, -1);
-  assert.notEqual(createWindowAt, -1);
-  assert.equal(initializeAt < createWindowAt, true);
+  assert.notEqual(bridgeStartAt, -1);
   assert.notEqual(serverRequireAt, -1);
+  assert.equal(initializeAt < serverRequireAt, true);
+  assert.equal(
+    readyBlock.indexOf('await initializePlatformCredentialRuntime()') < bridgeStartAt,
+    true,
+  );
   assert.doesNotMatch(
     main,
     /migrateOwnedDataFiles|COOKIE_FILE|QQ_COOKIE_FILE|['"]\.qq-cookie['"]|['"]\.cookie['"]/,
@@ -105,7 +113,7 @@ test('desktop loads the window from the port atomically claimed by the HTTP serv
     'utf8',
   );
   const createWindow = main.slice(
-    main.indexOf('async function createWindow()'),
+    main.indexOf('async function createWindowInternal()'),
     main.indexOf("if (process.platform === 'win32')"),
   );
 

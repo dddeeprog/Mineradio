@@ -37,7 +37,7 @@ test('stable and beta desktop build profiles are isolated but retain one release
   const report = diagnostics.createDesktopBuildDiagnostics(pkg, beta);
 
   assert.equal(report.schemaVersion, 1);
-  assert.equal(report.repository.owner, 'English-worse');
+  assert.equal(report.repository.owner, 'dddeeprog');
   assert.equal(report.repository.repo, 'Mineradio');
   assert.equal(report.profiles.stable.channel, 'stable');
   assert.equal(report.profiles.beta.channel, 'beta');
@@ -66,7 +66,7 @@ test('stable and beta desktop build profiles are isolated but retain one release
   assert.equal(report.profiles.beta.updateChannel, 'beta');
   assert.match(report.profiles.beta.artifactName, /^Mineradio-Beta-/);
   assert.match(report.profiles.beta.uninstallKey, /^[0-9a-f-]{36}$/i);
-  assert.equal(report.profiles.beta.publish.owner, 'English-worse');
+  assert.equal(report.profiles.beta.publish.owner, 'dddeeprog');
   assert.equal(report.profiles.beta.publish.repo, 'Mineradio');
   assert.equal(report.profiles.beta.publish.channel, 'beta');
 });
@@ -132,12 +132,12 @@ test('runtime updater resolves GitHub endpoints from the packaged update channel
   assert.equal(typeof updateChannel.createGithubUpdatePlan, 'function');
 
   const stable = updateChannel.createGithubUpdatePlan({
-    owner: 'English-worse',
+    owner: 'dddeeprog',
     repo: 'Mineradio',
     channel: 'latest',
   });
   const beta = updateChannel.createGithubUpdatePlan({
-    owner: 'English-worse',
+    owner: 'dddeeprog',
     repo: 'Mineradio',
     channel: 'beta',
   });
@@ -145,14 +145,14 @@ test('runtime updater resolves GitHub endpoints from the packaged update channel
   assert.deepEqual(stable, {
     channel: 'latest',
     manifestName: 'latest.yml',
-    releaseApiUrl: 'https://api.github.com/repos/English-worse/Mineradio/releases/latest',
+    releaseApiUrl: 'https://api.github.com/repos/dddeeprog/Mineradio/releases/latest',
     fallbackManifestUrl:
-      'https://github.com/English-worse/Mineradio/releases/latest/download/latest.yml',
+      'https://github.com/dddeeprog/Mineradio/releases/latest/download/latest.yml',
   });
   assert.deepEqual(beta, {
     channel: 'beta',
     manifestName: 'beta.yml',
-    releaseApiUrl: 'https://api.github.com/repos/English-worse/Mineradio/releases?per_page=20',
+    releaseApiUrl: 'https://api.github.com/repos/dddeeprog/Mineradio/releases?per_page=20',
     fallbackManifestUrl: '',
   });
 });

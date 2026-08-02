@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CANONICAL_RELEASE = Object.freeze({
-  owner: 'English-worse',
+  owner: 'dddeeprog',
   repo: 'Mineradio',
 });
 
@@ -103,7 +103,7 @@ function createDesktopBuildDiagnostics(packageMetadata, betaConfig) {
 
   for (const target of [repository, stable.publish, betaProfile.publish]) {
     if (target.owner !== CANONICAL_RELEASE.owner || target.repo !== CANONICAL_RELEASE.repo) {
-      throw new Error('Release ownership must remain English-worse/Mineradio');
+      throw new Error('Release ownership must remain dddeeprog/Mineradio');
     }
   }
   for (const field of PROFILE_FIELDS) {

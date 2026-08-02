@@ -43,13 +43,13 @@
       "updateChannel": "beta",
       "artifactName": "Mineradio-Beta-${version}-Setup.${ext}",
       "outputDirectory": "dist-beta",
-      "releaseOwner": "English-worse",
+      "releaseOwner": "dddeeprog",
       "releaseRepo": "Mineradio"
     },
     "mineradio": {
       "update": {
         "provider": "github",
-        "owner": "English-worse",
+        "owner": "dddeeprog",
         "repo": "Mineradio",
         "channel": "beta"
       }
@@ -89,7 +89,7 @@
   "publish": [
     {
       "provider": "github",
-      "owner": "English-worse",
+      "owner": "dddeeprog",
       "repo": "Mineradio",
       "channel": "beta",
       "publishAutoUpdate": false
