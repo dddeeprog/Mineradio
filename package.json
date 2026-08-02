@@ -1,16 +1,16 @@
 {
   "name": "mineradio",
   "productName": "Mineradio",
-  "version": "1.1.0",
-  "description": "沉浸式音乐播放器，融合天气电台、歌词舞台、粒子视觉和 3D 歌单架。",
+  "version": "1.3.0",
+  "description": "Windows 沉浸式音乐播放器，融合在线与本地音乐库、原生歌词舞台、Wallpaper Engine 和 3D 视觉。",
   "author": "Mineradio",
   "repository": {
     "type": "git",
-    "url": "https://github.com/English-worse/Mineradio.git"
+    "url": "https://github.com/dddeeprog/Mineradio.git"
   },
-  "homepage": "https://github.com/English-worse/Mineradio",
+  "homepage": "https://github.com/dddeeprog/Mineradio",
   "bugs": {
-    "url": "https://github.com/English-worse/Mineradio/issues"
+    "url": "https://github.com/dddeeprog/Mineradio/issues"
   },
   "main": "desktop/main.js",
   "private": true,
@@ -97,7 +97,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "English-worse",
+        "owner": "dddeeprog",
         "repo": "Mineradio",
         "publishAutoUpdate": false
       }
@@ -112,13 +112,13 @@
     "updateChannel": "latest",
     "artifactName": "Mineradio-${version}-Setup.${ext}",
     "outputDirectory": "dist",
-    "releaseOwner": "English-worse",
+    "releaseOwner": "dddeeprog",
     "releaseRepo": "Mineradio"
   },
   "mineradio": {
     "update": {
       "provider": "github",
-      "owner": "English-worse",
+      "owner": "dddeeprog",
       "repo": "Mineradio",
       "channel": "latest",
       "preview": true,
